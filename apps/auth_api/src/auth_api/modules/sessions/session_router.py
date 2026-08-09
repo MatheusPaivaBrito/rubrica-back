@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 
 from auth_api.modules.sessions.session_schema import (
     LoginRequest,
@@ -11,6 +11,16 @@ from auth_api.modules.sessions.session_service import session_service
 
 
 router = APIRouter(tags=["auth"])
+
+
+async def require_authenticated_session(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> SessionRead:
+    session = session_service.current_session(_access_token(request, authorization))
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+    return session
 
 
 @router.post("/auth/login", response_model=LoginResponse)
@@ -34,25 +44,30 @@ async def refresh(payload: RefreshRequest, request: Request, response: Response)
 
 
 @router.get("/sessions/me", response_model=SessionRead, tags=["sessions - query"])
-async def get_current_session(request: Request, authorization: str | None = Header(default=None)) -> SessionRead:
-    session = session_service.current_session(_access_token(request, authorization))
-    if session is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+async def get_current_session(session: SessionRead = Depends(require_authenticated_session)) -> SessionRead:
     return session
 
 
 @router.post("/auth/logout", response_model=LogoutResponse, tags=["sessions - command"])
-async def logout(request: Request, response: Response, authorization: str | None = Header(default=None)) -> LogoutResponse:
+async def logout(
+    request: Request,
+    response: Response,
+    authorization: str | None = Header(default=None),
+    _session: SessionRead = Depends(require_authenticated_session),
+) -> LogoutResponse:
     session_service.logout(_access_token(request, authorization))
     _clear_auth_cookies(response)
     return LogoutResponse()
 
 
 @router.post("/auth/logout-all", response_model=LogoutResponse, tags=["sessions - command"])
-async def logout_all(request: Request, response: Response, authorization: str | None = Header(default=None)) -> LogoutResponse:
-    if not session_service.logout_all(_access_token(request, authorization)):
-        _clear_auth_cookies(response)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+async def logout_all(
+    request: Request,
+    response: Response,
+    authorization: str | None = Header(default=None),
+    _session: SessionRead = Depends(require_authenticated_session),
+) -> LogoutResponse:
+    session_service.logout_all(_access_token(request, authorization))
     _clear_auth_cookies(response)
     return LogoutResponse()
 

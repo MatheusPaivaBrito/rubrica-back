@@ -3,10 +3,11 @@ from pathlib import Path
 import subprocess
 from urllib.parse import parse_qs, urlencode
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from core_api.bootstrap.domain_generator import DomainGeneratorError, generate_core_domain
+from core_api.infrastructure.auth_context import require_permission
 from toolbox.checks.migration_status import (
     MigrationStatus,
     inspect_project_migrations,
@@ -14,7 +15,10 @@ from toolbox.checks.migration_status import (
 )
 
 
-router = APIRouter(include_in_schema=False)
+router = APIRouter(
+    include_in_schema=False,
+    dependencies=[Depends(require_permission("*"))],
+)
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 MODULES_ROOT = PROJECT_ROOT / "apps/core_api/src/core_api/modules"
 
