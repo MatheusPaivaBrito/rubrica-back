@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from fastapi import Depends, Header, HTTPException, Request as FastAPIRequest, status
+from fastapi import Depends, HTTPException, Request as FastAPIRequest, Security, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core_api.infrastructure.settings import settings
 
@@ -20,8 +21,11 @@ class AuthContext:
         return "*" in self.permission_keys or permission in self.permission_keys
 
 
-def _token(request: FastAPIRequest, authorization: str | None) -> str:
-    return (authorization or "").removeprefix("Bearer ").strip() or request.cookies.get("access_token", "")
+bearer_auth = HTTPBearer(auto_error=False, scheme_name="bearerAuth")
+
+
+def _token(request: FastAPIRequest, credentials: HTTPAuthorizationCredentials | None) -> str:
+    return (credentials.credentials if credentials is not None else "") or request.cookies.get("access_token", "")
 
 
 def _resolve_context(token: str) -> AuthContext:
@@ -40,8 +44,11 @@ def _resolve_context(token: str) -> AuthContext:
     return AuthContext(subject=str(payload["subject"]), roles=frozenset(payload.get("roles", [])), permission_keys=frozenset(payload.get("permission_keys", [])))
 
 
-async def authenticated_context(request: FastAPIRequest, authorization: str | None = Header(default=None)) -> AuthContext:
-    return _resolve_context(_token(request, authorization))
+async def authenticated_context(
+    request: FastAPIRequest,
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_auth),
+) -> AuthContext:
+    return _resolve_context(_token(request, credentials))
 
 
 def require_permission(permission: str):

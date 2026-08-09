@@ -1,5 +1,7 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
+from fastapi.security import HTTPAuthorizationCredentials
 
+from auth_api.infrastructure.security import access_token, bearer_auth
 from auth_api.modules.sessions.session_schema import (
     LoginRequest,
     LoginResponse,
@@ -15,9 +17,9 @@ router = APIRouter(tags=["auth"])
 
 async def require_authenticated_session(
     request: Request,
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_auth),
 ) -> SessionRead:
-    session = session_service.current_session(_access_token(request, authorization))
+    session = session_service.current_session(access_token(request, credentials))
     if session is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return session
@@ -52,10 +54,9 @@ async def get_current_session(session: SessionRead = Depends(require_authenticat
 async def logout(
     request: Request,
     response: Response,
-    authorization: str | None = Header(default=None),
     _session: SessionRead = Depends(require_authenticated_session),
 ) -> LogoutResponse:
-    session_service.logout(_access_token(request, authorization))
+    session_service.logout(access_token(request))
     _clear_auth_cookies(response)
     return LogoutResponse()
 
@@ -64,20 +65,11 @@ async def logout(
 async def logout_all(
     request: Request,
     response: Response,
-    authorization: str | None = Header(default=None),
     _session: SessionRead = Depends(require_authenticated_session),
 ) -> LogoutResponse:
-    session_service.logout_all(_access_token(request, authorization))
+    session_service.logout_all(access_token(request))
     _clear_auth_cookies(response)
     return LogoutResponse()
-
-
-def _bearer_token(authorization: str | None) -> str:
-    return (authorization or "").removeprefix("Bearer ").strip()
-
-
-def _access_token(request: Request, authorization: str | None) -> str:
-    return _bearer_token(authorization) or request.cookies.get("access_token", "")
 
 
 def _set_auth_cookies(response: Response, payload: LoginResponse) -> None:
