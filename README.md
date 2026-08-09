@@ -26,14 +26,17 @@ service and works well for direct object-storage uploads later.
 - `POST /documents/{id}/versions`
 - `GET /documents/{id}/download`
 - `POST/GET /signature-requests` and `GET /signature-requests/{id}`
-- `POST/GET /signature-requests/{id}/signers`
+- `POST/GET /signature-requests/{id}/signers` and `POST /signature-requests/{id}/signers/{signer_id}/revoke`
 - `POST /signature-requests/{id}/open` and `/cancel`
 - `GET /signature-requests/{id}/audit`
 - `GET /signing/{token}` and `POST /signing/{token}/view|sign|decline`
 
-The local storage adapter writes opaque object keys under `.rubrica-storage`.
-`DocumentStorage` is the boundary to replace with S3/MinIO. Signing tokens are
-returned only when a signer is created; only their SHA-256 digest is retained.
+The local storage adapter writes opaque object keys under `.rubrica-storage` on
+the host or a persistent `./data/documents` Docker volume. `DocumentStorage` is
+the boundary to replace with S3/MinIO. Creating a signer returns `signing_url`
+once; it contains the high-entropy invitation token, while only its SHA-256
+digest is retained. The URL opens the future signing frontend; the recipient
+must still log in with the invited email before viewing or signing.
 
 The workflow persists metadata, versions, requests, signer token hashes,
 signatures and audit events in the project's PostgreSQL database. File bytes use

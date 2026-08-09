@@ -46,7 +46,6 @@ class SignatureRequestRead(BaseModel):
 
 
 class SignerCreate(BaseModel):
-    auth_user_id: str = Field(min_length=1, max_length=255)
     name: str = Field(min_length=1, max_length=180)
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     token_ttl_seconds: int = Field(default=604800, ge=300, le=2592000)
@@ -60,11 +59,12 @@ class SignerRead(BaseModel):
     email: str
     status: SignerStatus
     token_expires_at: datetime
+    link_revoked_at: datetime | None = None
     signed_at: datetime | None = None
 
 
 class SignerCreated(SignerRead):
-    signing_token: str
+    signing_url: str
 
 
 class SigningRead(BaseModel):
@@ -76,10 +76,6 @@ class SigningRead(BaseModel):
 
 class SignCommand(BaseModel):
     consent: bool
-
-
-class ActorCommand(BaseModel):
-    pass
 
 
 class AuditEventRead(BaseModel):

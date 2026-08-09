@@ -42,9 +42,13 @@ services:
           POSTGRES_PORT: "5432"
           CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
           AUTH_API_URL: http://auth-api:8000
+          DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
+          SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:3000/signing}
 
         ports:
           - "${CORE_API_PORT:-8100}:8000"
+        volumes:
+          - ./data/documents:/var/lib/rubrica/documents
         depends_on:
           - postgres
 

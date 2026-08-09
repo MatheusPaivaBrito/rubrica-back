@@ -17,4 +17,6 @@ build/
 .artifacts/
 .atlas/
 .codex/
+.rubrica-agent/
 .rubrica-storage/
+data/

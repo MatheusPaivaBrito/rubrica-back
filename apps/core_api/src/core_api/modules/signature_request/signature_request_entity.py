@@ -28,6 +28,7 @@ class SignerEntity(BaseEntity):
     email: Mapped[str] = mapped_column(String(254), index=True)
     signing_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     token_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    link_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[str] = mapped_column(String(20), index=True)
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

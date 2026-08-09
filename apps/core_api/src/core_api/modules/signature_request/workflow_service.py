@@ -9,6 +9,7 @@ from secrets import token_urlsafe
 from threading import RLock
 from uuid import uuid4
 
+from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_schema import (
     DocumentCreate,
     DocumentRead,
@@ -143,20 +144,38 @@ class SignatureWorkflowService:
             request = self._request(request_id)
             if request.status != RequestStatus.DRAFT:
                 raise WorkflowError("Signers can only be added to a draft request", 409)
-            if any(self.signers[sid].auth_user_id == payload.auth_user_id for sid in self.request_signers[request_id]):
+            email = payload.email.lower()
+            if any(self.signers[sid].auth_user_id == email for sid in self.request_signers[request_id]):
                 raise WorkflowError("This authenticated user is already a signer", 409)
             token = token_urlsafe(32)
             now = DateTimeService.utc_now()
-            signer = SignerRead(id=str(uuid4()), signature_request_id=request_id, auth_user_id=payload.auth_user_id, name=payload.name, email=payload.email.lower(), status=SignerStatus.PENDING, token_expires_at=now + timedelta(seconds=payload.token_ttl_seconds))
+            signer = SignerRead(id=str(uuid4()), signature_request_id=request_id, auth_user_id=email, name=payload.name, email=email, status=SignerStatus.PENDING, token_expires_at=now + timedelta(seconds=payload.token_ttl_seconds))
             self.signers[signer.id] = signer
             self.request_signers[request_id].append(signer.id)
             self.token_index[sha256(token.encode()).hexdigest()] = signer.id
             self._audit(request_id, actor_id, "signer.link_created", "signer", signer.id, {"token_expires_at": signer.token_expires_at.isoformat()})
-            return SignerCreated(**signer.model_dump(), signing_token=token)
+            return SignerCreated(**signer.model_dump(), signing_url=self._signing_url(token))
 
     def list_signers(self, request_id: str) -> list[SignerRead]:
         self._request(request_id)
         return [self.signers[sid] for sid in self.request_signers[request_id]]
+
+    def revoke_signer_link(self, request_id: str, signer_id: str, actor_id: str) -> SignerRead:
+        with self._lock:
+            request = self._request(request_id)
+            try:
+                signer = self.signers[signer_id]
+            except KeyError as exc:
+                raise WorkflowError("Signer not found", 404) from exc
+            if signer.signature_request_id != request.id:
+                raise WorkflowError("Signer not found", 404)
+            if signer.status == SignerStatus.SIGNED:
+                raise WorkflowError("A completed signature link cannot be revoked", 409)
+            if signer.link_revoked_at is None:
+                signer = signer.model_copy(update={"link_revoked_at": DateTimeService.utc_now()})
+                self.signers[signer.id] = signer
+                self._audit(request.id, actor_id, "signer.link_revoked", "signer", signer.id, {})
+            return signer
 
     def open_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
         with self._lock:
@@ -239,6 +258,8 @@ class SignatureWorkflowService:
         signer = self.signers[signer_id]
         request = self._request(signer.signature_request_id)
         now = DateTimeService.utc_now()
+        if signer.link_revoked_at is not None:
+            raise WorkflowError("Signing link has been revoked", 410)
         if signer.token_expires_at <= now or request.expires_at <= now:
             if signer.status not in {SignerStatus.SIGNED, SignerStatus.DECLINED}:
                 self.signers[signer.id] = signer.model_copy(update={"status": SignerStatus.EXPIRED})
@@ -270,5 +291,9 @@ class SignatureWorkflowService:
         event = AuditEventRead(id=str(uuid4()), occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id, correlation_id=str(uuid4()), metadata_sanitized=metadata)
         self.audit.setdefault(scope_id, []).append(event)
 
+    @staticmethod
+    def _signing_url(token: str) -> str:
+        return f"{settings.SIGNING_APP_URL.rstrip('/')}/{token}"
 
-workflow_service = SignatureWorkflowService(LocalDocumentStorage(Path(".rubrica-storage")))
+
+workflow_service = SignatureWorkflowService(LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH)))

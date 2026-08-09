@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from core_api.infrastructure.database.connection import SessionLocal
+from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
@@ -118,19 +119,32 @@ class DatabaseSignatureWorkflowService:
             request = self._request(db, request_id, lock=True)
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Signers can only be added to a draft request", 409)
-            item = SignerEntity(signature_request_id=request.id, auth_user_id=payload.auth_user_id, name=payload.name, email=payload.email.lower(), signing_token_hash=sha256(token.encode()).hexdigest(), token_expires_at=DateTimeService.utc_now() + timedelta(seconds=payload.token_ttl_seconds), status=SignerStatus.PENDING.value)
+            email = payload.email.lower()
+            item = SignerEntity(signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, signing_token_hash=sha256(token.encode()).hexdigest(), token_expires_at=DateTimeService.utc_now() + timedelta(seconds=payload.token_ttl_seconds), status=SignerStatus.PENDING.value)
             db.add(item)
             try:
                 db.flush()
             except IntegrityError as exc:
                 raise WorkflowError("This authenticated user is already a signer", 409) from exc
             self._audit(db, request.id, actor_id, "signer.link_created", "signer", item.id, {"token_expires_at": item.token_expires_at.isoformat()})
-            return SignerCreated(**self._signer_read(item).model_dump(), signing_token=token)
+            return SignerCreated(**self._signer_read(item).model_dump(), signing_url=self._signing_url(token))
 
     def list_signers(self, request_id: str) -> list[SignerRead]:
         with SessionLocal() as db:
             request = self._request(db, request_id)
             return [self._signer_read(item) for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id).order_by(SignerEntity.id)).all()]
+
+    def revoke_signer_link(self, request_id: str, signer_id: str, actor_id: str) -> SignerRead:
+        with SessionLocal.begin() as db:
+            request = self._request(db, request_id, lock=True)
+            signer = self._signer(db, signer_id, request.id, lock=True)
+            if signer.status == SignerStatus.SIGNED.value:
+                raise WorkflowError("A completed signature link cannot be revoked", 409)
+            if signer.link_revoked_at is None:
+                signer.link_revoked_at = DateTimeService.utc_now()
+                self._audit(db, request.id, actor_id, "signer.link_revoked", "signer", signer.id, {})
+            db.flush()
+            return self._signer_read(signer)
 
     def open_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
         with SessionLocal.begin() as db:
@@ -221,6 +235,8 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Signing link is invalid", 404)
         request = self._request(db, str(signer.signature_request_id), lock=lock)
         now = DateTimeService.utc_now()
+        if signer.link_revoked_at is not None:
+            raise WorkflowError("Signing link has been revoked", 410)
         if signer.token_expires_at <= now or request.expires_at <= now:
             raise WorkflowError("Signing link has expired", 410)
         if auth_user_id is not None and signer.auth_user_id != auth_user_id:
@@ -229,6 +245,17 @@ class DatabaseSignatureWorkflowService:
         if request.status != RequestStatus.OPEN.value:
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
+
+    def _signer(self, db, identifier: str, request_id: int, lock: bool = False) -> SignerEntity:
+        try:
+            value = int(identifier)
+        except ValueError as exc:
+            raise WorkflowError("Signer not found", 404) from exc
+        statement = select(SignerEntity).where(SignerEntity.id == value, SignerEntity.signature_request_id == request_id)
+        item = db.scalar(statement.with_for_update() if lock else statement)
+        if item is None:
+            raise WorkflowError("Signer not found", 404)
+        return item
 
     def _document(self, db, identifier: str, lock: bool = False) -> DocumentEntity:
         try:
@@ -267,11 +294,15 @@ class DatabaseSignatureWorkflowService:
 
     @staticmethod
     def _signer_read(x: SignerEntity) -> SignerRead:
-        return SignerRead(id=str(x.id), signature_request_id=str(x.signature_request_id), auth_user_id=x.auth_user_id, name=x.name, email=x.email, status=x.status, token_expires_at=x.token_expires_at, signed_at=x.signed_at)
+        return SignerRead(id=str(x.id), signature_request_id=str(x.signature_request_id), auth_user_id=x.auth_user_id, name=x.name, email=x.email, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
+
+    @staticmethod
+    def _signing_url(token: str) -> str:
+        return f"{settings.SIGNING_APP_URL.rstrip('/')}/{token}"
 
     @staticmethod
     def _audit(db, request_id: int | None, actor_id: str, action: str, entity_type: str, entity_id: object, metadata: dict[str, object]) -> None:
         db.add(AuditEventEntity(signature_request_id=request_id, occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=str(entity_id), correlation_id=str(uuid4()), metadata_sanitized=metadata))
 
 
-database_workflow_service = DatabaseSignatureWorkflowService(LocalDocumentStorage(Path(".rubrica-storage")))
+database_workflow_service = DatabaseSignatureWorkflowService(LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH)))
