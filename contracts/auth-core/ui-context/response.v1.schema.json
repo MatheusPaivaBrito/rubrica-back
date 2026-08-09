@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auth UI Context Response",
+  "type": "object",
+  "required": [
+    "version",
+    "subject",
+    "roles",
+    "permission_keys",
+    "capability_hash"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "subject": {
+      "type": "string"
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "permission_keys": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capability_hash": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

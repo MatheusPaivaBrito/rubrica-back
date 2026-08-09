@@ -1,0 +1,79 @@
+from fastapi import APIRouter, Depends, status
+
+from core_api.infrastructure.auth_context import AuthContext, require_permission
+from core_api.modules.signature_request.workflow_schema import (
+    ActorCommand,
+    AuditEventRead,
+    SignCommand,
+    SignatureRequestCreate,
+    SignatureRequestInput,
+    SignatureRequestRead,
+    SignerCreate,
+    SignerCreated,
+    SignerRead,
+    SigningRead,
+)
+from core_api.modules.signature_request.database_workflow_service import database_workflow_service as workflow_service
+
+
+router = APIRouter()
+
+
+@router.get("/signature-requests", response_model=list[SignatureRequestRead], tags=["signature requests - query"])
+async def list_requests(_context: AuthContext = Depends(require_permission("signature_requests:read"))) -> list[SignatureRequestRead]:
+    return workflow_service.list_requests()
+
+
+@router.get("/signature-requests/{request_id}", response_model=SignatureRequestRead, tags=["signature requests - query"])
+async def get_request(request_id: str, _context: AuthContext = Depends(require_permission("signature_requests:read"))) -> SignatureRequestRead:
+    return workflow_service.get_request(request_id)
+
+
+@router.post("/signature-requests", response_model=SignatureRequestRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
+async def create_request(payload: SignatureRequestInput, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+    return workflow_service.create_request(SignatureRequestCreate(**payload.model_dump(), created_by=context.subject))
+
+
+@router.get("/signature-requests/{request_id}/signers", response_model=list[SignerRead], tags=["signature requests - query"])
+async def list_signers(request_id: str, _context: AuthContext = Depends(require_permission("signature_requests:read"))) -> list[SignerRead]:
+    return workflow_service.list_signers(request_id)
+
+
+@router.post("/signature-requests/{request_id}/signers", response_model=SignerCreated, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
+async def add_signer(request_id: str, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerCreated:
+    return workflow_service.add_signer(request_id, payload, context.subject)
+
+
+@router.post("/signature-requests/{request_id}/open", response_model=SignatureRequestRead, tags=["signature requests - command"])
+async def open_request(request_id: str, _payload: ActorCommand, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+    return workflow_service.open_request(request_id, context.subject)
+
+
+@router.post("/signature-requests/{request_id}/cancel", response_model=SignatureRequestRead, tags=["signature requests - command"])
+async def cancel_request(request_id: str, _payload: ActorCommand, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+    return workflow_service.cancel_request(request_id, context.subject)
+
+
+@router.get("/signature-requests/{request_id}/audit", response_model=list[AuditEventRead], tags=["audit - query"])
+async def request_audit(request_id: str, _context: AuthContext = Depends(require_permission("audit:read"))) -> list[AuditEventRead]:
+    return workflow_service.audit_events(request_id)
+
+
+@router.get("/signing/{token}", response_model=SigningRead, tags=["signing - query"])
+async def signing_context(token: str, context: AuthContext = Depends(require_permission("signing:read"))) -> SigningRead:
+    return workflow_service.signing_context(token, context.subject)
+
+
+@router.post("/signing/{token}/view", response_model=SignerRead, tags=["signing - command"])
+async def view_document(token: str, _payload: ActorCommand, context: AuthContext = Depends(require_permission("signing:write"))) -> SignerRead:
+    return workflow_service.view(token, context.subject)
+
+
+@router.post("/signing/{token}/sign", response_model=SignerRead, tags=["signing - command"])
+async def sign_document(token: str, payload: SignCommand, context: AuthContext = Depends(require_permission("signing:write"))) -> SignerRead:
+    return workflow_service.sign(token, context.subject, payload.consent)
+
+
+@router.post("/signing/{token}/decline", response_model=SignerRead, tags=["signing - command"])
+async def decline_document(token: str, _payload: ActorCommand, context: AuthContext = Depends(require_permission("signing:write"))) -> SignerRead:
+    return workflow_service.decline(token, context.subject)

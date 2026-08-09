@@ -1,0 +1,71 @@
+services:
+
+      postgres:
+        image: postgres:16-alpine
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+          POSTGRES_DB: ${POSTGRES_DB:-postgres}
+          POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth}
+        ports:
+          - "${POSTGRES_HOST_PORT:-5435}:5432"
+        volumes:
+          - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rubrica} -d ${POSTGRES_DB:-postgres}"]
+          interval: 2s
+          timeout: 3s
+          retries: 30
+
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - "${REDIS_HOST_PORT:-6381}:6379"
+        healthcheck:
+          test: ["CMD", "redis-cli", "ping"]
+          interval: 2s
+          timeout: 3s
+          retries: 30
+
+
+      core-api:
+        build:
+          context: .
+          dockerfile: apps/core_api/dockerfile
+        command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
+        environment:
+          PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
+          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: "5432"
+          CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
+          AUTH_API_URL: http://auth-api:8000
+
+        ports:
+          - "${CORE_API_PORT:-8100}:8000"
+        depends_on:
+          - postgres
+
+
+      auth-api:
+        build:
+          context: .
+          dockerfile: apps/auth_api/dockerfile
+        command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
+        environment:
+          PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
+          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: "5432"
+          AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
+          REDIS_HOST: redis
+          REDIS_PORT: "6379"
+        ports:
+          - "${AUTH_API_PORT:-8101}:8000"
+
+        depends_on:
+          - postgres
+          - redis

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Core UI Manifest Response",
+  "type": "object",
+  "required": [
+    "version",
+    "service",
+    "domains",
+    "navigation",
+    "actions"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "service": {
+      "const": "core_api"
+    },
+    "domains": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "navigation": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "additionalProperties": false
+}
