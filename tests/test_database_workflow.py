@@ -34,11 +34,15 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         document_id = int(document.id)
         request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
         service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
+        service.add_signer(request.id, SignerCreate(name="Second User", email="second@example.com"), "operator")
         service.open_request(request.id, "operator")
         link = service.create_signing_link(request.id, "operator")
         token = link.signing_url.rsplit("/", maxsplit=1)[-1]
         stamp = StampPosition(page=1, x=0.65, y=0.8)
         service.sign(token, "database@example.com", True, stamp)
+        assert service.get_request(request.id).status == RequestStatus.OPEN
+        assert service.signing_signed_document(token, "second@example.com")[2].startswith(b"%PDF")
+        service.sign(token, "second@example.com", True, StampPosition(page=1, x=0.35, y=0.7))
 
         assert service.get_request(request.id).status == RequestStatus.COMPLETED
         assert service.get_content(document.id)[1] == original
@@ -64,6 +68,7 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         artifact_metadata = PdfReader(BytesIO(artifact)).metadata
         assert artifact_metadata.get("/RubricaEvidenceJSON")
         evidence = service.signature_evidence(request.id)
+        assert len(evidence) == 2
         assert evidence[0].evidence_sha256
         assert evidence[0].subject_hmac_sha256 != "database@example.com"
         assert "signature.completed" in [event.action for event in service.audit_events(request.id)]

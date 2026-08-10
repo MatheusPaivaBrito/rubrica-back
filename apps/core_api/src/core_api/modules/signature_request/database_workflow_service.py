@@ -315,9 +315,7 @@ class DatabaseSignatureWorkflowService:
             if administrator:
                 request = self._request_from_token(db, token)
             else:
-                signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
-                if signer.status != SignerStatus.SIGNED.value:
-                    raise WorkflowError("Signer has not signed this document", 409)
+                _, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             request_id = str(request.id)
         return self.signed_document(request_id)
 
