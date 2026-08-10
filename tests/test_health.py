@@ -21,7 +21,9 @@ def test_core_routes_are_registered() -> None:
     assert "/signature-requests" in paths
     assert "/signature-requests/{request_id}/signers" in paths
     assert "/signature-requests/{request_id}/audit" in paths
-    assert "/signing/requests/{request_id}/sign" in paths
+    assert "/signing/links/{token}/sign" in paths
+    assert "/signing/links/{token}/document" in paths
+    assert "/signing/links/{token}/download" in paths
 
 def test_auth_routes_are_registered() -> None:
     paths = {route.path for route in auth_app.routes}
@@ -34,6 +36,7 @@ def test_auth_routes_are_registered() -> None:
     assert "/sessions/me" in paths
     assert "/access-control/ui-context" in paths
     assert "/access-control/context" in paths
+    assert "/users/signers" in paths
 
 
 def test_core_business_routes_require_an_access_token() -> None:

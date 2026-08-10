@@ -26,9 +26,10 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         document = service.create_document(DocumentCreate(organization_id=organization, title="Smoke", original_filename="smoke.pdf", content_type="application/pdf", created_by="operator"), b"database workflow")
         document_id = int(document.id)
         request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
-        invitation = service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
+        service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
         service.open_request(request.id, "operator")
-        service.sign(invitation.signing_url.rsplit("/", maxsplit=1)[-1], "database@example.com", True)
+        link = service.create_signing_link(request.id, "operator")
+        service.sign(link.signing_url.rsplit("/", maxsplit=1)[-1], "database@example.com", True)
 
         assert service.get_request(request.id).status == RequestStatus.COMPLETED
         assert service.get_content(document.id)[1] == b"database workflow"

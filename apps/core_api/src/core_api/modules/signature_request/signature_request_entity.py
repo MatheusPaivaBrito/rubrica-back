@@ -16,6 +16,7 @@ class SignatureRequestEntity(BaseEntity):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     created_by: Mapped[str] = mapped_column(String(255), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    signing_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
 
 
 class SignerEntity(BaseEntity):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from core_api.infrastructure.auth_context import AuthContext, authenticated_context, require_permission
 from core_api.modules.signature_request.workflow_schema import (
@@ -8,7 +8,7 @@ from core_api.modules.signature_request.workflow_schema import (
     SignatureRequestInput,
     SignatureRequestRead,
     SignerCreate,
-    SignerCreated,
+    SigningLinkRead,
     SignerRead,
     SigningRead,
 )
@@ -38,9 +38,13 @@ async def list_signers(request_id: str, _context: AuthContext = Depends(require_
     return workflow_service.list_signers(request_id)
 
 
-@router.post("/signature-requests/{request_id}/signers", response_model=SignerCreated, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
-async def add_signer(request_id: str, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerCreated:
+@router.post("/signature-requests/{request_id}/signers", response_model=SignerRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
+async def add_signer(request_id: str, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
     return workflow_service.add_signer(request_id, payload, context.subject)
+
+@router.post("/signature-requests/{request_id}/signing-link", response_model=SigningLinkRead, tags=["signature requests - command"])
+async def create_signing_link(request_id: str, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SigningLinkRead:
+    return workflow_service.create_signing_link(request_id, context.subject)
 
 
 @router.post("/signature-requests/{request_id}/signers/{signer_id}/revoke", response_model=SignerRead, tags=["signature requests - command"])
@@ -63,21 +67,32 @@ async def request_audit(request_id: str, _context: AuthContext = Depends(require
     return workflow_service.audit_events(request_id)
 
 
-@router.get("/signing/requests/{request_id}", response_model=SigningRead, tags=["signing - query"])
-async def signing_context(request_id: str, context: AuthContext = Depends(authenticated_context)) -> SigningRead:
-    return workflow_service.signing_context(request_id, context.subject)
+@router.get("/signing/links/{token}", response_model=SigningRead, tags=["signing - query"])
+async def signing_context(token: str, context: AuthContext = Depends(authenticated_context)) -> SigningRead:
+    return workflow_service.signing_context(token, context.subject)
+
+@router.get("/signing/links/{token}/document", tags=["signing - query"])
+async def signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
+    metadata, content = workflow_service.signing_document(token, context.subject)
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'inline; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
 
-@router.post("/signing/requests/{request_id}/view", response_model=SignerRead, tags=["signing - command"])
-async def view_document(request_id: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.view(request_id, context.subject)
+@router.get("/signing/links/{token}/download", tags=["signing - query"])
+async def download_signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
+    metadata, content = workflow_service.signing_document(token, context.subject)
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'attachment; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
 
-@router.post("/signing/requests/{request_id}/sign", response_model=SignerRead, tags=["signing - command"])
-async def sign_document(request_id: str, payload: SignCommand, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.sign(request_id, context.subject, payload.consent)
+@router.post("/signing/links/{token}/view", response_model=SignerRead, tags=["signing - command"])
+async def view_document(token: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
+    return workflow_service.view(token, context.subject)
 
 
-@router.post("/signing/requests/{request_id}/decline", response_model=SignerRead, tags=["signing - command"])
-async def decline_document(request_id: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.decline(request_id, context.subject)
+@router.post("/signing/links/{token}/sign", response_model=SignerRead, tags=["signing - command"])
+async def sign_document(token: str, payload: SignCommand, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
+    return workflow_service.sign(token, context.subject, payload.consent)
+
+
+@router.post("/signing/links/{token}/decline", response_model=SignerRead, tags=["signing - command"])
+async def decline_document(token: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
+    return workflow_service.decline(token, context.subject)

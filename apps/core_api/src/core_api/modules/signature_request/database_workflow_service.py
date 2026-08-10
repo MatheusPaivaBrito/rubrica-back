@@ -16,7 +16,7 @@ from core_api.modules.document.document_entity import DocumentEntity, DocumentVe
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, RequestStatus, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerCreated, SignerRead, SignerStatus, SigningRead
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, RequestStatus, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
 
@@ -79,6 +79,15 @@ class DatabaseSignatureWorkflowService:
         with SessionLocal() as db:
             return self._document_read(self._document(db, document_id))
 
+    def delete_document(self, document_id: str, actor_id: str) -> None:
+        with SessionLocal.begin() as db:
+            item = self._document(db, document_id, lock=True)
+            frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.DRAFT.value, RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
+            if frozen is not None:
+                raise WorkflowError("A document linked to an active signature request cannot be deleted", 409)
+            item.deleted_at = DateTimeService.utc_now()
+            self._audit(db, None, actor_id, "document.deleted", "document", item.id, {})
+
     def get_content(self, document_id: str, version: int | None = None) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
             document = self._document(db, document_id)
@@ -113,7 +122,7 @@ class DatabaseSignatureWorkflowService:
         with SessionLocal() as db:
             return self._request_read(db, self._request(db, request_id))
 
-    def add_signer(self, request_id: str, payload: SignerCreate, actor_id: str) -> SignerCreated:
+    def add_signer(self, request_id: str, payload: SignerCreate, actor_id: str) -> SignerRead:
         token = token_urlsafe(32)
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
@@ -127,7 +136,17 @@ class DatabaseSignatureWorkflowService:
             except IntegrityError as exc:
                 raise WorkflowError("This authenticated user is already a signer", 409) from exc
             self._audit(db, request.id, actor_id, "signer.link_created", "signer", item.id, {"token_expires_at": item.token_expires_at.isoformat()})
-            return SignerCreated(**self._signer_read(item).model_dump(), signing_url=self._signing_url(str(request.id)))
+            return self._signer_read(item)
+
+    def create_signing_link(self, request_id: str, actor_id: str) -> SigningLinkRead:
+        token = token_urlsafe(32)
+        with SessionLocal.begin() as db:
+            request = self._request(db, request_id, lock=True)
+            if request.status != RequestStatus.OPEN.value:
+                raise WorkflowError("Only an open request can receive a signing link", 409)
+            request.signing_token_hash = sha256(token.encode()).hexdigest()
+            self._audit(db, request.id, actor_id, "signature_request.link_created", "signature_request", request.id, {})
+            return SigningLinkRead(signing_url=self._signing_url(token))
 
     def list_signers(self, request_id: str) -> list[SignerRead]:
         with SessionLocal() as db:
@@ -171,26 +190,40 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._request_read(db, request)
 
-    def signing_context(self, request_id: str, auth_user_id: str) -> SigningRead:
+    def signing_context(self, token: str, auth_user_id: str) -> SigningRead:
         with SessionLocal() as db:
-            signer, request = self._resolve_request(db, request_id, auth_user_id)
+            signer, request = self._resolve_request(db, token, auth_user_id)
             document = self._document(db, str(request.document_id))
             return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename)
 
-    def view(self, request_id: str, auth_user_id: str) -> SignerRead:
+    def signing_document(self, token: str, auth_user_id: str) -> tuple[DocumentVersionRead, bytes]:
+        with SessionLocal() as db:
+            _, request = self._resolve_request(db, token, auth_user_id)
+            version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
+            if version is None:
+                raise WorkflowError("Document version not found", 404)
+            metadata = self._version_read(version)
+            storage_key = version.storage_key
+        with self.storage.get(storage_key) as stream:
+            content = stream.read()
+        if sha256(content).hexdigest() != metadata.sha256:
+            raise WorkflowError("Stored document integrity check failed", 409)
+        return metadata, content
+
+    def view(self, token: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
-            signer, request = self._resolve_request(db, request_id, auth_user_id, lock=True)
+            signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
             if signer.status == SignerStatus.PENDING.value:
                 signer.status = SignerStatus.VIEWED.value
                 self._audit(db, request.id, auth_user_id, "document.viewed", "signer", signer.id, {})
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, request_id: str, auth_user_id: str, consent: bool) -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         with SessionLocal.begin() as db:
-            signer, request = self._resolve_request(db, request_id, auth_user_id, lock=True)
+            signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
             if signer.status == SignerStatus.SIGNED.value:
                 raise WorkflowError("Signer has already signed", 409)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
@@ -212,9 +245,9 @@ class DatabaseSignatureWorkflowService:
                 self._audit(db, request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {})
             return self._signer_read(signer)
 
-    def decline(self, request_id: str, auth_user_id: str) -> SignerRead:
+    def decline(self, token: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
-            signer, request = self._resolve_request(db, request_id, auth_user_id, lock=True)
+            signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
             if signer.status in {SignerStatus.SIGNED.value, SignerStatus.DECLINED.value}:
                 raise WorkflowError("Signer already answered", 409)
             signer.status = SignerStatus.DECLINED.value
@@ -228,8 +261,11 @@ class DatabaseSignatureWorkflowService:
             items = db.scalars(select(AuditEventEntity).where(AuditEventEntity.signature_request_id == request.id).order_by(AuditEventEntity.id)).all()
             return [AuditEventRead(id=str(x.id), occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
 
-    def _resolve_request(self, db, request_id: str, auth_user_id: str, lock: bool = False):
-        request = self._request(db, request_id, lock=lock)
+    def _resolve_request(self, db, token: str, auth_user_id: str, lock: bool = False):
+        statement = select(SignatureRequestEntity).where(SignatureRequestEntity.signing_token_hash == sha256(token.encode()).hexdigest(), SignatureRequestEntity.deleted_at.is_(None))
+        request = db.scalar(statement.with_for_update() if lock else statement)
+        if request is None:
+            raise WorkflowError("Signing link is invalid", 404)
         statement = select(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.auth_user_id == auth_user_id.lower())
         signer = db.scalar(statement.with_for_update() if lock else statement)
         if signer is None:
@@ -280,7 +316,7 @@ class DatabaseSignatureWorkflowService:
     def _request_read(self, db, item: SignatureRequestEntity) -> SignatureRequestRead:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
-        return SignatureRequestRead(id=str(item.id), document_id=str(item.document_id), document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, signing_url=self._signing_url(str(item.id)))
+        return SignatureRequestRead(id=str(item.id), document_id=str(item.document_id), document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count)
 
     @staticmethod
     def _document_read(x: DocumentEntity) -> DocumentRead:

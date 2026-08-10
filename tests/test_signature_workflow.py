@@ -31,10 +31,9 @@ def test_full_signature_flow_is_tracked(service: SignatureWorkflowService) -> No
         content,
     )
     request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(days=1), created_by="operator-1"))
-    invitation = service.add_signer(request.id, SignerCreate(name="Ada", email="ada@example.com"), "operator-1")
-    token = invitation_token(invitation.signing_url)
-
+    service.add_signer(request.id, SignerCreate(name="Ada", email="ada@example.com"), "operator-1")
     opened = service.open_request(request.id, "operator-1")
+    token = invitation_token(service.create_signing_link(request.id, "operator-1").signing_url)
     service.view(token, "ada@example.com")
     signer = service.sign(token, "ada@example.com", True)
 
@@ -44,7 +43,7 @@ def test_full_signature_flow_is_tracked(service: SignatureWorkflowService) -> No
     assert service.get_request(request.id).signed_count == 1
     assert service.get_content(document.id)[1] == content
     assert [event.action for event in service.audit_events(request.id)] == [
-        "signature_request.created", "signer.link_created", "signature_request.opened",
+        "signature_request.created", "signer.link_created", "signature_request.opened", "signature_request.link_created",
         "document.viewed", "signature.completed", "signature_request.completed",
     ]
 
@@ -52,9 +51,9 @@ def test_full_signature_flow_is_tracked(service: SignatureWorkflowService) -> No
 def test_identity_and_duplicate_signature_are_rejected(service: SignatureWorkflowService) -> None:
     document = service.create_document(DocumentCreate(organization_id="acme", title="NDA", original_filename="nda.pdf", content_type="application/pdf", created_by="operator"), b"nda")
     request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
-    invitation = service.add_signer(request.id, SignerCreate(name="Signer", email="signer@example.com"), "operator")
-    token = invitation_token(invitation.signing_url)
+    service.add_signer(request.id, SignerCreate(name="Signer", email="signer@example.com"), "operator")
     service.open_request(request.id, "operator")
+    token = invitation_token(service.create_signing_link(request.id, "operator").signing_url)
 
     with pytest.raises(WorkflowError, match="does not match"):
         service.sign(token, "intruder@example.com", True)
@@ -73,12 +72,24 @@ def test_new_version_is_blocked_after_request_is_open(service: SignatureWorkflow
         service.add_version(document.id, filename="nda-v2.pdf", content_type="application/pdf", actor_id="operator", content=b"v2")
 
 
+def test_document_soft_delete_behavior_is_blocked_by_active_request(service: SignatureWorkflowService) -> None:
+    standalone = service.create_document(DocumentCreate(organization_id="acme", title="Delete me", original_filename="delete.pdf", content_type="application/pdf", created_by="operator"), b"pdf")
+    service.delete_document(standalone.id, "operator")
+    assert service.list_documents() == []
+
+    linked = service.create_document(DocumentCreate(organization_id="acme", title="Linked", original_filename="linked.pdf", content_type="application/pdf", created_by="operator"), b"pdf")
+    service.create_request(SignatureRequestCreate(document_id=linked.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
+    with pytest.raises(WorkflowError, match="active signature request"):
+        service.delete_document(linked.id, "operator")
+
+
 def test_revoked_link_cannot_be_used(service: SignatureWorkflowService) -> None:
     document = service.create_document(DocumentCreate(organization_id="acme", title="NDA", original_filename="nda.pdf", content_type="application/pdf", created_by="operator"), b"nda")
     request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
     invitation = service.add_signer(request.id, SignerCreate(name="Signer", email="signer@example.com"), "operator")
     service.open_request(request.id, "operator")
+    token = invitation_token(service.create_signing_link(request.id, "operator").signing_url)
     service.revoke_signer_link(request.id, invitation.id, "operator")
 
     with pytest.raises(WorkflowError, match="revoked"):
-        service.sign(invitation_token(invitation.signing_url), "signer@example.com", True)
+        service.sign(token, "signer@example.com", True)

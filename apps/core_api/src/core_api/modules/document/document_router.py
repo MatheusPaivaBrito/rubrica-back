@@ -17,11 +17,22 @@ async def list_documents(_context: AuthContext = Depends(require_permission("doc
 async def get_document(document_id: str, _context: AuthContext = Depends(require_permission("documents:read"))) -> DocumentRead:
     return workflow_service.get_document(document_id)
 
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["documents - command"])
+async def delete_document(document_id: str, context: AuthContext = Depends(require_permission("documents:write"))) -> Response:
+    workflow_service.delete_document(document_id, context.subject)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 @router.get("/{document_id}/download", tags=["documents - query"])
 async def download_document(document_id: str, version: int | None = None, _context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
     metadata, content = workflow_service.get_content(document_id, version)
     return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'attachment; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
+
+
+@router.get("/{document_id}/preview", tags=["documents - query"])
+async def preview_document(document_id: str, version: int | None = None, _context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
+    metadata, content = workflow_service.get_content(document_id, version)
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'inline; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
 
 @router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED, tags=["documents - command"])
