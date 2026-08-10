@@ -390,6 +390,7 @@ class DatabaseSignatureWorkflowService:
             "subject_hmac_sha256": subject_hash,
             "identity_binding_hmac_sha256": identity_binding,
             "signer_name": signer.name,
+            "signer_email": signer.email,
             "signed_at": signed_at.isoformat(),
             "stamp": stamp.model_dump(),
             "network": {"ip_address": ip_address[:64], "user_agent": normalized_agent, "device_type": device_type},
