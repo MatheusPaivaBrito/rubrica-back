@@ -96,3 +96,40 @@ make migrate-auth
 make test
 make lint
 ```
+
+## Production with Cloudflare and HTTPS
+
+Production uses `docker-compose.prod.yml`, the frontend `Dockerfile.prod`, the
+Nginx production template and Certbot's Cloudflare DNS challenge. Local Docker
+continues to use `nginx.local.conf` on port 8080.
+
+```bash
+cp .env.production.example .env.production
+mkdir -p secrets
+cp secrets/cloudflare.ini.example secrets/cloudflare.ini
+chmod 600 secrets/cloudflare.ini
+
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm certbot-init
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
+docker compose --env-file .env.production -f docker-compose.prod.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
+docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api python toolbox/seeds/auth_admin.py
+```
+
+Create a Cloudflare API token restricted to DNS editing for only the Rubrica
+zone and place it in `secrets/cloudflare.ini`. In Cloudflare, proxy the DNS
+record and select SSL/TLS mode **Full (strict)**. At the server firewall, allow
+ports 80/443 only from Cloudflare's published address ranges; the Nginx file
+contains the same ranges solely to restore the signer's real client IP.
+
+Certbot checks renewal every 12 hours and reloads Nginx only after a successful
+renewal. Keep PostgreSQL, Redis, Auth and Core unexposed; the production Compose
+publishes only Nginx ports 80 and 443.
+
+For subsequent deployments, keep the existing named volumes and run:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
+docker compose --env-file .env.production -f docker-compose.prod.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
+```

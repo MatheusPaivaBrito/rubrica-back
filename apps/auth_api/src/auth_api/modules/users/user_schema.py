@@ -3,7 +3,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-UserRole = Literal["signature_operator", "signature_signer", "signature_auditor"]
+UserRole = Literal["signature_admin", "signature_operator", "signature_signer", "signature_auditor"]
 
 
 class UserCreate(BaseModel):

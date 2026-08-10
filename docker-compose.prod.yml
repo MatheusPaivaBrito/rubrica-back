@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-rubrica}
+      POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-rubrica}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [rubrica_internal]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [rubrica_internal]
+
+  auth-api:
+    build:
+      context: .
+      dockerfile: apps/auth_api/dockerfile
+    restart: unless-stopped
+    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
+    environment:
+      ENVIRONMENT: production
+      APP_DEBUG: "false"
+      PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:?AUTH_SEED_ADMIN_EMAIL is required}
+      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:?AUTH_SEED_ADMIN_PASSWORD is required}
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [rubrica_internal]
+
+  core-api:
+    build:
+      context: .
+      dockerfile: apps/core_api/dockerfile
+    restart: unless-stopped
+    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
+    environment:
+      ENVIRONMENT: production
+      APP_DEBUG: "false"
+      PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
+      AUTH_API_URL: http://auth-api:8000
+      DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
+      SIGNING_APP_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}/signing
+      EVIDENCE_SECRET: ${EVIDENCE_SECRET:?EVIDENCE_SECRET is required}
+    volumes:
+      - document_storage:/var/lib/rubrica/documents
+    depends_on:
+      postgres: { condition: service_healthy }
+      auth-api: { condition: service_started }
+    networks: [rubrica_internal]
+
+  certbot-init:
+    image: certbot/dns-cloudflare:v5.7.0
+    restart: "no"
+    environment:
+      RUBRICA_DOMAIN: ${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - >-
+        certbot certonly --dns-cloudflare
+        --dns-cloudflare-credentials /run/secrets/cloudflare.ini
+        --dns-cloudflare-propagation-seconds 30
+        --non-interactive --agree-tos
+        --email "$${LETSENCRYPT_EMAIL}"
+        --cert-name rubrica
+        --key-type ecdsa
+        --keep-until-expiring
+        -d "$${RUBRICA_DOMAIN}"
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - ./secrets/cloudflare.ini:/run/secrets/cloudflare.ini:ro
+    networks: [rubrica_external]
+
+  web:
+    build:
+      context: ../rubrica-web
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      RUBRICA_DOMAIN: ${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      auth-api: { condition: service_started }
+      core-api: { condition: service_started }
+      certbot-init: { condition: service_completed_successfully }
+    networks: [rubrica_internal]
+
+  certbot-renew:
+    image: certbot/dns-cloudflare:v5.7.0
+    restart: unless-stopped
+    pid: service:web
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - >-
+        trap exit TERM;
+        while :; do
+          certbot renew --quiet --deploy-hook "kill -HUP 1";
+          sleep 12h & wait $${!};
+        done
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - ./secrets/cloudflare.ini:/run/secrets/cloudflare.ini:ro
+    depends_on:
+      web: { condition: service_started }
+    networks: [rubrica_external]
+
+volumes:
+  postgres_data:
+  redis_data:
+  document_storage:
+  letsencrypt:
+
+networks:
+  rubrica_internal:
+    internal: true
+  rubrica_external:
