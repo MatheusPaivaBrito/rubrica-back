@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from hashlib import sha256
+from hmac import new as hmac_new
 from io import BytesIO
 from pathlib import Path
 from secrets import token_urlsafe
@@ -16,7 +17,8 @@ from core_api.modules.document.document_entity import DocumentEntity, DocumentVe
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, RequestStatus, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
+from core_api.modules.signature_request.signed_pdf import evidence_sha256, generate_signed_pdf
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
 
@@ -139,13 +141,24 @@ class DatabaseSignatureWorkflowService:
             return self._signer_read(item)
 
     def create_signing_link(self, request_id: str, actor_id: str) -> SigningLinkRead:
-        token = token_urlsafe(32)
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
-            if request.status != RequestStatus.OPEN.value:
-                raise WorkflowError("Only an open request can receive a signing link", 409)
+            if request.status not in {RequestStatus.OPEN.value, RequestStatus.COMPLETED.value}:
+                raise WorkflowError("Only an open or completed request can receive a signing link", 409)
+            request.signing_token_nonce = token_urlsafe(24)
+            token = self._request_token(request.id, request.signing_token_nonce)
             request.signing_token_hash = sha256(token.encode()).hexdigest()
             self._audit(db, request.id, actor_id, "signature_request.link_created", "signature_request", request.id, {})
+            return SigningLinkRead(signing_url=self._signing_url(token))
+
+    def get_signing_link(self, request_id: str) -> SigningLinkRead:
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            if not request.signing_token_nonce:
+                raise WorkflowError("Signing link must be generated again", 404)
+            token = self._request_token(request.id, request.signing_token_nonce)
+            if sha256(token.encode()).hexdigest() != request.signing_token_hash:
+                raise WorkflowError("Signing link integrity check failed", 409)
             return SigningLinkRead(signing_url=self._signing_url(token))
 
     def list_signers(self, request_id: str) -> list[SignerRead]:
@@ -221,32 +234,77 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition) -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v1", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown") -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
-        with SessionLocal.begin() as db:
-            signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
-            if signer.status == SignerStatus.SIGNED.value:
-                raise WorkflowError("Signer has already signed", 409)
-            version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
-            if version is None or version.sha256 != request.document_sha256:
-                raise WorkflowError("Document hash does not match the frozen request", 409)
-            with self.storage.get(version.storage_key) as stream:
-                if sha256(stream.read()).hexdigest() != request.document_sha256:
+        artifact_key: str | None = None
+        try:
+            with SessionLocal.begin() as db:
+                signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
+                if signer.status == SignerStatus.SIGNED.value:
+                    raise WorkflowError("Signer has already signed", 409)
+                version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
+                if version is None or version.sha256 != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
-            now = DateTimeService.utc_now()
-            evidence = {"consent": True, "document_version": request.document_version, "stamp": stamp.model_dump()}
-            db.add(SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence))
-            signer.status = SignerStatus.SIGNED.value
-            signer.signed_at = now
-            self._audit(db, request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version, "stamp": stamp.model_dump()})
-            db.flush()
-            pending = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
-            if pending == 0:
-                request.status = RequestStatus.COMPLETED.value
-                request.completed_at = now
-                self._audit(db, request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {})
-            return self._signer_read(signer)
+                with self.storage.get(version.storage_key) as stream:
+                    original = stream.read()
+                if sha256(original).hexdigest() != request.document_sha256:
+                    raise WorkflowError("Document hash does not match the frozen request", 409)
+                now = DateTimeService.utc_now()
+                evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent)
+                evidence_hash = evidence_sha256(evidence)
+                existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
+                stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
+                stamp_records.append(evidence | {"evidence_sha256": evidence_hash})
+                artifact_id = str(uuid4())
+                manifest_hash = sha256("|".join(item["evidence_sha256"] for item in stamp_records).encode()).hexdigest()
+                signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{item["subject_hmac_sha256"][:16]}' for item in stamp_records)
+                artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat()})
+                artifact_hash = sha256(artifact).hexdigest()
+                artifact_key, _ = self.storage.put(BytesIO(artifact), filename=f"rubrica-{request.id}-signed.pdf")
+                signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash)
+                db.add(signature)
+                signer.status = SignerStatus.SIGNED.value
+                signer.signed_at = now
+                self._audit(db, request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version, "evidence_sha256": evidence_hash, "artifact_sha256": artifact_hash})
+                db.flush()
+                pending = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
+                if pending == 0:
+                    request.status = RequestStatus.COMPLETED.value
+                    request.completed_at = now
+                    self._audit(db, request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {"artifact_sha256": artifact_hash})
+                return self._signer_read(signer)
+        except Exception:
+            if artifact_key:
+                self.storage.delete(artifact_key)
+            raise
+
+    def signed_document(self, request_id: str) -> tuple[str, str, bytes]:
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.artifact_storage_key.is_not(None)).order_by(SignatureEntity.id.desc()).limit(1))
+            if signature is None or not signature.artifact_storage_key or not signature.artifact_sha256:
+                raise WorkflowError("Signed document is not available", 404)
+            key, digest = signature.artifact_storage_key, signature.artifact_sha256
+        with self.storage.get(key) as stream:
+            content = stream.read()
+        if sha256(content).hexdigest() != digest:
+            raise WorkflowError("Signed document integrity check failed", 409)
+        return f"rubrica-request-{request_id}-signed.pdf", digest, content
+
+    def signing_signed_document(self, token: str, auth_user_id: str) -> tuple[str, str, bytes]:
+        with SessionLocal() as db:
+            signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
+            if signer.status != SignerStatus.SIGNED.value:
+                raise WorkflowError("Signer has not signed this document", 409)
+            request_id = str(request.id)
+        return self.signed_document(request_id)
+
+    def signature_evidence(self, request_id: str) -> list[SignatureEvidenceRead]:
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            rows = db.execute(select(SignatureEntity, SignerEntity).join(SignerEntity, SignerEntity.id == SignatureEntity.signer_id).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all()
+            return [SignatureEvidenceRead(signature_id=str(signature.id), signer_id=str(signer.id), request_id=str(request.id), document_id=str(request.document_id), document_version=request.document_version, signed_at=signature.signed_at, signer_name=signer.name, signer_email=signer.email, subject_hmac_sha256=str(signature.evidence_json.get("subject_hmac_sha256", "")), original_sha256=signature.document_sha256, evidence_sha256=signature.evidence_sha256 or evidence_sha256(signature.evidence_json), artifact_sha256=signature.artifact_sha256 or "", evidence=signature.evidence_json) for signature, signer in rows]
 
     def decline(self, token: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
@@ -277,11 +335,43 @@ class DatabaseSignatureWorkflowService:
         now = DateTimeService.utc_now()
         if signer.link_revoked_at is not None:
             raise WorkflowError("Signing access has been revoked", 410)
-        if request.expires_at <= now:
+        signed_history = allow_completed and signer.status == SignerStatus.SIGNED.value
+        if request.expires_at <= now and not signed_history:
             raise WorkflowError("Signature request has expired", 410)
-        if request.status != RequestStatus.OPEN.value and not (allow_completed and request.status == RequestStatus.COMPLETED.value and signer.status == SignerStatus.SIGNED.value):
+        if request.status != RequestStatus.OPEN.value and not signed_history:
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
+
+    @staticmethod
+    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str) -> dict[str, object]:
+        subject_hash = hmac_new(settings.EVIDENCE_SECRET.encode(), auth_user_id.lower().encode(), "sha256").hexdigest()
+        identity_binding = hmac_new(settings.EVIDENCE_SECRET.encode(), f"{auth_user_id.lower()}|{request.id}|{signer.id}|{request.document_id}|{request.document_version}".encode(), "sha256").hexdigest()
+        normalized_agent = user_agent[:1000] or "unknown"
+        lowered = normalized_agent.lower()
+        device_type = "mobile" if any(value in lowered for value in ("mobile", "android", "iphone")) else "tablet" if "ipad" in lowered else "desktop"
+        return {
+            "schema": "rubrica-signature-evidence-v1",
+            "consent": True,
+            "consent_version": consent_version,
+            "request_id": str(request.id),
+            "signer_id": str(signer.id),
+            "document_id": str(request.document_id),
+            "document_version": request.document_version,
+            "original_sha256": request.document_sha256,
+            "subject_hmac_sha256": subject_hash,
+            "identity_binding_hmac_sha256": identity_binding,
+            "signer_name": signer.name,
+            "signed_at": signed_at.isoformat(),
+            "stamp": stamp.model_dump(),
+            "network": {"ip_address": ip_address[:64], "user_agent": normalized_agent, "device_type": device_type},
+            "client": (client or ClientEvidence()).model_dump(),
+            "geolocation": (geolocation or GeolocationEvidence(status="unavailable")).model_dump(),
+        }
+
+    @staticmethod
+    def _request_token(request_id: int, nonce: str) -> str:
+        payload = f"rubrica-request:{request_id}:{nonce}".encode()
+        return hmac_new(settings.EVIDENCE_SECRET.encode(), payload, "sha256").hexdigest()
 
     def _signer(self, db, identifier: str, request_id: int, lock: bool = False) -> SignerEntity:
         try:

@@ -1,9 +1,11 @@
 import os
 from datetime import timedelta
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 from sqlalchemy import delete, select
+from pypdf import PdfWriter
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
@@ -23,7 +25,12 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
     organization = "database-smoke-test"
     document_id: int | None = None
     try:
-        document = service.create_document(DocumentCreate(organization_id=organization, title="Smoke", original_filename="smoke.pdf", content_type="application/pdf", created_by="operator"), b"database workflow")
+        source = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=595, height=842)
+        writer.write(source)
+        original = source.getvalue()
+        document = service.create_document(DocumentCreate(organization_id=organization, title="Smoke", original_filename="smoke.pdf", content_type="application/pdf", created_by="operator"), original)
         document_id = int(document.id)
         request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
         service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
@@ -34,8 +41,23 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         service.sign(token, "database@example.com", True, stamp)
 
         assert service.get_request(request.id).status == RequestStatus.COMPLETED
-        assert service.get_content(document.id)[1] == b"database workflow"
+        assert service.get_content(document.id)[1] == original
+        with SessionLocal.begin() as db:
+            persisted_request = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.id == int(request.id)))
+            persisted_request.expires_at = DateTimeService.utc_now() - timedelta(days=730)
         assert service.signing_context(token, "database@example.com").stamp == stamp
+        assert service.signing_signed_document(token, "database@example.com")[2].startswith(b"%PDF")
+        assert service.get_signing_link(request.id).signing_url == link.signing_url
+        historical_link = service.create_signing_link(request.id, "administrator")
+        historical_token = historical_link.signing_url.rsplit("/", maxsplit=1)[-1]
+        assert service.signing_signed_document(historical_token, "database@example.com")[2].startswith(b"%PDF")
+        filename, artifact_hash, artifact = service.signed_document(request.id)
+        assert filename.endswith("signed.pdf")
+        assert artifact_hash
+        assert artifact.startswith(b"%PDF")
+        evidence = service.signature_evidence(request.id)
+        assert evidence[0].evidence_sha256
+        assert evidence[0].subject_hmac_sha256 != "database@example.com"
         assert "signature.completed" in [event.action for event in service.audit_events(request.id)]
     finally:
         if document_id is not None:

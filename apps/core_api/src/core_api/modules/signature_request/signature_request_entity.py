@@ -17,6 +17,7 @@ class SignatureRequestEntity(BaseEntity):
     created_by: Mapped[str] = mapped_column(String(255), index=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     signing_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    signing_token_nonce: Mapped[str | None] = mapped_column(String(64), unique=True)
 
 
 class SignerEntity(BaseEntity):
@@ -47,6 +48,9 @@ class SignatureEntity(BaseEntity):
     document_sha256: Mapped[str] = mapped_column(String(64))
     signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     evidence_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    evidence_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    artifact_storage_key: Mapped[str | None] = mapped_column(String(255), unique=True)
+    artifact_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
 
 
 class AuditEventEntity(BaseEntity):

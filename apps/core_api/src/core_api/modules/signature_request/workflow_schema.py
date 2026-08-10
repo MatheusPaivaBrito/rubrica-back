@@ -73,6 +73,21 @@ class StampPosition(BaseModel):
     y: float = Field(ge=0, le=1)
 
 
+class ClientEvidence(BaseModel):
+    platform: str = Field(default="unknown", max_length=120)
+    language: str = Field(default="unknown", max_length=40)
+    timezone: str = Field(default="unknown", max_length=80)
+    screen_width: int | None = Field(default=None, ge=1, le=20000)
+    screen_height: int | None = Field(default=None, ge=1, le=20000)
+
+
+class GeolocationEvidence(BaseModel):
+    status: str = Field(pattern=r"^(granted|denied|unavailable|timeout)$")
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    accuracy_meters: float | None = Field(default=None, ge=0, le=1000000)
+
+
 class SigningRead(BaseModel):
     request: SignatureRequestRead
     signer: SignerRead
@@ -83,7 +98,26 @@ class SigningRead(BaseModel):
 
 class SignCommand(BaseModel):
     consent: bool
+    consent_version: str = Field(pattern=r"^rubrica-evidence-v1$")
     stamp: StampPosition
+    client: ClientEvidence
+    geolocation: GeolocationEvidence
+
+
+class SignatureEvidenceRead(BaseModel):
+    signature_id: str
+    signer_id: str
+    request_id: str
+    document_id: str
+    document_version: int
+    signed_at: datetime
+    signer_name: str
+    signer_email: str
+    subject_hmac_sha256: str
+    original_sha256: str
+    evidence_sha256: str
+    artifact_sha256: str
+    evidence: dict[str, object]
 
 
 class AuditEventRead(BaseModel):

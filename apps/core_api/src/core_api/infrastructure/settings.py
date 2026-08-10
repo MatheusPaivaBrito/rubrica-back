@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     AUTH_API_URL: str = "http://localhost:8101"
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
+    EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

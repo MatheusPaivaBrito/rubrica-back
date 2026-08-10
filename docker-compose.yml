@@ -44,6 +44,7 @@ services:
           AUTH_API_URL: http://auth-api:8000
           DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
           SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:8080/signing}
+          EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
 
         ports:
           - "${CORE_API_PORT:-8100}:8000"
