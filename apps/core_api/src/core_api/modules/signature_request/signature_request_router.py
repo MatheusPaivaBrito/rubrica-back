@@ -63,21 +63,21 @@ async def request_audit(request_id: str, _context: AuthContext = Depends(require
     return workflow_service.audit_events(request_id)
 
 
-@router.get("/signing/{token}", response_model=SigningRead, tags=["signing - query"])
-async def signing_context(token: str, context: AuthContext = Depends(authenticated_context)) -> SigningRead:
-    return workflow_service.signing_context(token, context.subject)
+@router.get("/signing/requests/{request_id}", response_model=SigningRead, tags=["signing - query"])
+async def signing_context(request_id: str, context: AuthContext = Depends(authenticated_context)) -> SigningRead:
+    return workflow_service.signing_context(request_id, context.subject)
 
 
-@router.post("/signing/{token}/view", response_model=SignerRead, tags=["signing - command"])
-async def view_document(token: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.view(token, context.subject)
+@router.post("/signing/requests/{request_id}/view", response_model=SignerRead, tags=["signing - command"])
+async def view_document(request_id: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
+    return workflow_service.view(request_id, context.subject)
 
 
-@router.post("/signing/{token}/sign", response_model=SignerRead, tags=["signing - command"])
-async def sign_document(token: str, payload: SignCommand, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.sign(token, context.subject, payload.consent)
+@router.post("/signing/requests/{request_id}/sign", response_model=SignerRead, tags=["signing - command"])
+async def sign_document(request_id: str, payload: SignCommand, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
+    return workflow_service.sign(request_id, context.subject, payload.consent)
 
 
-@router.post("/signing/{token}/decline", response_model=SignerRead, tags=["signing - command"])
-async def decline_document(token: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.decline(token, context.subject)
+@router.post("/signing/requests/{request_id}/decline", response_model=SignerRead, tags=["signing - command"])
+async def decline_document(request_id: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
+    return workflow_service.decline(request_id, context.subject)

@@ -127,7 +127,7 @@ class DatabaseSignatureWorkflowService:
             except IntegrityError as exc:
                 raise WorkflowError("This authenticated user is already a signer", 409) from exc
             self._audit(db, request.id, actor_id, "signer.link_created", "signer", item.id, {"token_expires_at": item.token_expires_at.isoformat()})
-            return SignerCreated(**self._signer_read(item).model_dump(), signing_url=self._signing_url(token))
+            return SignerCreated(**self._signer_read(item).model_dump(), signing_url=self._signing_url(str(request.id)))
 
     def list_signers(self, request_id: str) -> list[SignerRead]:
         with SessionLocal() as db:
@@ -171,26 +171,26 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._request_read(db, request)
 
-    def signing_context(self, token: str, auth_user_id: str) -> SigningRead:
+    def signing_context(self, request_id: str, auth_user_id: str) -> SigningRead:
         with SessionLocal() as db:
-            signer, request = self._resolve_token(db, token, auth_user_id)
+            signer, request = self._resolve_request(db, request_id, auth_user_id)
             document = self._document(db, str(request.document_id))
             return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename)
 
-    def view(self, token: str, auth_user_id: str) -> SignerRead:
+    def view(self, request_id: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
-            signer, request = self._resolve_token(db, token, auth_user_id, lock=True)
+            signer, request = self._resolve_request(db, request_id, auth_user_id, lock=True)
             if signer.status == SignerStatus.PENDING.value:
                 signer.status = SignerStatus.VIEWED.value
                 self._audit(db, request.id, auth_user_id, "document.viewed", "signer", signer.id, {})
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, token: str, auth_user_id: str, consent: bool) -> SignerRead:
+    def sign(self, request_id: str, auth_user_id: str, consent: bool) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         with SessionLocal.begin() as db:
-            signer, request = self._resolve_token(db, token, auth_user_id, lock=True)
+            signer, request = self._resolve_request(db, request_id, auth_user_id, lock=True)
             if signer.status == SignerStatus.SIGNED.value:
                 raise WorkflowError("Signer has already signed", 409)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
@@ -212,9 +212,9 @@ class DatabaseSignatureWorkflowService:
                 self._audit(db, request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {})
             return self._signer_read(signer)
 
-    def decline(self, token: str, auth_user_id: str) -> SignerRead:
+    def decline(self, request_id: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
-            signer, request = self._resolve_token(db, token, auth_user_id, lock=True)
+            signer, request = self._resolve_request(db, request_id, auth_user_id, lock=True)
             if signer.status in {SignerStatus.SIGNED.value, SignerStatus.DECLINED.value}:
                 raise WorkflowError("Signer already answered", 409)
             signer.status = SignerStatus.DECLINED.value
@@ -228,20 +228,18 @@ class DatabaseSignatureWorkflowService:
             items = db.scalars(select(AuditEventEntity).where(AuditEventEntity.signature_request_id == request.id).order_by(AuditEventEntity.id)).all()
             return [AuditEventRead(id=str(x.id), occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
 
-    def _resolve_token(self, db, token: str, auth_user_id: str | None = None, lock: bool = False):
-        statement = select(SignerEntity).where(SignerEntity.signing_token_hash == sha256(token.encode()).hexdigest())
+    def _resolve_request(self, db, request_id: str, auth_user_id: str, lock: bool = False):
+        request = self._request(db, request_id, lock=lock)
+        statement = select(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.auth_user_id == auth_user_id.lower())
         signer = db.scalar(statement.with_for_update() if lock else statement)
         if signer is None:
-            raise WorkflowError("Signing link is invalid", 404)
-        request = self._request(db, str(signer.signature_request_id), lock=lock)
+            self._audit(db, request.id, auth_user_id, "authorization.failed", "signature_request", request.id, {})
+            raise WorkflowError("Authenticated user does not match a signer for this request", 403)
         now = DateTimeService.utc_now()
         if signer.link_revoked_at is not None:
-            raise WorkflowError("Signing link has been revoked", 410)
-        if signer.token_expires_at <= now or request.expires_at <= now:
-            raise WorkflowError("Signing link has expired", 410)
-        if auth_user_id is not None and signer.auth_user_id != auth_user_id:
-            self._audit(db, request.id, auth_user_id, "authorization.failed", "signer", signer.id, {})
-            raise WorkflowError("Authenticated user does not match the signer", 403)
+            raise WorkflowError("Signing access has been revoked", 410)
+        if request.expires_at <= now:
+            raise WorkflowError("Signature request has expired", 410)
         if request.status != RequestStatus.OPEN.value:
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
@@ -282,7 +280,7 @@ class DatabaseSignatureWorkflowService:
     def _request_read(self, db, item: SignatureRequestEntity) -> SignatureRequestRead:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
-        return SignatureRequestRead(id=str(item.id), document_id=str(item.document_id), document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count)
+        return SignatureRequestRead(id=str(item.id), document_id=str(item.document_id), document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, signing_url=self._signing_url(str(item.id)))
 
     @staticmethod
     def _document_read(x: DocumentEntity) -> DocumentRead:
@@ -297,8 +295,8 @@ class DatabaseSignatureWorkflowService:
         return SignerRead(id=str(x.id), signature_request_id=str(x.signature_request_id), auth_user_id=x.auth_user_id, name=x.name, email=x.email, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
 
     @staticmethod
-    def _signing_url(token: str) -> str:
-        return f"{settings.SIGNING_APP_URL.rstrip('/')}/{token}"
+    def _signing_url(request_id: str) -> str:
+        return f"{settings.SIGNING_APP_URL.rstrip('/')}/{request_id}"
 
     @staticmethod
     def _audit(db, request_id: int | None, actor_id: str, action: str, entity_type: str, entity_id: object, metadata: dict[str, object]) -> None:

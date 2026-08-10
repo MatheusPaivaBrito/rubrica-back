@@ -21,7 +21,7 @@ def test_core_routes_are_registered() -> None:
     assert "/signature-requests" in paths
     assert "/signature-requests/{request_id}/signers" in paths
     assert "/signature-requests/{request_id}/audit" in paths
-    assert "/signing/{token}/sign" in paths
+    assert "/signing/requests/{request_id}/sign" in paths
 
 def test_auth_routes_are_registered() -> None:
     paths = {route.path for route in auth_app.routes}

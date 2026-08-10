@@ -154,7 +154,7 @@ class SignatureWorkflowService:
             self.request_signers[request_id].append(signer.id)
             self.token_index[sha256(token.encode()).hexdigest()] = signer.id
             self._audit(request_id, actor_id, "signer.link_created", "signer", signer.id, {"token_expires_at": signer.token_expires_at.isoformat()})
-            return SignerCreated(**signer.model_dump(), signing_url=self._signing_url(token))
+            return SignerCreated(**signer.model_dump(), signing_url=self._signing_url(request.id))
 
     def list_signers(self, request_id: str) -> list[SignerRead]:
         self._request(request_id)
@@ -202,25 +202,25 @@ class SignatureWorkflowService:
             self._audit(request_id, actor_id, "signature_request.cancelled", "signature_request", request_id, {})
             return self._counts(updated)
 
-    def signing_context(self, token: str, auth_user_id: str) -> SigningRead:
-        signer, request = self._resolve_token(token, auth_user_id)
+    def signing_context(self, request_id: str, auth_user_id: str) -> SigningRead:
+        signer, request = self._resolve_request(request_id, auth_user_id)
         document = self._document(request.document_id)
         return SigningRead(request=self._counts(request), signer=signer, document_title=document.title, original_filename=document.original_filename)
 
-    def view(self, token: str, auth_user_id: str) -> SignerRead:
+    def view(self, request_id: str, auth_user_id: str) -> SignerRead:
         with self._lock:
-            signer, request = self._resolve_token(token, auth_user_id)
+            signer, request = self._resolve_request(request_id, auth_user_id)
             if signer.status == SignerStatus.PENDING:
                 signer = signer.model_copy(update={"status": SignerStatus.VIEWED})
                 self.signers[signer.id] = signer
                 self._audit(request.id, auth_user_id, "document.viewed", "signer", signer.id, {})
             return signer
 
-    def sign(self, token: str, auth_user_id: str, consent: bool) -> SignerRead:
+    def sign(self, request_id: str, auth_user_id: str, consent: bool) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         with self._lock:
-            signer, request = self._resolve_token(token, auth_user_id)
+            signer, request = self._resolve_request(request_id, auth_user_id)
             if signer.status == SignerStatus.SIGNED or (request.id, signer.id) in self.signatures:
                 raise WorkflowError("Signer has already signed", 409)
             document = self._document(request.document_id)
@@ -237,9 +237,9 @@ class SignatureWorkflowService:
                 self._audit(request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {})
             return signer
 
-    def decline(self, token: str, auth_user_id: str) -> SignerRead:
+    def decline(self, request_id: str, auth_user_id: str) -> SignerRead:
         with self._lock:
-            signer, request = self._resolve_token(token, auth_user_id)
+            signer, request = self._resolve_request(request_id, auth_user_id)
             if signer.status in {SignerStatus.SIGNED, SignerStatus.DECLINED}:
                 raise WorkflowError("Signer already answered", 409)
             signer = signer.model_copy(update={"status": SignerStatus.DECLINED})
@@ -251,29 +251,26 @@ class SignatureWorkflowService:
         self._request(request_id)
         return list(self.audit[request_id])
 
-    def _resolve_token(self, token: str, auth_user_id: str | None = None) -> tuple[SignerRead, SignatureRequestRead]:
-        signer_id = self.token_index.get(sha256(token.encode()).hexdigest())
-        if signer_id is None:
-            raise WorkflowError("Signing link is invalid", 404)
-        signer = self.signers[signer_id]
-        request = self._request(signer.signature_request_id)
+    def _resolve_request(self, request_id: str, auth_user_id: str) -> tuple[SignerRead, SignatureRequestRead]:
+        request = self._request(request_id)
+        signer = next((item for item in self.list_signers(request.id) if item.auth_user_id == auth_user_id.lower()), None)
+        if signer is None:
+            self._audit(request.id, auth_user_id, "authorization.failed", "signature_request", request.id, {})
+            raise WorkflowError("Authenticated user does not match a signer for this request", 403)
         now = DateTimeService.utc_now()
         if signer.link_revoked_at is not None:
-            raise WorkflowError("Signing link has been revoked", 410)
-        if signer.token_expires_at <= now or request.expires_at <= now:
+            raise WorkflowError("Signing access has been revoked", 410)
+        if request.expires_at <= now:
             if signer.status not in {SignerStatus.SIGNED, SignerStatus.DECLINED}:
                 self.signers[signer.id] = signer.model_copy(update={"status": SignerStatus.EXPIRED})
-            raise WorkflowError("Signing link has expired", 410)
-        if auth_user_id is not None and signer.auth_user_id != auth_user_id:
-            self._audit(request.id, auth_user_id, "authorization.failed", "signer", signer.id, {})
-            raise WorkflowError("Authenticated user does not match the signer", 403)
+            raise WorkflowError("Signature request has expired", 410)
         if request.status != RequestStatus.OPEN:
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
 
     def _counts(self, request: SignatureRequestRead) -> SignatureRequestRead:
         signers = [self.signers[sid] for sid in self.request_signers.get(request.id, [])]
-        return request.model_copy(update={"signer_count": len(signers), "signed_count": sum(s.status == SignerStatus.SIGNED for s in signers)})
+        return request.model_copy(update={"signer_count": len(signers), "signed_count": sum(s.status == SignerStatus.SIGNED for s in signers), "signing_url": self._signing_url(request.id)})
 
     def _document(self, document_id: str) -> DocumentRead:
         try:
@@ -292,8 +289,8 @@ class SignatureWorkflowService:
         self.audit.setdefault(scope_id, []).append(event)
 
     @staticmethod
-    def _signing_url(token: str) -> str:
-        return f"{settings.SIGNING_APP_URL.rstrip('/')}/{token}"
+    def _signing_url(request_id: str) -> str:
+        return f"{settings.SIGNING_APP_URL.rstrip('/')}/{request_id}"
 
 
 workflow_service = SignatureWorkflowService(LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH)))

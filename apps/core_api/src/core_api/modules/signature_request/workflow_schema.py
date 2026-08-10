@@ -43,6 +43,7 @@ class SignatureRequestRead(BaseModel):
     completed_at: datetime | None = None
     signer_count: int = 0
     signed_count: int = 0
+    signing_url: str = ""
 
 
 class SignerCreate(BaseModel):
