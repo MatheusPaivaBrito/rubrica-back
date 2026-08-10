@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import delete, select
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
@@ -55,10 +55,14 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         assert administrator_view.viewer_mode == "administrator"
         assert administrator_view.request.status == RequestStatus.COMPLETED
         assert service.signing_signed_document(historical_token, "admin@example.local", administrator=True)[2].startswith(b"%PDF")
+        signer_view = service.signing_context(historical_token, "database@example.com", administrator=True)
+        assert signer_view.viewer_mode == "signer"
         filename, artifact_hash, artifact = service.signed_document(request.id)
         assert filename.endswith("signed.pdf")
         assert artifact_hash
         assert artifact.startswith(b"%PDF")
+        artifact_metadata = PdfReader(BytesIO(artifact)).metadata
+        assert artifact_metadata.get("/RubricaEvidenceJSON")
         evidence = service.signature_evidence(request.id)
         assert evidence[0].evidence_sha256
         assert evidence[0].subject_hmac_sha256 != "database@example.com"

@@ -46,6 +46,21 @@ Auth's `/access-control/context` contract. The client cannot choose its actor
 identity. Run `make seed-auth` after setting `AUTH_SEED_ADMIN_PASSWORD` in
 `.env` to create the local `signature_admin` user.
 
+## Verifying a signed PDF
+
+New signed artifacts carry the visual stamps plus a `RubricaEvidenceJSON`
+metadata entry containing the consented technical evidence for every signature.
+Extract it and verify each evidence hash and the combined manifest with:
+
+```bash
+PYTHONPATH=apps/core_api/src:packages/shared_kernel/src poetry run python toolbox/verify_signed_pdf.py /path/to/signed.pdf
+```
+
+The command prints the PDF hash, Rubrica identifiers, original-document hash,
+evidence manifest and the evidence captured for each signer. Artifacts created
+before this metadata was introduced retain their original hashes and expose the
+summary metadata only; they are not rewritten retroactively.
+
 ## Local Development
 
 Prerequisites: Python 3.13 or 3.14, Poetry, and a Docker-compatible

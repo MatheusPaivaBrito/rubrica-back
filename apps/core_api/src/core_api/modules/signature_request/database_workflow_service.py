@@ -17,7 +17,7 @@ from core_api.modules.document.document_entity import DocumentEntity, DocumentVe
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
-from core_api.modules.signature_request.signed_pdf import evidence_sha256, generate_signed_pdf
+from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
 from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
@@ -205,8 +205,15 @@ class DatabaseSignatureWorkflowService:
 
     def signing_context(self, token: str, auth_user_id: str, *, administrator: bool = False) -> SigningRead:
         with SessionLocal() as db:
-            if administrator:
-                request = self._request_from_token(db, token)
+            request = self._request_from_token(db, token)
+            authenticated_signer = db.scalar(
+                select(SignerEntity).where(
+                    SignerEntity.signature_request_id == request.id,
+                    SignerEntity.auth_user_id == auth_user_id.lower(),
+                )
+            )
+            administrative_view = administrator and authenticated_signer is None
+            if administrative_view:
                 signer = db.scalar(
                     select(SignerEntity)
                     .where(SignerEntity.signature_request_id == request.id)
@@ -219,8 +226,8 @@ class DatabaseSignatureWorkflowService:
                 signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             document = self._document(db, str(request.document_id))
             signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.signer_id == signer.id))
-            stamp = None if administrator else signature.evidence_json.get("stamp") if signature is not None else None
-            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, stamp=stamp, viewer_mode="administrator" if administrator else "signer")
+            stamp = None if administrative_view else signature.evidence_json.get("stamp") if signature is not None else None
+            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, stamp=stamp, viewer_mode="administrator" if administrative_view else "signer")
 
     def signing_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
@@ -270,7 +277,7 @@ class DatabaseSignatureWorkflowService:
                 artifact_id = str(uuid4())
                 manifest_hash = sha256("|".join(item["evidence_sha256"] for item in stamp_records).encode()).hexdigest()
                 signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{item["subject_hmac_sha256"][:16]}' for item in stamp_records)
-                artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat()})
+                artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat(), "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8")})
                 artifact_hash = sha256(artifact).hexdigest()
                 artifact_key, _ = self.storage.put(BytesIO(artifact), filename=f"rubrica-{request.id}-signed.pdf")
                 signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash)
