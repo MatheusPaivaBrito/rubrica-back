@@ -28,7 +28,7 @@ AUTH_PYTHONPATH = apps/auth_api/src:$(SHARED_PYTHONPATH)
 TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:packages/shared_kernel/src
 MIGRATION_ENV = env -u DEBUG -u DATABASE_URL -u CORE_DATABASE_URL -u AUTH_DATABASE_URL -u EVENTING_DATABASE_URL -u NOTIFICATION_DATABASE_URL -u OBSERVABILITY_DATABASE_URL -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_HOST_PORT -u POSTGRES_DB -u CORE_POSTGRES_DB -u AUTH_POSTGRES_DB -u EVENTING_POSTGRES_DB -u NOTIFICATION_POSTGRES_DB -u OBSERVABILITY_POSTGRES_DB
 
-.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint compose-up compose-down smoke smoke-all smoke-core-generator migrate-core revision-core migrate-auth revision-auth migrate-all seed-auth
+.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-all seed-auth
 
 help:
 	@echo "Rubrica"
@@ -53,6 +53,7 @@ help:
 	@echo "Runtime"
 	@echo "  make compose-up          Start Docker Compose"
 	@echo "  make compose-down        Stop Docker Compose"
+	@echo "  make bootstrap           Build containers, migrate databases and create the local admin"
 
 
 	@echo ""
@@ -63,7 +64,8 @@ help:
 	@echo "Database"
 	@echo "  Postgres host endpoint: localhost:$(POSTGRES_HOST_PORT)"
 	@echo "  make ensure-postgres     Start this project's isolated Postgres"
-	@echo "  make migrate-all         Run every selected database migration"
+	@echo "  make migrate             Run Core and Auth database migrations"
+	@echo "  make migrate-all         Alias for make migrate"
 	@echo "  make migrate-core           Run Core Alembic migrations"
 	@echo "  make revision-core msg=create_domain"
 	@echo "  make migrate-auth           Run Auth Alembic migrations"
@@ -133,8 +135,10 @@ revision-auth:
 	@test -n "$(msg)" || (echo "Usage: make revision-auth msg=create_users"; exit 2)
 	PYTHONPATH=$(AUTH_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/auth_api/alembic.ini revision --autogenerate -m "$(msg)"
 
-migrate-all: migrate-core migrate-auth
+migrate: migrate-core migrate-auth
 	@echo "[ok] Selected database migrations are current"
+
+migrate-all: migrate
 
 seed-auth: migrate-auth
 	PYTHONPATH=$(AUTH_PYTHONPATH) poetry run python toolbox/seeds/auth_admin.py
@@ -144,7 +148,10 @@ seed-auth: migrate-auth
 
 
 compose-up:
-	docker compose up -d
+	docker compose up -d --build
+
+bootstrap: compose-up migrate seed-auth
+	@echo "[ok] Rubrica is ready at http://localhost:8080"
 
 compose-down:
 	docker compose --profile "*" down --remove-orphans
