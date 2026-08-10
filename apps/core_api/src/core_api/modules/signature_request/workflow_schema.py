@@ -67,15 +67,23 @@ class SigningLinkRead(BaseModel):
     signing_url: str
 
 
+class StampPosition(BaseModel):
+    page: int = Field(ge=1)
+    x: float = Field(ge=0, le=1)
+    y: float = Field(ge=0, le=1)
+
+
 class SigningRead(BaseModel):
     request: SignatureRequestRead
     signer: SignerRead
     document_title: str
     original_filename: str
+    stamp: StampPosition | None = None
 
 
 class SignCommand(BaseModel):
     consent: bool
+    stamp: StampPosition
 
 
 class AuditEventRead(BaseModel):

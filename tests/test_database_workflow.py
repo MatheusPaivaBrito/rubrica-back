@@ -11,7 +11,7 @@ from core_api.modules.document.document_schema import DocumentCreate
 from core_api.modules.document.storage import LocalDocumentStorage
 from core_api.modules.signature_request.database_workflow_service import DatabaseSignatureWorkflowService
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
-from core_api.modules.signature_request.workflow_schema import RequestStatus, SignatureRequestCreate, SignerCreate
+from core_api.modules.signature_request.workflow_schema import RequestStatus, SignatureRequestCreate, SignerCreate, StampPosition
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -29,10 +29,13 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
         service.open_request(request.id, "operator")
         link = service.create_signing_link(request.id, "operator")
-        service.sign(link.signing_url.rsplit("/", maxsplit=1)[-1], "database@example.com", True)
+        token = link.signing_url.rsplit("/", maxsplit=1)[-1]
+        stamp = StampPosition(page=1, x=0.65, y=0.8)
+        service.sign(token, "database@example.com", True, stamp)
 
         assert service.get_request(request.id).status == RequestStatus.COMPLETED
         assert service.get_content(document.id)[1] == b"database workflow"
+        assert service.signing_context(token, "database@example.com").stamp == stamp
         assert "signature.completed" in [event.action for event in service.audit_events(request.id)]
     finally:
         if document_id is not None:

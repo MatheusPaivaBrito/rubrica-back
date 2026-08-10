@@ -10,6 +10,7 @@ from core_api.modules.signature_request.workflow_schema import (
     SignatureRequestCreate,
     SignerCreate,
     SignerStatus,
+    StampPosition,
 )
 from core_api.modules.signature_request.workflow_service import SignatureWorkflowService, WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
@@ -24,6 +25,9 @@ def invitation_token(signing_url: str) -> str:
     return signing_url.rsplit("/", maxsplit=1)[-1]
 
 
+STAMP = StampPosition(page=1, x=0.72, y=0.84)
+
+
 def test_full_signature_flow_is_tracked(service: SignatureWorkflowService) -> None:
     content = b"immutable agreement"
     document = service.create_document(
@@ -35,13 +39,14 @@ def test_full_signature_flow_is_tracked(service: SignatureWorkflowService) -> No
     opened = service.open_request(request.id, "operator-1")
     token = invitation_token(service.create_signing_link(request.id, "operator-1").signing_url)
     service.view(token, "ada@example.com")
-    signer = service.sign(token, "ada@example.com", True)
+    signer = service.sign(token, "ada@example.com", True, STAMP)
 
     assert opened.status == RequestStatus.OPEN
     assert signer.status == SignerStatus.SIGNED
     assert service.get_request(request.id).status == RequestStatus.COMPLETED
     assert service.get_request(request.id).signed_count == 1
     assert service.get_content(document.id)[1] == content
+    assert service.signing_context(token, "ada@example.com").stamp == STAMP
     assert [event.action for event in service.audit_events(request.id)] == [
         "signature_request.created", "signer.link_created", "signature_request.opened", "signature_request.link_created",
         "document.viewed", "signature.completed", "signature_request.completed",
@@ -56,10 +61,10 @@ def test_identity_and_duplicate_signature_are_rejected(service: SignatureWorkflo
     token = invitation_token(service.create_signing_link(request.id, "operator").signing_url)
 
     with pytest.raises(WorkflowError, match="does not match"):
-        service.sign(token, "intruder@example.com", True)
-    service.sign(token, "signer@example.com", True)
+        service.sign(token, "intruder@example.com", True, STAMP)
+    service.sign(token, "signer@example.com", True, STAMP)
     with pytest.raises(WorkflowError):
-        service.sign(token, "signer@example.com", True)
+        service.sign(token, "signer@example.com", True, STAMP)
 
 
 def test_new_version_is_blocked_after_request_is_open(service: SignatureWorkflowService) -> None:
@@ -92,4 +97,4 @@ def test_revoked_link_cannot_be_used(service: SignatureWorkflowService) -> None:
     service.revoke_signer_link(request.id, invitation.id, "operator")
 
     with pytest.raises(WorkflowError, match="revoked"):
-        service.sign(token, "signer@example.com", True)
+        service.sign(token, "signer@example.com", True, STAMP)

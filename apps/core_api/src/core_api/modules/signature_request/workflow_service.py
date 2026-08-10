@@ -27,6 +27,7 @@ from core_api.modules.signature_request.workflow_schema import (
     SignerStatus,
     SigningLinkRead,
     SigningRead,
+    StampPosition,
 )
 from shared_kernel.time.datetime_service import DateTimeService
 
@@ -59,6 +60,7 @@ class SignatureWorkflowService:
         self.request_signers: dict[str, list[str]] = {}
         self.request_token_index: dict[str, str] = {}
         self.signatures: set[tuple[str, str]] = set()
+        self.signature_evidence: dict[tuple[str, str], StampPosition] = {}
         self.audit: dict[str, list[AuditEventRead]] = {}
         self._lock = RLock()
 
@@ -219,12 +221,12 @@ class SignatureWorkflowService:
             return self._counts(updated)
 
     def signing_context(self, token: str, auth_user_id: str) -> SigningRead:
-        signer, request = self._resolve_request(token, auth_user_id)
+        signer, request = self._resolve_request(token, auth_user_id, allow_completed=True)
         document = self._document(request.document_id)
-        return SigningRead(request=self._counts(request), signer=signer, document_title=document.title, original_filename=document.original_filename)
+        return SigningRead(request=self._counts(request), signer=signer, document_title=document.title, original_filename=document.original_filename, stamp=self.signature_evidence.get((request.id, signer.id)))
 
     def signing_document(self, token: str, auth_user_id: str) -> tuple[DocumentVersionRead, bytes]:
-        _, request = self._resolve_request(token, auth_user_id)
+        _, request = self._resolve_request(token, auth_user_id, allow_completed=True)
         return self.get_content(request.document_id, request.document_version)
 
     def view(self, token: str, auth_user_id: str) -> SignerRead:
@@ -236,7 +238,7 @@ class SignatureWorkflowService:
                 self._audit(request.id, auth_user_id, "document.viewed", "signer", signer.id, {})
             return signer
 
-    def sign(self, token: str, auth_user_id: str, consent: bool) -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         with self._lock:
@@ -250,8 +252,9 @@ class SignatureWorkflowService:
             now = DateTimeService.utc_now()
             signer = signer.model_copy(update={"status": SignerStatus.SIGNED, "signed_at": now})
             self.signatures.add((request.id, signer.id))
+            self.signature_evidence[(request.id, signer.id)] = stamp
             self.signers[signer.id] = signer
-            self._audit(request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version})
+            self._audit(request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version, "stamp": stamp.model_dump()})
             if all(self.signers[sid].status == SignerStatus.SIGNED for sid in self.request_signers[request.id]):
                 self.requests[request.id] = request.model_copy(update={"status": RequestStatus.COMPLETED, "completed_at": now})
                 self._audit(request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {})
@@ -271,7 +274,7 @@ class SignatureWorkflowService:
         self._request(request_id)
         return list(self.audit[request_id])
 
-    def _resolve_request(self, token: str, auth_user_id: str) -> tuple[SignerRead, SignatureRequestRead]:
+    def _resolve_request(self, token: str, auth_user_id: str, *, allow_completed: bool = False) -> tuple[SignerRead, SignatureRequestRead]:
         request_id = self.request_token_index.get(sha256(token.encode()).hexdigest())
         if request_id is None:
             raise WorkflowError("Signing link is invalid", 404)
@@ -287,7 +290,7 @@ class SignatureWorkflowService:
             if signer.status not in {SignerStatus.SIGNED, SignerStatus.DECLINED}:
                 self.signers[signer.id] = signer.model_copy(update={"status": SignerStatus.EXPIRED})
             raise WorkflowError("Signature request has expired", 410)
-        if request.status != RequestStatus.OPEN:
+        if request.status != RequestStatus.OPEN and not (allow_completed and request.status == RequestStatus.COMPLETED and signer.status == SignerStatus.SIGNED):
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
 

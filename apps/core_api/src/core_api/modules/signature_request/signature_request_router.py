@@ -90,7 +90,7 @@ async def view_document(token: str, context: AuthContext = Depends(authenticated
 
 @router.post("/signing/links/{token}/sign", response_model=SignerRead, tags=["signing - command"])
 async def sign_document(token: str, payload: SignCommand, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.sign(token, context.subject, payload.consent)
+    return workflow_service.sign(token, context.subject, payload.consent, payload.stamp)
 
 
 @router.post("/signing/links/{token}/decline", response_model=SignerRead, tags=["signing - command"])

@@ -16,7 +16,7 @@ from core_api.modules.document.document_entity import DocumentEntity, DocumentVe
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, RequestStatus, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, RequestStatus, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
 
@@ -192,13 +192,15 @@ class DatabaseSignatureWorkflowService:
 
     def signing_context(self, token: str, auth_user_id: str) -> SigningRead:
         with SessionLocal() as db:
-            signer, request = self._resolve_request(db, token, auth_user_id)
+            signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             document = self._document(db, str(request.document_id))
-            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename)
+            signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.signer_id == signer.id))
+            stamp = signature.evidence_json.get("stamp") if signature is not None else None
+            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, stamp=stamp)
 
     def signing_document(self, token: str, auth_user_id: str) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
-            _, request = self._resolve_request(db, token, auth_user_id)
+            _, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
             if version is None:
                 raise WorkflowError("Document version not found", 404)
@@ -219,7 +221,7 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, token: str, auth_user_id: str, consent: bool) -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         with SessionLocal.begin() as db:
@@ -233,10 +235,11 @@ class DatabaseSignatureWorkflowService:
                 if sha256(stream.read()).hexdigest() != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
             now = DateTimeService.utc_now()
-            db.add(SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json={"consent": True, "document_version": request.document_version}))
+            evidence = {"consent": True, "document_version": request.document_version, "stamp": stamp.model_dump()}
+            db.add(SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence))
             signer.status = SignerStatus.SIGNED.value
             signer.signed_at = now
-            self._audit(db, request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version})
+            self._audit(db, request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version, "stamp": stamp.model_dump()})
             db.flush()
             pending = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
             if pending == 0:
@@ -261,7 +264,7 @@ class DatabaseSignatureWorkflowService:
             items = db.scalars(select(AuditEventEntity).where(AuditEventEntity.signature_request_id == request.id).order_by(AuditEventEntity.id)).all()
             return [AuditEventRead(id=str(x.id), occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
 
-    def _resolve_request(self, db, token: str, auth_user_id: str, lock: bool = False):
+    def _resolve_request(self, db, token: str, auth_user_id: str, lock: bool = False, *, allow_completed: bool = False):
         statement = select(SignatureRequestEntity).where(SignatureRequestEntity.signing_token_hash == sha256(token.encode()).hexdigest(), SignatureRequestEntity.deleted_at.is_(None))
         request = db.scalar(statement.with_for_update() if lock else statement)
         if request is None:
@@ -276,7 +279,7 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Signing access has been revoked", 410)
         if request.expires_at <= now:
             raise WorkflowError("Signature request has expired", 410)
-        if request.status != RequestStatus.OPEN.value:
+        if request.status != RequestStatus.OPEN.value and not (allow_completed and request.status == RequestStatus.COMPLETED.value and signer.status == SignerStatus.SIGNED.value):
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
 
