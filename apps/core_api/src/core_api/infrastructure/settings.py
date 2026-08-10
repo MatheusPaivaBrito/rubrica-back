@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str | None = Field(default=None, validation_alias="CORE_DATABASE_URL")
     AUTH_API_URL: str = "http://localhost:8101"
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
-    SIGNING_APP_URL: str = "http://localhost:3000/signing"
+    SIGNING_APP_URL: str = "http://localhost:8080/signing"
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

@@ -43,7 +43,7 @@ services:
           CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
           AUTH_API_URL: http://auth-api:8000
           DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
-          SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:3000/signing}
+          SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:8080/signing}
 
         ports:
           - "${CORE_API_PORT:-8100}:8000"
@@ -51,6 +51,17 @@ services:
           - ./data/documents:/var/lib/rubrica/documents
         depends_on:
           - postgres
+
+
+      web:
+        build:
+          context: ../rubrica-web
+          dockerfile: Dockerfile
+        ports:
+          - "${RUBRICA_WEB_PORT:-8080}:80"
+        depends_on:
+          - core-api
+          - auth-api
 
 
       auth-api:
