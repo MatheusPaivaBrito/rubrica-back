@@ -51,6 +51,10 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         historical_link = service.create_signing_link(request.id, "administrator")
         historical_token = historical_link.signing_url.rsplit("/", maxsplit=1)[-1]
         assert service.signing_signed_document(historical_token, "database@example.com")[2].startswith(b"%PDF")
+        administrator_view = service.signing_context(historical_token, "admin@example.local", administrator=True)
+        assert administrator_view.viewer_mode == "administrator"
+        assert administrator_view.request.status == RequestStatus.COMPLETED
+        assert service.signing_signed_document(historical_token, "admin@example.local", administrator=True)[2].startswith(b"%PDF")
         filename, artifact_hash, artifact = service.signed_document(request.id)
         assert filename.endswith("signed.pdf")
         assert artifact_hash

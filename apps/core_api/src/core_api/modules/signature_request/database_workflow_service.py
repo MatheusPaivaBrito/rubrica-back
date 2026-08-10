@@ -203,17 +203,28 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._request_read(db, request)
 
-    def signing_context(self, token: str, auth_user_id: str) -> SigningRead:
+    def signing_context(self, token: str, auth_user_id: str, *, administrator: bool = False) -> SigningRead:
         with SessionLocal() as db:
-            signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
+            if administrator:
+                request = self._request_from_token(db, token)
+                signer = db.scalar(
+                    select(SignerEntity)
+                    .where(SignerEntity.signature_request_id == request.id)
+                    .order_by(SignerEntity.signed_at.desc().nulls_last(), SignerEntity.id)
+                    .limit(1)
+                )
+                if signer is None:
+                    raise WorkflowError("Signature request has no signers", 409)
+            else:
+                signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             document = self._document(db, str(request.document_id))
             signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.signer_id == signer.id))
-            stamp = signature.evidence_json.get("stamp") if signature is not None else None
-            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, stamp=stamp)
+            stamp = None if administrator else signature.evidence_json.get("stamp") if signature is not None else None
+            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, stamp=stamp, viewer_mode="administrator" if administrator else "signer")
 
-    def signing_document(self, token: str, auth_user_id: str) -> tuple[DocumentVersionRead, bytes]:
+    def signing_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
-            _, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
+            request = self._request_from_token(db, token) if administrator else self._resolve_request(db, token, auth_user_id, allow_completed=True)[1]
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
             if version is None:
                 raise WorkflowError("Document version not found", 404)
@@ -292,11 +303,14 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Signed document integrity check failed", 409)
         return f"rubrica-request-{request_id}-signed.pdf", digest, content
 
-    def signing_signed_document(self, token: str, auth_user_id: str) -> tuple[str, str, bytes]:
+    def signing_signed_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[str, str, bytes]:
         with SessionLocal() as db:
-            signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
-            if signer.status != SignerStatus.SIGNED.value:
-                raise WorkflowError("Signer has not signed this document", 409)
+            if administrator:
+                request = self._request_from_token(db, token)
+            else:
+                signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
+                if signer.status != SignerStatus.SIGNED.value:
+                    raise WorkflowError("Signer has not signed this document", 409)
             request_id = str(request.id)
         return self.signed_document(request_id)
 
@@ -323,10 +337,7 @@ class DatabaseSignatureWorkflowService:
             return [AuditEventRead(id=str(x.id), occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
 
     def _resolve_request(self, db, token: str, auth_user_id: str, lock: bool = False, *, allow_completed: bool = False):
-        statement = select(SignatureRequestEntity).where(SignatureRequestEntity.signing_token_hash == sha256(token.encode()).hexdigest(), SignatureRequestEntity.deleted_at.is_(None))
-        request = db.scalar(statement.with_for_update() if lock else statement)
-        if request is None:
-            raise WorkflowError("Signing link is invalid", 404)
+        request = self._request_from_token(db, token, lock=lock)
         statement = select(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.auth_user_id == auth_user_id.lower())
         signer = db.scalar(statement.with_for_update() if lock else statement)
         if signer is None:
@@ -341,6 +352,17 @@ class DatabaseSignatureWorkflowService:
         if request.status != RequestStatus.OPEN.value and not signed_history:
             raise WorkflowError("Signature request is not open", 409)
         return signer, request
+
+    @staticmethod
+    def _request_from_token(db, token: str, lock: bool = False) -> SignatureRequestEntity:
+        statement = select(SignatureRequestEntity).where(
+            SignatureRequestEntity.signing_token_hash == sha256(token.encode()).hexdigest(),
+            SignatureRequestEntity.deleted_at.is_(None),
+        )
+        request = db.scalar(statement.with_for_update() if lock else statement)
+        if request is None:
+            raise WorkflowError("Signing link is invalid", 404)
+        return request
 
     @staticmethod
     def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str) -> dict[str, object]:

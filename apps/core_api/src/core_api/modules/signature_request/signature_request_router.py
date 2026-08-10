@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 async def administrator_context(context: AuthContext = Depends(authenticated_context)) -> AuthContext:
-    if "signature_admin" not in context.roles:
+    if "signature_admin" not in context.roles and "*" not in context.permission_keys:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required")
     return context
 
@@ -92,23 +92,23 @@ async def request_audit(request_id: str, _context: AuthContext = Depends(require
 
 @router.get("/signing/links/{token}", response_model=SigningRead, tags=["signing - query"])
 async def signing_context(token: str, context: AuthContext = Depends(authenticated_context)) -> SigningRead:
-    return workflow_service.signing_context(token, context.subject)
+    return workflow_service.signing_context(token, context.subject, administrator=_is_administrator(context))
 
 @router.get("/signing/links/{token}/document", tags=["signing - query"])
 async def signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
-    metadata, content = workflow_service.signing_document(token, context.subject)
+    metadata, content = workflow_service.signing_document(token, context.subject, administrator=_is_administrator(context))
     return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'inline; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/signing/links/{token}/download", tags=["signing - query"])
 async def download_signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
-    metadata, content = workflow_service.signing_document(token, context.subject)
+    metadata, content = workflow_service.signing_document(token, context.subject, administrator=_is_administrator(context))
     return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'attachment; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/signing/links/{token}/signed-document", tags=["signing - query"])
 async def signing_signed_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
-    filename, digest, content = workflow_service.signing_signed_document(token, context.subject)
+    filename, digest, content = workflow_service.signing_signed_document(token, context.subject, administrator=_is_administrator(context))
     return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"', "X-Signed-Document-SHA256": digest})
 
 
@@ -127,3 +127,7 @@ async def sign_document(token: str, payload: SignCommand, request: Request, cont
 @router.post("/signing/links/{token}/decline", response_model=SignerRead, tags=["signing - command"])
 async def decline_document(token: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
     return workflow_service.decline(token, context.subject)
+
+
+def _is_administrator(context: AuthContext) -> bool:
+    return "signature_admin" in context.roles or "*" in context.permission_keys

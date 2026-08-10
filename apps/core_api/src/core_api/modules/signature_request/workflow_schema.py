@@ -94,6 +94,7 @@ class SigningRead(BaseModel):
     document_title: str
     original_filename: str
     stamp: StampPosition | None = None
+    viewer_mode: str = Field(default="signer", pattern=r"^(signer|administrator)$")
 
 
 class SignCommand(BaseModel):
