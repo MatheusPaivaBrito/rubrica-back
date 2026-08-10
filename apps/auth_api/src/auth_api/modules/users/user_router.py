@@ -39,7 +39,12 @@ async def list_signers(session: SessionRead = Depends(require_authenticated_sess
         rows = database.scalars(
             select(UserEntity)
             .join(UserRoleEntity, UserRoleEntity.user_id == UserEntity.id)
-            .where(UserEntity.is_active.is_(True), UserEntity.deleted_at.is_(None), UserRoleEntity.role == "signature_signer")
+            .where(
+                UserEntity.is_active.is_(True),
+                UserEntity.deleted_at.is_(None),
+                UserRoleEntity.role.in_(["signature_signer", "signature_admin"]),
+            )
+            .distinct()
             .order_by(UserEntity.name, UserEntity.email)
         ).all()
         return [UserRead(id=str(item.id), name=item.name or item.email, email=item.email, role="signature_signer", is_active=item.is_active) for item in rows]
