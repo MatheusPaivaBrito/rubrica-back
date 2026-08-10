@@ -13,7 +13,7 @@ for database in $(echo "${POSTGRES_MULTIPLE_DATABASES}" | tr ',' ' '); do
     continue
   fi
 
-  if ! psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname postgres --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname = '${database}'" | grep -qx 1; then
-    psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname postgres --command "CREATE DATABASE \"${database}\""
+  if ! psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" --tuples-only --no-align --command "SELECT 1 FROM pg_database WHERE datname = '${database}'" | grep -qx 1; then
+    psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname "${POSTGRES_DB}" --command "CREATE DATABASE \"${database}\""
   fi
 done

@@ -5,14 +5,14 @@ services:
         environment:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
           POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
-          POSTGRES_DB: ${POSTGRES_DB:-postgres}
+          POSTGRES_DB: ${POSTGRES_DB:-rubrica}
           POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth}
         ports:
           - "${POSTGRES_HOST_PORT:-5435}:5432"
         volumes:
           - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
         healthcheck:
-          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rubrica} -d ${POSTGRES_DB:-postgres}"]
+          test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rubrica} -d ${POSTGRES_DB:-rubrica}"]
           interval: 2s
           timeout: 3s
           retries: 30
