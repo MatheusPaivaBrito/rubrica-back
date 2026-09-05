@@ -7,13 +7,13 @@ from shared_kernel.http import CorsConfig, parse_cors_origins
 
 
 class ObservabilitySettings(BaseSettings):
-    APP_NAME: str = "GeneratedProject"
+    APP_NAME: str = "Rubrica Observability API"
     ENVIRONMENT: str = "development"
     SERVICE_NAME: str = "observability_api"
     OBSERVABILITY_PERSISTENCE_MODE: Literal["none", "incidents"] = "none"
     OBSERVABILITY_DATABASE_URL: str | None = None
-    POSTGRES_USER: str = "atlas"
-    POSTGRES_PASSWORD: str = "atlas"
+    POSTGRES_USER: str = "rubrica"
+    POSTGRES_PASSWORD: str = "rubrica"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     OBSERVABILITY_POSTGRES_DB: str = "rubrica_observability"

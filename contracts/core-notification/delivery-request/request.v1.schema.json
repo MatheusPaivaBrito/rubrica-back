@@ -10,11 +10,7 @@
   ],
   "properties": {
     "channel": {
-      "enum": [
-        "email",
-        "slack",
-        "whatsapp"
-      ]
+      "const": "email"
     },
     "recipient": {
       "type": "string"

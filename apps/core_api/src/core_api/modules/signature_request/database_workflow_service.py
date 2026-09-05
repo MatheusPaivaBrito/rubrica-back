@@ -8,7 +8,7 @@ from pathlib import Path
 from secrets import token_urlsafe
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from core_api.infrastructure.database.connection import SessionLocal
@@ -20,6 +20,8 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
 from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
+from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
+from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -34,7 +36,15 @@ class DatabaseSignatureWorkflowService:
         key, size = self.storage.put(BytesIO(content), filename=payload.original_filename)
         try:
             with SessionLocal.begin() as db:
-                item = DocumentEntity(**payload.model_dump(), storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
+                tenant = db.scalar(select(TenantEntity).where(or_(TenantEntity.slug == payload.organization_id.lower(), func.lower(TenantEntity.name) == payload.organization_id.lower()), TenantEntity.deleted_at.is_(None)))
+                if tenant is None:
+                    tenant = TenantEntity(name=payload.organization_id, slug=payload.organization_id.lower(), status="active")
+                    db.add(tenant)
+                    db.flush()
+                    db.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id=payload.created_by.lower(), role="admin"))
+                else:
+                    tenant_service.require_role(db, tenant.id, payload.created_by, {"admin", "member"})
+                item = DocumentEntity(**payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
                 db.add(item)
                 db.flush()
                 db.add(DocumentVersionEntity(document_id=item.id, version=1, original_filename=item.original_filename, content_type=item.content_type, storage_key=key, sha256=digest, size_bytes=size, created_by=item.created_by))
@@ -53,6 +63,7 @@ class DatabaseSignatureWorkflowService:
         try:
             with SessionLocal.begin() as db:
                 item = self._document(db, document_id, lock=True)
+                tenant_service.require_role(db, item.tenant_id, actor_id, {"admin", "member"})
                 frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
                 if frozen is not None:
                     raise WorkflowError("A frozen document cannot receive a new version", 409)
@@ -73,26 +84,32 @@ class DatabaseSignatureWorkflowService:
                 self.storage.delete(key)
             raise
 
-    def list_documents(self) -> list[DocumentRead]:
+    def list_documents(self, actor_id: str) -> list[DocumentRead]:
         with SessionLocal() as db:
-            return [self._document_read(item) for item in db.scalars(select(DocumentEntity).where(DocumentEntity.deleted_at.is_(None)).order_by(DocumentEntity.id)).all()]
+            statement = select(DocumentEntity).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(DocumentEntity.id)
+            return [self._document_read(item) for item in db.scalars(statement).all()]
 
-    def get_document(self, document_id: str) -> DocumentRead:
+    def get_document(self, document_id: str, actor_id: str) -> DocumentRead:
         with SessionLocal() as db:
-            return self._document_read(self._document(db, document_id))
+            item = self._document(db, document_id)
+            tenant_service.require_role(db, item.tenant_id, actor_id)
+            return self._document_read(item)
 
     def delete_document(self, document_id: str, actor_id: str) -> None:
         with SessionLocal.begin() as db:
             item = self._document(db, document_id, lock=True)
+            tenant_service.require_role(db, item.tenant_id, actor_id, {"admin"})
             frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.DRAFT.value, RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
             if frozen is not None:
                 raise WorkflowError("A document linked to an active signature request cannot be deleted", 409)
             item.deleted_at = DateTimeService.utc_now()
             self._audit(db, None, actor_id, "document.deleted", "document", item.id, {})
 
-    def get_content(self, document_id: str, version: int | None = None) -> tuple[DocumentVersionRead, bytes]:
+    def get_content(self, document_id: str, version: int | None = None, actor_id: str | None = None) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
             document = self._document(db, document_id)
+            if actor_id is not None:
+                tenant_service.require_role(db, document.tenant_id, actor_id)
             item = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == document.id, DocumentVersionEntity.version == (version or document.version)))
             if item is None:
                 raise WorkflowError("Document version not found", 404)
@@ -110,24 +127,29 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Expiration must be in the future")
         with SessionLocal.begin() as db:
             document = self._document(db, payload.document_id)
+            tenant_service.require_role(db, document.tenant_id, payload.created_by, {"admin", "member"})
             item = SignatureRequestEntity(document_id=document.id, document_version=document.version, document_sha256=document.sha256, status=RequestStatus.DRAFT.value, expires_at=payload.expires_at, created_by=payload.created_by)
             db.add(item)
             db.flush()
             self._audit(db, item.id, payload.created_by, "signature_request.created", "signature_request", item.id, {"document_version": document.version, "document_sha256": document.sha256})
             return self._request_read(db, item)
 
-    def list_requests(self) -> list[SignatureRequestRead]:
+    def list_requests(self, actor_id: str) -> list[SignatureRequestRead]:
         with SessionLocal() as db:
-            return [self._request_read(db, item) for item in db.scalars(select(SignatureRequestEntity).where(SignatureRequestEntity.deleted_at.is_(None)).order_by(SignatureRequestEntity.id)).all()]
+            statement = select(SignatureRequestEntity).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(SignatureRequestEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(SignatureRequestEntity.id)
+            return [self._request_read(db, item) for item in db.scalars(statement).all()]
 
-    def get_request(self, request_id: str) -> SignatureRequestRead:
+    def get_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
         with SessionLocal() as db:
-            return self._request_read(db, self._request(db, request_id))
+            request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
+            return self._request_read(db, request)
 
     def add_signer(self, request_id: str, payload: SignerCreate, actor_id: str) -> SignerRead:
         token = token_urlsafe(32)
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Signers can only be added to a draft request", 409)
             email = payload.email.lower()
@@ -143,6 +165,7 @@ class DatabaseSignatureWorkflowService:
     def create_signing_link(self, request_id: str, actor_id: str) -> SigningLinkRead:
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
             if request.status not in {RequestStatus.OPEN.value, RequestStatus.COMPLETED.value}:
                 raise WorkflowError("Only an open or completed request can receive a signing link", 409)
             request.signing_token_nonce = token_urlsafe(24)
@@ -151,9 +174,10 @@ class DatabaseSignatureWorkflowService:
             self._audit(db, request.id, actor_id, "signature_request.link_created", "signature_request", request.id, {})
             return SigningLinkRead(signing_url=self._signing_url(token))
 
-    def get_signing_link(self, request_id: str) -> SigningLinkRead:
+    def get_signing_link(self, request_id: str, actor_id: str) -> SigningLinkRead:
         with SessionLocal() as db:
             request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
             if not request.signing_token_nonce:
                 raise WorkflowError("Signing link must be generated again", 404)
             token = self._request_token(request.id, request.signing_token_nonce)
@@ -161,14 +185,16 @@ class DatabaseSignatureWorkflowService:
                 raise WorkflowError("Signing link integrity check failed", 409)
             return SigningLinkRead(signing_url=self._signing_url(token))
 
-    def list_signers(self, request_id: str) -> list[SignerRead]:
+    def list_signers(self, request_id: str, actor_id: str) -> list[SignerRead]:
         with SessionLocal() as db:
             request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
             return [self._signer_read(item) for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id).order_by(SignerEntity.id)).all()]
 
     def revoke_signer_link(self, request_id: str, signer_id: str, actor_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
             signer = self._signer(db, signer_id, request.id, lock=True)
             if signer.status == SignerStatus.SIGNED.value:
                 raise WorkflowError("A completed signature link cannot be revoked", 409)
@@ -181,6 +207,7 @@ class DatabaseSignatureWorkflowService:
     def open_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Only a draft request can be opened", 409)
             if not db.scalar(select(SignerEntity.id).where(SignerEntity.signature_request_id == request.id).limit(1)):
@@ -196,6 +223,7 @@ class DatabaseSignatureWorkflowService:
     def cancel_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
             if request.status not in {RequestStatus.DRAFT.value, RequestStatus.OPEN.value}:
                 raise WorkflowError("Request cannot be cancelled", 409)
             request.status = RequestStatus.CANCELLED.value
@@ -297,9 +325,11 @@ class DatabaseSignatureWorkflowService:
                 self.storage.delete(artifact_key)
             raise
 
-    def signed_document(self, request_id: str) -> tuple[str, str, bytes]:
+    def signed_document(self, request_id: str, actor_id: str | None = None) -> tuple[str, str, bytes]:
         with SessionLocal() as db:
             request = self._request(db, request_id)
+            if actor_id is not None:
+                self._require_request_access(db, request, actor_id)
             signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.artifact_storage_key.is_not(None)).order_by(SignatureEntity.id.desc()).limit(1))
             if signature is None or not signature.artifact_storage_key or not signature.artifact_sha256:
                 raise WorkflowError("Signed document is not available", 404)
@@ -319,9 +349,10 @@ class DatabaseSignatureWorkflowService:
             request_id = str(request.id)
         return self.signed_document(request_id)
 
-    def signature_evidence(self, request_id: str) -> list[SignatureEvidenceRead]:
+    def signature_evidence(self, request_id: str, actor_id: str) -> list[SignatureEvidenceRead]:
         with SessionLocal() as db:
             request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
             rows = db.execute(select(SignatureEntity, SignerEntity).join(SignerEntity, SignerEntity.id == SignatureEntity.signer_id).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all()
             return [SignatureEvidenceRead(signature_id=str(signature.id), signer_id=str(signer.id), request_id=str(request.id), document_id=str(request.document_id), document_version=request.document_version, signed_at=signature.signed_at, signer_name=signer.name, signer_email=signer.email, subject_hmac_sha256=str(signature.evidence_json.get("subject_hmac_sha256", "")), original_sha256=signature.document_sha256, evidence_sha256=signature.evidence_sha256 or evidence_sha256(signature.evidence_json), artifact_sha256=signature.artifact_sha256 or "", evidence=signature.evidence_json) for signature, signer in rows]
 
@@ -335,9 +366,10 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def audit_events(self, request_id: str) -> list[AuditEventRead]:
+    def audit_events(self, request_id: str, actor_id: str) -> list[AuditEventRead]:
         with SessionLocal() as db:
             request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
             items = db.scalars(select(AuditEventEntity).where(AuditEventEntity.signature_request_id == request.id).order_by(AuditEventEntity.id)).all()
             return [AuditEventRead(id=str(x.id), occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
 
@@ -433,6 +465,13 @@ class DatabaseSignatureWorkflowService:
         if item is None:
             raise WorkflowError("Signature request not found", 404)
         return item
+
+    @staticmethod
+    def _require_request_access(db, request: SignatureRequestEntity, actor_id: str) -> None:
+        document = db.get(DocumentEntity, request.document_id)
+        if document is None:
+            raise WorkflowError("Document not found", 404)
+        tenant_service.require_role(db, document.tenant_id, actor_id)
 
     def _request_read(self, db, item: SignatureRequestEntity) -> SignatureRequestRead:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0

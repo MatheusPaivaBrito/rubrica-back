@@ -6,8 +6,8 @@ class Settings(BaseSettings):
     APP_NAME: str = "Eventing API"
     ENVIRONMENT: str = "development"
     SERVICE_NAME: str = Field(default="eventing_api", validation_alias=AliasChoices("EVENTING_SERVICE_NAME", "SERVICE_NAME"))
-    POSTGRES_USER: str = "atlas"
-    POSTGRES_PASSWORD: str = "atlas"
+    POSTGRES_USER: str = "rubrica"
+    POSTGRES_PASSWORD: str = "rubrica"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     EVENTING_POSTGRES_DB: str = "rubrica_eventing"
@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     KAFKA_HOST: str = "localhost"
     KAFKA_PORT: int = 9092
     KAFKA_BOOTSTRAP_SERVERS: str | None = None
-    EVENTING_DEFAULT_EVENT_TOPIC: str = "atlas.events"
-    EVENTING_DEAD_LETTER_TOPIC: str = "atlas.events.dead_letter"
+    EVENTING_DEFAULT_EVENT_TOPIC: str = "rubrica.events"
+    EVENTING_DEAD_LETTER_TOPIC: str = "rubrica.events.dead_letter"
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

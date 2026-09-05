@@ -5,6 +5,9 @@ export
 CORE_API_PORT ?= 8100
 CORE_WEB_CONCURRENCY ?= 2
 AUTH_API_PORT ?= 8101
+EVENTING_API_PORT ?= 8102
+NOTIFICATION_API_PORT ?= 8103
+OBSERVABILITY_API_PORT ?= 8104
 AUTH_WEB_CONCURRENCY ?= 2
 GATEWAY_HOST_PORT ?= 8180
 GATEWAY_PORT ?= $(GATEWAY_HOST_PORT)
@@ -25,10 +28,13 @@ K8S_NAMESPACE ?= rubrica
 SHARED_PYTHONPATH = packages/shared_kernel/src
 CORE_PYTHONPATH = apps/core_api/src:$(SHARED_PYTHONPATH)
 AUTH_PYTHONPATH = apps/auth_api/src:$(SHARED_PYTHONPATH)
-TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:packages/shared_kernel/src
+EVENTING_PYTHONPATH = apps/eventing_api/src:$(SHARED_PYTHONPATH)
+NOTIFICATION_PYTHONPATH = apps/notification_api/src:$(SHARED_PYTHONPATH)
+OBSERVABILITY_PYTHONPATH = apps/observability_api/src:$(SHARED_PYTHONPATH)
+TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/observability_api/src:apps/worker/src:packages/shared_kernel/src
 MIGRATION_ENV = env -u DEBUG -u DATABASE_URL -u CORE_DATABASE_URL -u AUTH_DATABASE_URL -u EVENTING_DATABASE_URL -u NOTIFICATION_DATABASE_URL -u OBSERVABILITY_DATABASE_URL -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_HOST_PORT -u POSTGRES_DB -u CORE_POSTGRES_DB -u AUTH_POSTGRES_DB -u EVENTING_POSTGRES_DB -u NOTIFICATION_POSTGRES_DB -u OBSERVABILITY_POSTGRES_DB
 
-.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-all seed-auth
+.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth
 
 help:
 	@echo "Rubrica"
@@ -131,11 +137,20 @@ revision-core:
 migrate-auth: ensure-postgres
 	PYTHONPATH=$(AUTH_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/auth_api/alembic.ini upgrade head
 
+migrate-eventing: ensure-postgres
+	PYTHONPATH=$(EVENTING_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/eventing_api/alembic.ini upgrade head
+
+migrate-notification: ensure-postgres
+	PYTHONPATH=$(NOTIFICATION_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/notification_api/alembic.ini upgrade head
+
+migrate-observability: ensure-postgres
+	PYTHONPATH=$(OBSERVABILITY_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/observability_api/alembic.ini upgrade head
+
 revision-auth:
 	@test -n "$(msg)" || (echo "Usage: make revision-auth msg=create_users"; exit 2)
 	PYTHONPATH=$(AUTH_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/auth_api/alembic.ini revision --autogenerate -m "$(msg)"
 
-migrate: migrate-core migrate-auth
+migrate: migrate-core migrate-auth migrate-eventing migrate-notification migrate-observability
 	@echo "[ok] Selected database migrations are current"
 
 migrate-all: migrate

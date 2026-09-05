@@ -6,7 +6,7 @@ services:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
           POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
           POSTGRES_DB: ${POSTGRES_DB:-rubrica}
-          POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth}
+          POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification},${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
         ports:
           - "${POSTGRES_HOST_PORT:-5435}:5432"
         volumes:
@@ -85,3 +85,59 @@ services:
         depends_on:
           - postgres
           - redis
+
+      eventing-api:
+        build:
+          context: .
+          dockerfile: apps/eventing_api/dockerfile
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: "5432"
+          EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
+          EVENTING_DEFAULT_EVENT_TOPIC: ${EVENTING_DEFAULT_EVENT_TOPIC:-rubrica.events}
+          EVENTING_DEAD_LETTER_TOPIC: ${EVENTING_DEAD_LETTER_TOPIC:-rubrica.events.dead_letter}
+        ports:
+          - "${EVENTING_API_PORT:-8102}:8000"
+        depends_on:
+          postgres:
+            condition: service_healthy
+
+      notification-api:
+        build:
+          context: .
+          dockerfile: apps/notification_api/dockerfile
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: "5432"
+          NOTIFICATION_POSTGRES_DB: ${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
+          NOTIFICATION_PERSISTENCE_MODE: ${NOTIFICATION_PERSISTENCE_MODE:-durable}
+          NOTIFICATION_EMAIL_PROVIDER: ${NOTIFICATION_EMAIL_PROVIDER:-local_ack}
+          NOTIFICATION_DEFAULT_FROM_EMAIL: ${NOTIFICATION_DEFAULT_FROM_EMAIL:-no-reply@rubrica.local}
+          SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+        ports:
+          - "${NOTIFICATION_API_PORT:-8103}:8000"
+        depends_on:
+          postgres:
+            condition: service_healthy
+
+      observability-api:
+        build:
+          context: .
+          dockerfile: apps/observability_api/dockerfile
+        environment:
+          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+          POSTGRES_HOST: postgres
+          POSTGRES_PORT: "5432"
+          OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
+          OBSERVABILITY_PERSISTENCE_MODE: ${OBSERVABILITY_PERSISTENCE_MODE:-incidents}
+          SENTRY_DSN: ${SENTRY_DSN:-}
+        ports:
+          - "${OBSERVABILITY_API_PORT:-8104}:8000"
+        depends_on:
+          postgres:
+            condition: service_healthy

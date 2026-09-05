@@ -27,8 +27,4 @@ def accept_delivery(*, channel: str, recipient: str, payload: dict) -> dict[str,
 def _provider_for(channel: str) -> str:
     if channel == "email" and settings.SENDGRID_API_KEY:
         return "sendgrid"
-    if channel == "slack" and settings.SLACK_WEBHOOK_URL:
-        return "slack_webhook"
-    if channel == "whatsapp" and settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
-        return "twilio"
     return "local_ack"

@@ -14,6 +14,7 @@ from core_api.modules.document.storage import LocalDocumentStorage
 from core_api.modules.signature_request.database_workflow_service import DatabaseSignatureWorkflowService
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.workflow_schema import RequestStatus, SignatureRequestCreate, SignerCreate, StampPosition
+from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -40,19 +41,19 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         token = link.signing_url.rsplit("/", maxsplit=1)[-1]
         stamp = StampPosition(page=1, x=0.65, y=0.8)
         service.sign(token, "database@example.com", True, stamp)
-        assert service.get_request(request.id).status == RequestStatus.OPEN
+        assert service.get_request(request.id, "operator").status == RequestStatus.OPEN
         assert service.signing_signed_document(token, "second@example.com")[2].startswith(b"%PDF")
         service.sign(token, "second@example.com", True, StampPosition(page=1, x=0.35, y=0.7))
 
-        assert service.get_request(request.id).status == RequestStatus.COMPLETED
+        assert service.get_request(request.id, "operator").status == RequestStatus.COMPLETED
         assert service.get_content(document.id)[1] == original
         with SessionLocal.begin() as db:
             persisted_request = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.id == int(request.id)))
             persisted_request.expires_at = DateTimeService.utc_now() - timedelta(days=730)
         assert service.signing_context(token, "database@example.com").stamp == stamp
         assert service.signing_signed_document(token, "database@example.com")[2].startswith(b"%PDF")
-        assert service.get_signing_link(request.id).signing_url == link.signing_url
-        historical_link = service.create_signing_link(request.id, "administrator")
+        assert service.get_signing_link(request.id, "operator").signing_url == link.signing_url
+        historical_link = service.create_signing_link(request.id, "operator")
         historical_token = historical_link.signing_url.rsplit("/", maxsplit=1)[-1]
         assert service.signing_signed_document(historical_token, "database@example.com")[2].startswith(b"%PDF")
         administrator_view = service.signing_context(historical_token, "admin@example.local", administrator=True)
@@ -67,11 +68,11 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         assert artifact.startswith(b"%PDF")
         artifact_metadata = PdfReader(BytesIO(artifact)).metadata
         assert artifact_metadata.get("/RubricaEvidenceJSON")
-        evidence = service.signature_evidence(request.id)
+        evidence = service.signature_evidence(request.id, "operator")
         assert len(evidence) == 2
         assert evidence[0].evidence_sha256
         assert evidence[0].subject_hmac_sha256 != "database@example.com"
-        assert "signature.completed" in [event.action for event in service.audit_events(request.id)]
+        assert "signature.completed" in [event.action for event in service.audit_events(request.id, "operator")]
     finally:
         if document_id is not None:
             with SessionLocal.begin() as db:
@@ -86,4 +87,8 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
                     db.execute(delete(SignatureRequestEntity).where(SignatureRequestEntity.id.in_(request_ids)))
                 db.execute(delete(AuditEventEntity).where(AuditEventEntity.entity_type == "document", AuditEventEntity.entity_id == str(document_id)))
                 db.execute(delete(DocumentVersionEntity).where(DocumentVersionEntity.document_id == document_id))
+                tenant_id = db.scalar(select(DocumentEntity.tenant_id).where(DocumentEntity.id == document_id))
                 db.execute(delete(DocumentEntity).where(DocumentEntity.id == document_id))
+                if tenant_id is not None:
+                    db.execute(delete(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id))
+                    db.execute(delete(TenantEntity).where(TenantEntity.id == tenant_id))

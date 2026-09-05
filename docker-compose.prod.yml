@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-rubrica}
-      POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth}
+      POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification},${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
@@ -80,6 +80,62 @@ services:
       auth-api: { condition: service_started }
     networks: [rubrica_internal]
 
+  eventing-api:
+    build:
+      context: .
+      dockerfile: apps/eventing_api/dockerfile
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
+      EVENTING_DEFAULT_EVENT_TOPIC: rubrica.events
+      EVENTING_DEAD_LETTER_TOPIC: rubrica.events.dead_letter
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [rubrica_internal]
+
+  notification-api:
+    build:
+      context: .
+      dockerfile: apps/notification_api/dockerfile
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      NOTIFICATION_POSTGRES_DB: ${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
+      NOTIFICATION_PERSISTENCE_MODE: durable
+      NOTIFICATION_EMAIL_PROVIDER: ${NOTIFICATION_EMAIL_PROVIDER:-local_ack}
+      NOTIFICATION_DEFAULT_FROM_EMAIL: ${NOTIFICATION_DEFAULT_FROM_EMAIL:?NOTIFICATION_DEFAULT_FROM_EMAIL is required}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [rubrica_internal]
+
+  observability-api:
+    build:
+      context: .
+      dockerfile: apps/observability_api/dockerfile
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
+      OBSERVABILITY_PERSISTENCE_MODE: incidents
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [rubrica_internal]
+
   certbot-init:
     image: certbot/dns-cloudflare:v5.7.0
     restart: "no"
@@ -119,6 +175,9 @@ services:
     depends_on:
       auth-api: { condition: service_started }
       core-api: { condition: service_started }
+      eventing-api: { condition: service_started }
+      notification-api: { condition: service_started }
+      observability-api: { condition: service_started }
       certbot-init: { condition: service_completed_successfully }
     networks: [rubrica_internal]
 

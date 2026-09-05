@@ -10,20 +10,14 @@ class Settings(BaseSettings):
 
     NOTIFICATION_PERSISTENCE_MODE: Literal["stateless", "durable"] = "stateless"
     NOTIFICATION_DATABASE_URL: str | None = None
-    POSTGRES_USER: str = "atlas"
-    POSTGRES_PASSWORD: str = "atlas"
+    POSTGRES_USER: str = "rubrica"
+    POSTGRES_PASSWORD: str = "rubrica"
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     NOTIFICATION_POSTGRES_DB: str = "rubrica_notification"
     NOTIFICATION_EMAIL_PROVIDER: str = "local_ack"
-    NOTIFICATION_DEFAULT_FROM_EMAIL: str = "no-reply@example.local"
+    NOTIFICATION_DEFAULT_FROM_EMAIL: str = "no-reply@rubrica.local"
     SENDGRID_API_KEY: str | None = None
-
-    SLACK_WEBHOOK_URL: str | None = None
-
-    TWILIO_ACCOUNT_SID: str | None = None
-    TWILIO_AUTH_TOKEN: str | None = None
-    TWILIO_WHATSAPP_FROM: str = "whatsapp:+14155238886"
 
     NOTIFICATION_REDIS_ENABLED: bool = False
     NOTIFICATION_REDIS_URL: str = "redis://localhost:6379/0"
@@ -31,9 +25,6 @@ class Settings(BaseSettings):
     NOTIFICATION_DELIVERY_DEFAULT_POLICY: str = "reliable"
     NOTIFICATION_DELIVERY_RETENTION_SECONDS: int = 604800
 
-    NOTIFICATION_KAFKA_ENABLED: bool = False
-    NOTIFICATION_KAFKA_BOOTSTRAP_SERVERS: str = "localhost:9092"
-    NOTIFICATION_WHATSAPP_TOPIC: str = "notification.whatsapp.message.requested"
 
     @property
     def PERSISTENCE_ENABLED(self) -> bool:
@@ -54,16 +45,6 @@ class Settings(BaseSettings):
                 "enabled": True,
                 "provider": self.NOTIFICATION_EMAIL_PROVIDER,
                 "sendgrid_configured": bool(self.SENDGRID_API_KEY),
-            },
-            "slack": {
-                "enabled": True,
-                "provider": "slack_webhook" if self.SLACK_WEBHOOK_URL else "local_ack",
-            },
-            "whatsapp": {
-                "enabled": True,
-                "provider": "twilio" if self.TWILIO_ACCOUNT_SID and self.TWILIO_AUTH_TOKEN else "local_ack",
-                "kafka_enabled": self.NOTIFICATION_KAFKA_ENABLED,
-                "topic": self.NOTIFICATION_WHATSAPP_TOPIC,
             },
             "delivery_attempts": {
                 "store": "redis" if self.NOTIFICATION_REDIS_ENABLED else "memory",
