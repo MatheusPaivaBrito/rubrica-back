@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-api
+  namespace: rubrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-api
+  template:
+    metadata:
+      labels:
+        app: notification-api
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: notification-api
+          image: rubrica-notification-api:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: rubrica-config
+          env:
+            - name: NOTIFICATION_EMAIL_PROVIDER
+              value: "local_ack"
+            - name: NOTIFICATION_DEFAULT_FROM_EMAIL
+              value: "no-reply@rubrica.local"
+            - name: NOTIFICATION_REDIS_ENABLED
+              value: "true"
+            - name: NOTIFICATION_REDIS_URL
+              value: "redis://redis:6379/0"
+            - name: NOTIFICATION_REDIS_KEY_PREFIX
+              value: "notification"
+            - name: NOTIFICATION_KAFKA_ENABLED
+              value: "true"
+            - name: NOTIFICATION_KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka:9092"
+            - name: NOTIFICATION_WHATSAPP_TOPIC
+              value: "notification.whatsapp.message.requested"
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-api
+  namespace: rubrica
+spec:
+  selector:
+    app: notification-api
+  ports:
+    - port: 8000
+      targetPort: 8000

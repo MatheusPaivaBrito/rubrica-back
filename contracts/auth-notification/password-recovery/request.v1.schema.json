@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Password Recovery Notification Request",
+  "type": "object",
+  "required": [
+    "email",
+    "recovery_url"
+  ],
+  "properties": {
+    "email": {
+      "type": "string"
+    },
+    "recovery_url": {
+      "type": "string"
+    },
+    "expires_in_minutes": {
+      "type": "integer",
+      "minimum": 1
+    }
+  },
+  "additionalProperties": false
+}

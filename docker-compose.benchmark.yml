@@ -1,0 +1,10 @@
+services:
+  k6:
+    image: grafana/k6:2.0.0
+    profiles: ["benchmark"]
+    working_dir: /scripts
+    volumes:
+      - ./performance/k6:/scripts:ro
+      - ./.artifacts/benchmarks:/artifacts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

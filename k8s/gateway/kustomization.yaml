@@ -1,0 +1,13 @@
+namespace: rubrica
+
+resources:
+  - gateway.yaml
+
+configMapGenerator:
+  - name: rubrica-gateway-config
+    files:
+      - nginx.conf
+      - proxy_params
+
+generatorOptions:
+  disableNameSuffixHash: true

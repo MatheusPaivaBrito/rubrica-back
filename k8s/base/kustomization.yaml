@@ -1,0 +1,13 @@
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - postgres.yaml
+  - redis.yaml
+  - core-api.yaml
+  - auth-api.yaml
+  - kafka.yaml
+  - eventing-api.yaml
+  - notification-api.yaml
+  - loki.yaml
+  - grafana.yaml
+  - observability-api.yaml

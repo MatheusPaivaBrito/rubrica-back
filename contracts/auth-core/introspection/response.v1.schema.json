@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auth Introspection Response",
+  "type": "object",
+  "required": [
+    "active",
+    "session_id",
+    "subject"
+  ],
+  "properties": {
+    "active": {
+      "const": true
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}

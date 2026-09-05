@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Core Eventing Outbox Command Request",
+  "type": "object",
+  "required": [
+    "event_type",
+    "source",
+    "version",
+    "payload"
+  ],
+  "properties": {
+    "event_type": {
+      "type": "string"
+    },
+    "source": {
+      "const": "core_api"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "payload": {
+      "type": "object"
+    },
+    "actor": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

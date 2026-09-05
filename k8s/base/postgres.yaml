@@ -1,0 +1,67 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init
+  namespace: rubrica
+data:
+  init-multiple-databases.sh: |
+    #!/bin/sh
+    set -eu
+    for database in $(echo "$POSTGRES_MULTIPLE_DATABASES" | tr ',' ' '); do
+      exists=$(psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname='$database'")
+      if [ "$exists" != "1" ]; then
+        psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" -c "CREATE DATABASE "$database""
+      fi
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: rubrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_USER
+              value: "rubrica"
+            - name: POSTGRES_PASSWORD
+              value: "rubrica"
+            - name: POSTGRES_DB
+              value: "rubrica"
+            - name: POSTGRES_MULTIPLE_DATABASES
+              value: "rubrica_core,rubrica_auth,rubrica_eventing,rubrica_notification,rubrica_observability"
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-init
+              mountPath: /docker-entrypoint-initdb.d/init-multiple-databases.sh
+              subPath: init-multiple-databases.sh
+      volumes:
+        - name: postgres-init
+          configMap:
+            name: postgres-init
+            defaultMode: 0755
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: rubrica
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

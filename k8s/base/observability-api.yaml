@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: observability-api
+  namespace: rubrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: observability-api
+  template:
+    metadata:
+      labels:
+        app: observability-api
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: observability-api
+          image: rubrica-observability-api:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: rubrica-config
+          env:
+            - name: LOKI_URL
+              value: http://loki:3100
+            - name: LOKI_READY_URL
+              value: http://loki:3100/ready
+            - name: GRAFANA_URL
+              value: http://grafana:3000
+            - name: GRAFANA_HEALTH_URL
+              value: http://grafana:3000/api/health
+            - name: SENTRY_DSN
+              value: ""
+            - name: SENTRY_ENVIRONMENT
+              value: development
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: observability-api
+  namespace: rubrica
+spec:
+  selector:
+    app: observability-api
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eventing-api
+  namespace: rubrica
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eventing-api
+  template:
+    metadata:
+      labels:
+        app: eventing-api
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: eventing-api
+          image: rubrica-eventing-api:local
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: rubrica-config
+          ports:
+            - containerPort: 8000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eventing-api
+  namespace: rubrica
+spec:
+  selector:
+    app: eventing-api
+  ports:
+    - port: 8000
+      targetPort: 8000

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Core Delivery Request",
+  "type": "object",
+  "required": [
+    "channel",
+    "recipient",
+    "template",
+    "payload"
+  ],
+  "properties": {
+    "channel": {
+      "enum": [
+        "email",
+        "slack",
+        "whatsapp"
+      ]
+    },
+    "recipient": {
+      "type": "string"
+    },
+    "template": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

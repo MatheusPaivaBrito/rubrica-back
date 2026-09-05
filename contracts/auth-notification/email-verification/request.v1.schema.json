@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Email Verification Notification Request",
+  "type": "object",
+  "required": [
+    "email",
+    "verification_url"
+  ],
+  "properties": {
+    "email": {
+      "type": "string"
+    },
+    "verification_url": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
