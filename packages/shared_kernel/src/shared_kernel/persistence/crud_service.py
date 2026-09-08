@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -37,7 +38,7 @@ class SqlAlchemyCrudService:
                 statement = statement.where(self.model.deleted_at.is_(None))
             return [self._read(item) for item in session.scalars(statement).unique().all()]
 
-    def get(self, item_id: str) -> BaseModel | None:
+    def get(self, item_id: UUID) -> BaseModel | None:
         with self.session_factory() as session:
             item = session.get(self.model, self._identifier(item_id))
             return self._read(item) if item is not None else None
@@ -53,7 +54,7 @@ class SqlAlchemyCrudService:
             session.refresh(item)
             return self._read(item)
 
-    def update(self, item_id: str, payload: BaseModel) -> BaseModel | None:
+    def update(self, item_id: UUID, payload: BaseModel) -> BaseModel | None:
         values = payload.model_dump(exclude_unset=True)
         relation_values = self._pop_relation_values(values)
         with self.session_factory() as session:
@@ -67,17 +68,17 @@ class SqlAlchemyCrudService:
             session.refresh(item)
             return self._read(item)
 
-    def delete(self, item_id: str) -> BaseModel | None:
+    def delete(self, item_id: UUID) -> BaseModel | None:
         return self._set_deleted_at(item_id, datetime.now(UTC))
 
-    def restore(self, item_id: str) -> BaseModel | None:
+    def restore(self, item_id: UUID) -> BaseModel | None:
         return self._set_deleted_at(item_id, None)
 
     def list_by_parent(
         self,
         *,
         parent_field: str,
-        parent_id: str,
+        parent_id: UUID,
         include_deleted: bool = False,
     ) -> list[BaseModel]:
         with self.session_factory() as session:
@@ -92,8 +93,8 @@ class SqlAlchemyCrudService:
         self,
         *,
         parent_field: str,
-        parent_id: str,
-        item_id: str,
+        parent_id: UUID,
+        item_id: UUID,
     ) -> BaseModel | None:
         item = self.get(item_id)
         if item is None or getattr(item, parent_field, None) != self._identifier(parent_id):
@@ -104,7 +105,7 @@ class SqlAlchemyCrudService:
         self,
         *,
         parent_field: str,
-        parent_id: str,
+        parent_id: UUID,
         payload: BaseModel,
     ) -> BaseModel:
         return self.create(
@@ -115,8 +116,8 @@ class SqlAlchemyCrudService:
         self,
         *,
         parent_field: str,
-        parent_id: str,
-        item_id: str,
+        parent_id: UUID,
+        item_id: UUID,
         payload: BaseModel,
     ) -> BaseModel | None:
         if self.get_by_parent(
@@ -131,8 +132,8 @@ class SqlAlchemyCrudService:
         self,
         *,
         parent_field: str,
-        parent_id: str,
-        item_id: str,
+        parent_id: UUID,
+        item_id: UUID,
     ) -> BaseModel | None:
         if self.get_by_parent(
             parent_field=parent_field,
@@ -146,8 +147,8 @@ class SqlAlchemyCrudService:
         self,
         *,
         parent_field: str,
-        parent_id: str,
-        item_id: str,
+        parent_id: UUID,
+        item_id: UUID,
     ) -> BaseModel | None:
         if self.get_by_parent(
             parent_field=parent_field,
@@ -157,7 +158,7 @@ class SqlAlchemyCrudService:
             return None
         return self.restore(item_id)
 
-    def list_related(self, *, item_id: str, related_field: str) -> list[int] | None:
+    def list_related(self, *, item_id: UUID, related_field: str) -> list[UUID] | None:
         item = self.get(item_id)
         if item is None:
             return None
@@ -166,9 +167,9 @@ class SqlAlchemyCrudService:
     def link_related(
         self,
         *,
-        item_id: str,
+        item_id: UUID,
         related_field: str,
-        related_id: str,
+        related_id: UUID,
     ) -> BaseModel | None:
         config = self._relation(related_field)
         with self.session_factory() as session:
@@ -186,9 +187,9 @@ class SqlAlchemyCrudService:
     def unlink_related(
         self,
         *,
-        item_id: str,
+        item_id: UUID,
         related_field: str,
-        related_id: str,
+        related_id: UUID,
     ) -> BaseModel | None:
         config = self._relation(related_field)
         with self.session_factory() as session:
@@ -202,7 +203,7 @@ class SqlAlchemyCrudService:
             session.refresh(item)
             return self._read(item)
 
-    def _set_deleted_at(self, item_id: str, value: datetime | None) -> BaseModel | None:
+    def _set_deleted_at(self, item_id: UUID, value: datetime | None) -> BaseModel | None:
         with self.session_factory() as session:
             item = session.get(self.model, self._identifier(item_id))
             if item is None:
@@ -212,7 +213,7 @@ class SqlAlchemyCrudService:
             session.refresh(item)
             return self._read(item)
 
-    def _pop_relation_values(self, values: dict[str, Any]) -> dict[str, list[int]]:
+    def _pop_relation_values(self, values: dict[str, Any]) -> dict[str, list[UUID]]:
         return {
             field_name: values.pop(field_name)
             for field_name in self.relations
@@ -223,7 +224,7 @@ class SqlAlchemyCrudService:
         self,
         session: Any,
         item: Any,
-        relation_values: dict[str, list[int]],
+        relation_values: dict[str, list[UUID]],
     ) -> None:
         for field_name, identifiers in relation_values.items():
             config = self._relation(field_name)
@@ -249,8 +250,8 @@ class SqlAlchemyCrudService:
         return self.read_schema.model_validate(item, from_attributes=True)
 
     @staticmethod
-    def _identifier(value: str | int) -> int:
+    def _identifier(value: UUID | str) -> UUID:
         try:
-            return int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"invalid integer resource id: {value!r}") from exc
+            return value if isinstance(value, UUID) else UUID(value)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(f"invalid UUID resource id: {value!r}") from exc

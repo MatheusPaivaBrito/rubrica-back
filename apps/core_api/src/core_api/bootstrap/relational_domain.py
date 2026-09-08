@@ -185,7 +185,7 @@ def _entity_source(
         )
         fields.extend(
             [
-                f"    {parent_field}: Mapped[int | None] = mapped_column(",
+                f"    {parent_field}: Mapped[UUID | None] = mapped_column(",
                 (
                     f'        ForeignKey("{parent_domain}.id", ondelete="RESTRICT"), '
                     "nullable=True, index=True"
@@ -235,7 +235,7 @@ def _entity_source(
             "\n".join(
                 [
                     "    @property",
-                    f"    def {related_entity}_ids(self) -> list[int]:",
+                    f"    def {related_entity}_ids(self) -> list[UUID]:",
                     f"        return [item.id for item in self.{related_domain}]",
                 ]
             )
@@ -256,6 +256,8 @@ def _entity_source(
 
     lines = [
         "from __future__ import annotations",
+        "",
+        "from uuid import UUID",
         "",
         f"from sqlalchemy import {', '.join(sqlalchemy_imports)}",
         f"from sqlalchemy.orm import {', '.join(orm_imports)}",
@@ -289,17 +291,18 @@ def _schema_source(
     parent_field: str | None,
     related_domains: tuple[str, ...],
 ) -> str:
-    create_fields = [f"    {parent_field}: int | None = None"] if parent_field else []
-    update_fields = [f"    {parent_field}: int | None = None"] if parent_field else []
-    read_fields = [f"    {parent_field}: int | None = None"] if parent_field else []
+    create_fields = [f"    {parent_field}: UUID | None = None"] if parent_field else []
+    update_fields = [f"    {parent_field}: UUID | None = None"] if parent_field else []
+    read_fields = [f"    {parent_field}: UUID | None = None"] if parent_field else []
     for related_domain in related_domains:
         field = f"{_singular(related_domain)}_ids"
-        create_fields.append(f"    {field}: list[int] = Field(default_factory=list)")
-        update_fields.append(f"    {field}: list[int] | None = None")
-        read_fields.append(f"    {field}: list[int] = Field(default_factory=list)")
+        create_fields.append(f"    {field}: list[UUID] = Field(default_factory=list)")
+        update_fields.append(f"    {field}: list[UUID] | None = None")
+        read_fields.append(f"    {field}: list[UUID] = Field(default_factory=list)")
 
     lines = [
         "from datetime import datetime",
+        "from uuid import UUID",
         "",
         "from pydantic import BaseModel, Field",
         "",
@@ -317,7 +320,7 @@ def _schema_source(
         "",
         "",
         f"class {entity_class}Read(BaseModel):",
-        "    id: int",
+        "    id: UUID",
         "    name: str",
         "    code: str",
         *read_fields,
@@ -407,6 +410,8 @@ def _router_source(
     }
     return _clean(
         f"""
+        from uuid import UUID
+
         from fastapi import APIRouter, HTTPException, Path, status
 
         from core_api.modules.{domain_name}.{entity_name}_schema import (
@@ -453,7 +458,7 @@ def _router_source(
                 tags=[f"{{DOMAIN_TAG}} - query"],
             )
             async def list_by_parent(
-                parent_id: str = Path(alias=PARENT_FIELD),
+                parent_id: UUID = Path(alias=PARENT_FIELD),
                 include_deleted: bool = False,
             ) -> list[{entity_class}Read]:
                 return {entity_name}_service.list_by_parent(
@@ -470,7 +475,7 @@ def _router_source(
             )
             async def create_for_parent(
                 payload: {entity_class}Create,
-                parent_id: str = Path(alias=PARENT_FIELD),
+                parent_id: UUID = Path(alias=PARENT_FIELD),
             ) -> {entity_class}Read:
                 return {entity_name}_service.create_for_parent(
                     parent_field=PARENT_FIELD,
@@ -480,7 +485,7 @@ def _router_source(
 
 
         def _list_related_endpoint(related_field: str):
-            async def endpoint(resource_id: str) -> list[int]:
+            async def endpoint(resource_id: UUID) -> list[UUID]:
                 related_ids = {entity_name}_service.list_related(
                     item_id=resource_id,
                     related_field=related_field,
@@ -493,7 +498,7 @@ def _router_source(
 
 
         def _link_related_endpoint(related_field: str):
-            async def endpoint(resource_id: str, related_id: str) -> {entity_class}Read:
+            async def endpoint(resource_id: UUID, related_id: UUID) -> {entity_class}Read:
                 resource = {entity_name}_service.link_related(
                     item_id=resource_id,
                     related_field=related_field,
@@ -507,7 +512,7 @@ def _router_source(
 
 
         def _unlink_related_endpoint(related_field: str):
-            async def endpoint(resource_id: str, related_id: str) -> {entity_class}Read:
+            async def endpoint(resource_id: UUID, related_id: UUID) -> {entity_class}Read:
                 resource = {entity_name}_service.unlink_related(
                     item_id=resource_id,
                     related_field=related_field,
@@ -530,7 +535,7 @@ def _router_source(
                 relation_prefix,
                 _list_related_endpoint(related_field),
                 methods=["GET"],
-                response_model=list[int],
+                response_model=list[UUID],
                 tags=[f"{{related_tag}} - query"],
             )
             router.add_api_route(
@@ -575,7 +580,7 @@ def _migration_source(
         "def upgrade() -> None:",
         "    op.create_table(",
         f'        "{domain_name}",',
-        '        sa.Column("id", sa.Integer(), primary_key=True),',
+        '        sa.Column("id", sa.Uuid(), primary_key=True),',
         '        sa.Column("name", sa.String(length=120), nullable=False),',
         '        sa.Column("code", sa.String(length=80), nullable=False),',
     ]
@@ -584,7 +589,7 @@ def _migration_source(
             [
                 "        sa.Column(",
                 f'            "{parent_field}",',
-                "            sa.Integer(),",
+                "            sa.Uuid(),",
                 (
                     f'            sa.ForeignKey("{parent_domain}.id", '
                     'ondelete="RESTRICT"),'
@@ -642,7 +647,7 @@ def _migration_source(
                 f'        "{table_name}",',
                 "        sa.Column(",
                 f'            "{entity_name}_id",',
-                "            sa.Integer(),",
+                "            sa.Uuid(),",
                 (
                     f'            sa.ForeignKey("{domain_name}.id", '
                     'ondelete="CASCADE"),'
@@ -651,7 +656,7 @@ def _migration_source(
                 "        ),",
                 "        sa.Column(",
                 f'            "{related_entity}_id",',
-                "            sa.Integer(),",
+                "            sa.Uuid(),",
                 (
                     f'            sa.ForeignKey("{related_domain}.id", '
                     'ondelete="CASCADE"),'

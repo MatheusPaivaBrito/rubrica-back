@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 from secrets import token_urlsafe
+from uuid import UUID
 
 from redis import Redis
 from sqlalchemy import select
@@ -66,11 +67,15 @@ class SessionService:
         state = self._state_for_token("access", access_token)
         if state is None:
             return False
-        for session_id in self._redis.smembers(self._user_sessions_key(state["user_id"])):
+        session_keys = {self._user_sessions_key(self._user_identifier(state["user_id"]))}
+        if str(state["user_id"]).isdigit():
+            session_keys.add(self._user_sessions_key(str(state["user_id"])))
+        session_ids = set().union(*(self._redis.smembers(key) for key in session_keys))
+        for session_id in session_ids:
             stored = self._load_state(session_id)
             if stored is not None:
                 self._revoke_state(stored)
-        self._redis.delete(self._user_sessions_key(state["user_id"]))
+        self._redis.delete(*session_keys)
         return True
 
     def ui_context(self, token: str) -> UiContextResponse | None:
@@ -80,7 +85,7 @@ class SessionService:
         state = self._state_for_token("access", token)
         if state is None:
             return None
-        roles, permission_keys = access_control_service.context_for_user(int(state["user_id"]))
+        roles, permission_keys = access_control_service.context_for_user(self._user_identifier(state["user_id"]))
         fingerprint = sha256(f"{session.subject}:{session.session_id}".encode("utf-8")).hexdigest()
         return UiContextResponse(
             subject=session.subject,
@@ -100,16 +105,16 @@ class SessionService:
         self._redis.delete(self._session_key(str(state["session_id"])))
         return self._store_session(
             session_id=str(state["session_id"]),
-            user_id=int(state["user_id"]),
+            user_id=self._user_identifier(state["user_id"]),
             subject=str(state["subject"]),
         )
 
-    def _store_session(self, *, session_id: str, user_id: int, subject: str) -> LoginResponse:
+    def _store_session(self, *, session_id: str, user_id: UUID, subject: str) -> LoginResponse:
         access_token = self._new_token("access")
         refresh_token = self._new_token("refresh")
         state = {
             "session_id": session_id,
-            "user_id": user_id,
+            "user_id": str(user_id),
             "subject": subject,
             "access_key": self._token_key("access", access_token),
             "refresh_key": self._token_key("refresh", refresh_token),
@@ -142,7 +147,11 @@ class SessionService:
             str(state["refresh_key"]),
             self._session_key(str(state["session_id"])),
         )
-        self._redis.srem(self._user_sessions_key(int(state["user_id"])), str(state["session_id"]))
+        session_keys = [self._user_sessions_key(self._user_identifier(state["user_id"]))]
+        if str(state["user_id"]).isdigit():
+            session_keys.append(self._user_sessions_key(str(state["user_id"])))
+        for key in session_keys:
+            self._redis.srem(key, str(state["session_id"]))
 
     @staticmethod
     def _new_token(kind: str) -> str:
@@ -153,8 +162,16 @@ class SessionService:
         return f"{settings.AUTH_REDIS_KEY_PREFIX}:session:{session_id}"
 
     @staticmethod
-    def _user_sessions_key(user_id: int) -> str:
+    def _user_sessions_key(user_id: UUID | str) -> str:
         return f"{settings.AUTH_REDIS_KEY_PREFIX}:user:{user_id}:sessions"
+
+    @staticmethod
+    def _user_identifier(value: object) -> UUID:
+        serialized = str(value)
+        try:
+            return UUID(serialized)
+        except ValueError:
+            return UUID(int=int(serialized))
 
     @staticmethod
     def _token_key(kind: str, token: str) -> str:
@@ -164,7 +181,7 @@ class SessionService:
     @staticmethod
     def _user_is_active(user_id: object) -> bool:
         with SessionLocal() as database:
-            user = database.get(UserEntity, int(user_id))
+            user = database.get(UserEntity, SessionService._user_identifier(user_id))
             return user is not None and user.is_active
 
 

@@ -1,6 +1,7 @@
 from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, JSON, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -9,7 +10,7 @@ from core_api.infrastructure.database.connection import BaseEntity
 class BillingAccountEntity(BaseEntity):
     __tablename__ = "billing_accounts"
 
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False, unique=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_configured", index=True)
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     provider_customer_id: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
@@ -21,7 +22,7 @@ class BillingEventEntity(BaseEntity):
     __tablename__ = "billing_events"
     __table_args__ = (UniqueConstraint("provider", "provider_event_id", name="uq_billing_event_provider_id"),)
 
-    tenant_id: Mapped[int | None] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True, index=True)
+    tenant_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True, index=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     provider_event_id: Mapped[str] = mapped_column(String(240), nullable=False)
     event_type: Mapped[str] = mapped_column(String(80), nullable=False, index=True)

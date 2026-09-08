@@ -1,5 +1,6 @@
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from uuid import UUID
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.modules.signature_request.workflow_service import WorkflowError
@@ -30,7 +31,7 @@ class TenantService:
             db.flush()
             return self._read(tenant, "admin")
 
-    def add_member(self, tenant_id: int, payload: TenantMemberCreate, subject: str) -> None:
+    def add_member(self, tenant_id: UUID, payload: TenantMemberCreate, subject: str) -> None:
         with SessionLocal.begin() as db:
             self.require_role(db, tenant_id, subject, {"admin"})
             db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), role=payload.role))
@@ -40,7 +41,7 @@ class TenantService:
                 raise WorkflowError("User is already a tenant member", 409) from exc
 
     @staticmethod
-    def require_role(db, tenant_id: int, subject: str, roles: set[str] | None = None) -> TenantMemberEntity:
+    def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None) -> TenantMemberEntity:
         member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.auth_user_id == subject.lower(), TenantMemberEntity.deleted_at.is_(None)))
         if member is None or (roles is not None and member.role not in roles):
             raise WorkflowError("Tenant access denied", 403)

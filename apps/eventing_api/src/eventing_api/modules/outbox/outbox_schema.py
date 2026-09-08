@@ -1,16 +1,16 @@
 from datetime import datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
 
 
 class EventActor(BaseModel):
     type: str = "service"
-    id: str = "generated-project"
+    id: str = "rubrica"
 
 
 class EventIn(BaseModel):
-    event_id: str = Field(default_factory=lambda: str(uuid4()))
+    event_id: UUID = Field(default_factory=uuid4)
     event_type: str = Field(min_length=1, max_length=180)
     occurred_at: datetime | None = None
     source: str = Field(min_length=1, max_length=80)
@@ -21,7 +21,7 @@ class EventIn(BaseModel):
 
 
 class OutboxRecord(BaseModel):
-    event_id: str
+    event_id: UUID
     event_type: str
     version: int
     source: str

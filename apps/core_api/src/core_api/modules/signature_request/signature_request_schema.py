@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -16,7 +17,7 @@ class SignatureRequestUpdate(BaseModel):
 
 
 class SignatureRequestRead(BaseModel):
-    id: str
+    id: UUID
     name: str
     code: str
 

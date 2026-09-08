@@ -47,7 +47,7 @@ async def list_signers(session: SessionRead = Depends(require_authenticated_sess
             .distinct()
             .order_by(UserEntity.name, UserEntity.email)
         ).all()
-        return [UserRead(id=str(item.id), name=item.name or item.email, email=item.email, role="signature_signer", is_active=item.is_active) for item in rows]
+        return [UserRead(id=item.id, name=item.name or item.email, email=item.email, role="signature_signer", is_active=item.is_active) for item in rows]
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -66,4 +66,4 @@ async def create_user(payload: UserCreate, session: SessionRead = Depends(requir
         except IntegrityError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists") from exc
         database.add(UserRoleEntity(user_id=item.id, role=payload.role))
-        return UserRead(id=str(item.id), name=item.name or item.email, email=item.email, role=payload.role, is_active=item.is_active)
+        return UserRead(id=item.id, name=item.name or item.email, email=item.email, role=payload.role, is_active=item.is_active)

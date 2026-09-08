@@ -1,82 +1,129 @@
-# Generated Architecture
+# Rubrica Architecture
 
-This project was generated from AtlasCore patterns. It is a starting
-point, not a final business application.
+## Product boundary
 
-## Service Boundaries
+Rubrica is a multi-tenant platform for authenticated electronic PDF signatures. It stores immutable document versions, coordinates signature requests, produces cumulative stamped PDFs and retains technical evidence. The product does not claim automatic legal validity; identity assurance, retention and country-specific rules require explicit policy and legal review.
 
-Each API owns its own application package under `apps/`.
+## System map
 
-- `core_api` owns business domains.
-- `auth_api` owns identity, users, sessions and future RBAC.
-- messaging APIs are optional and should be added only when the
-  project needs async/event-driven flows.
+```text
+Browser / Angular
+        |
+        v
+Production Nginx / local Web gateway
+        |--------------------------|
+        v                          v
+    Auth API                    Core API
+ PostgreSQL + Redis       PostgreSQL + document storage
+                                   |
+                 |-----------------|-----------------|
+                 v                 v                 v
+            Eventing API     Notification API  Observability API
+             PostgreSQL         PostgreSQL          PostgreSQL
+                 |
+                 v
+              Worker
+```
 
-## Auth Starter
+Each API owns its database. No service reads another service's tables.
 
-The generated Auth boundary is intentionally compact. It keeps users
-in its own Postgres database and revocable opaque sessions in Redis.
-Its public routes are:
+## Identifier policy
 
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `POST /auth/logout-all`
-- `GET /sessions/me`
-- `GET /access-control/ui-context`
+- Persisted entity identifiers use PostgreSQL UUID and Python `uuid.UUID`.
+- SQLAlchemy entities generate UUIDv4 identifiers at the application boundary.
+- Foreign keys use native UUID columns; counters such as document version, retry attempt and byte size remain integers.
+- External provider IDs, e-mail subjects and opaque signing tokens are not entity IDs and remain strings.
+- Incremental migrations convert legacy integer identifiers deterministically, preserving every relationship.
+- API schemas expose UUID format while JSON representation remains a string, so the Angular transport stays compatible.
+- UUID migrations are intentionally irreversible. Back up databases before production rollout.
 
-Enable the optional Auth example seed when local credentials are
-useful. It creates `admin@example.local` with password
-`AtlasAdmin123!`; remove or rotate this account before production.
+## Auth API
 
-## Database Ownership
+Owns identities, password hashes, roles and revocable sessions.
 
-APIs should not share tables. When Core and Auth are generated, each
-one receives its own database settings and Alembic folder.
+- Database: `rubrica_auth`.
+- Redis stores access/refresh session state and user-session indexes.
+- Roles: `signature_admin`, `signature_operator`, `signature_auditor`, `signature_signer`.
+- Core validates Auth-issued context; it never implements a second login.
+- Government identifiers are sensitive identity attributes, not primary keys.
 
-- Core uses `CORE_POSTGRES_DB`.
-- Auth uses `AUTH_POSTGRES_DB`.
+## Core API
 
-Docker Compose includes a small Postgres initialization script that
-creates multiple local databases from `POSTGRES_MULTIPLE_DATABASES`.
+Owns product state and the authoritative business audit trail.
 
-## Alembic Per API
+### Tenants
 
-Run migrations per API:
+`tenants` are workspaces. `tenant_members` links Auth subjects to a tenant role. Documents, administrative reads, requests, billing state and audit access are tenant-scoped.
+
+### Documents
+
+`documents` stores metadata and the current version. `document_versions` freezes filename, media type, storage key, SHA-256 and size for each immutable binary version. Binary content remains in `DocumentStorage`.
+
+### Signature workflow
+
+`signature_requests` freezes the chosen document version and hash. `signers` represents expected authenticated subjects. `signatures` records the act, evidence hash and generated artifact. A request-level opaque link locates the workflow but never replaces authentication.
+
+The signed PDF contains cumulative visible stamps and Rubrica metadata. Core `audit_events` remains transactionally coupled to signature operations and is the authoritative signature ledger.
+
+### Billing
+
+Billing is intentionally plan-free. `billing_accounts` records only tenant commercial state and provider binding; `billing_events` provides an idempotent provider-event boundary. Plans, entitlements, subscriptions and checkout must be designed from Rubrica requirements before being introduced.
+
+## Eventing API
+
+Owns durable integration events and outbox delivery state in `rubrica_eventing`. Canonical contracts currently cover tenant creation, document upload, request opening and signature completion. Eventing does not replace Core audit evidence.
+
+## Notification API
+
+Owns delivery attempts in `rubrica_notification`. The active product channel is e-mail. Local development uses `local_ack`; a real provider key must be supplied in production. Slack and WhatsApp are outside the current scope.
+
+## Observability API
+
+Owns operational incidents, alert events and release markers in `rubrica_observability`. It integrates operational status with Loki, Grafana, Alloy and optional Sentry. Operational telemetry must not receive raw PDFs, signing tokens or complete government identifiers.
+
+## Worker
+
+The Worker is the execution boundary for future outbox relay and background jobs. It must be idempotent and must not become a second source of truth for signature state.
+
+## Shared kernel
+
+`packages/shared_kernel` contains narrow cross-service primitives: UUID identifiers, UTC/timezone helpers, HTTP conventions, service security and event envelopes. Business rules remain inside their owning app.
+
+All persisted timestamps are timezone-aware UTC. Locale and timezone affect presentation only. Naive datetimes are interpreted as UTC at compatibility boundaries.
+
+## Data and security invariants
+
+- Every protected operation revalidates backend authorization.
+- Tenant membership scopes administrative access.
+- Document binaries are immutable per version and verified by SHA-256.
+- Signing tokens are high-entropy, stored only as hashes and revocable.
+- Signature and audit writes occur in the same Core transaction.
+- Passwords and sensitive identity values never enter logs or events.
+- Evidence fields use canonical names and UTC timestamps; localized UI never changes evidence meaning.
+- Secrets, `.env`, `.atlas`, `.codex`, local storage and runtime data stay outside Git.
+
+## Database migrations
+
+Each persistent API owns an Alembic chain:
 
 ```bash
 make migrate-core
 make migrate-auth
+make migrate-eventing
+make migrate-notification
+make migrate-observability
 ```
 
-Create revisions per API:
+`make migrate-all` applies every chain. Production UUID rollout requires a verified backup and maintenance window because PostgreSQL rewrites identifier columns and rebuilds foreign keys.
 
-```bash
-make revision-core msg=create_domain
-make revision-auth msg=create_users
-```
+## Deployment
 
-Alembic discovers entities through each API database loader:
+Local Compose runs PostgreSQL, Redis, Core, Auth, Eventing, Notification, Observability and the Angular web gateway. Production Compose adds TLS/Nginx concerns. Kubernetes manifests provide the same service boundaries. Public traffic enters through the web gateway; databases are never public application endpoints.
 
-- `core_api.infrastructure.database.loader`
-- `auth_api.infrastructure.database.loader`
+## Near-term architecture work
 
-## Vertical Domains
-
-Domains should keep their local files together:
-
-```text
-modules/<your_domain>/
-  <entity>_entity.py
-  <entity>_schema.py
-  <entity>_service.py
-  <entity>_router.py
-```
-
-Shared behavior belongs in `packages/shared_kernel`. Domain-specific
-business decisions stay inside the domain.
-
-## Creating The First Domain
-
-The initial Core migration is intentionally empty. The first relational
-domain owns the first business table and the following Alembic revision.
+1. Connect Core transactions to Eventing through a transactional outbox relay.
+2. Implement account registration, e-mail verification and one-time password recovery.
+3. Add explicit active-tenant selection for users belonging to multiple tenants.
+4. Define international locale, identity and e-mail policies for `pt-BR`, `en` and `ja-JP`.
+5. Design Rubrica plans and entitlements only after commercial requirements are confirmed.

@@ -12,7 +12,8 @@
   ],
   "properties": {
     "event_id": {
-      "type": "string"
+      "type": "string",
+      "format": "uuid"
     },
     "event_type": {
       "const": "auth.user_logged_in"
@@ -35,7 +36,8 @@
       ],
       "properties": {
         "user_id": {
-          "type": "string"
+          "type": "string",
+          "format": "uuid"
         },
         "email": {
           "type": "string"

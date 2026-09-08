@@ -1,6 +1,7 @@
 from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -9,7 +10,7 @@ from core_api.infrastructure.database.connection import BaseEntity
 class SignatureRequestEntity(BaseEntity):
     __tablename__ = "signature_requests"
 
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="RESTRICT"), index=True)
+    document_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="RESTRICT"), index=True)
     document_version: Mapped[int]
     document_sha256: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(20), index=True)
@@ -24,7 +25,7 @@ class SignerEntity(BaseEntity):
     __tablename__ = "signers"
     __table_args__ = (UniqueConstraint("signature_request_id", "auth_user_id"),)
 
-    signature_request_id: Mapped[int] = mapped_column(ForeignKey("signature_requests.id", ondelete="RESTRICT"), index=True)
+    signature_request_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("signature_requests.id", ondelete="RESTRICT"), index=True)
     auth_user_id: Mapped[str] = mapped_column(String(255), index=True)
     name: Mapped[str] = mapped_column(String(180))
     email: Mapped[str] = mapped_column(String(254), index=True)
@@ -42,8 +43,8 @@ class SignatureEntity(BaseEntity):
         UniqueConstraint("signature_request_id", "auth_user_id"),
     )
 
-    signature_request_id: Mapped[int] = mapped_column(ForeignKey("signature_requests.id", ondelete="RESTRICT"), index=True)
-    signer_id: Mapped[int] = mapped_column(ForeignKey("signers.id", ondelete="RESTRICT"), index=True)
+    signature_request_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("signature_requests.id", ondelete="RESTRICT"), index=True)
+    signer_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("signers.id", ondelete="RESTRICT"), index=True)
     auth_user_id: Mapped[str] = mapped_column(String(255), index=True)
     document_sha256: Mapped[str] = mapped_column(String(64))
     signed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -56,12 +57,12 @@ class SignatureEntity(BaseEntity):
 class AuditEventEntity(BaseEntity):
     __tablename__ = "audit_events"
 
-    signature_request_id: Mapped[int | None] = mapped_column(ForeignKey("signature_requests.id", ondelete="RESTRICT"), index=True)
+    signature_request_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("signature_requests.id", ondelete="RESTRICT"), index=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     actor_type: Mapped[str] = mapped_column(String(30))
     actor_id: Mapped[str] = mapped_column(String(255), index=True)
     action: Mapped[str] = mapped_column(String(100), index=True)
     entity_type: Mapped[str] = mapped_column(String(60), index=True)
-    entity_id: Mapped[str] = mapped_column(String(255), index=True)
-    correlation_id: Mapped[str] = mapped_column(String(64), index=True)
+    entity_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
+    correlation_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), index=True)
     metadata_sanitized: Mapped[dict[str, object]] = mapped_column(JSON)

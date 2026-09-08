@@ -6,7 +6,7 @@ from hmac import new as hmac_new
 from io import BytesIO
 from pathlib import Path
 from secrets import token_urlsafe
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -371,7 +371,7 @@ class DatabaseSignatureWorkflowService:
             request = self._request(db, request_id)
             self._require_request_access(db, request, actor_id)
             items = db.scalars(select(AuditEventEntity).where(AuditEventEntity.signature_request_id == request.id).order_by(AuditEventEntity.id)).all()
-            return [AuditEventRead(id=str(x.id), occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
+            return [AuditEventRead(id=x.id, occurred_at=x.occurred_at, actor_type=x.actor_type, actor_id=x.actor_id, action=x.action, entity_type=x.entity_type, entity_id=x.entity_id, correlation_id=x.correlation_id, metadata_sanitized=x.metadata_sanitized) for x in items]
 
     def _resolve_request(self, db, token: str, auth_user_id: str, lock: bool = False, *, allow_completed: bool = False):
         request = self._request_from_token(db, token, lock=lock)
@@ -429,13 +429,15 @@ class DatabaseSignatureWorkflowService:
         }
 
     @staticmethod
-    def _request_token(request_id: int, nonce: str) -> str:
-        payload = f"rubrica-request:{request_id}:{nonce}".encode()
+    def _request_token(request_id: UUID, nonce: str) -> str:
+        legacy_value = request_id.int
+        token_identifier = str(legacy_value) if request_id.int <= 0x7FFFFFFF else str(request_id)
+        payload = f"rubrica-request:{token_identifier}:{nonce}".encode()
         return hmac_new(settings.EVIDENCE_SECRET.encode(), payload, "sha256").hexdigest()
 
-    def _signer(self, db, identifier: str, request_id: int, lock: bool = False) -> SignerEntity:
+    def _signer(self, db, identifier: str, request_id: UUID, lock: bool = False) -> SignerEntity:
         try:
-            value = int(identifier)
+            value = UUID(str(identifier))
         except ValueError as exc:
             raise WorkflowError("Signer not found", 404) from exc
         statement = select(SignerEntity).where(SignerEntity.id == value, SignerEntity.signature_request_id == request_id)
@@ -446,7 +448,7 @@ class DatabaseSignatureWorkflowService:
 
     def _document(self, db, identifier: str, lock: bool = False) -> DocumentEntity:
         try:
-            value = int(identifier)
+            value = UUID(str(identifier))
         except ValueError as exc:
             raise WorkflowError("Document not found", 404) from exc
         statement = select(DocumentEntity).where(DocumentEntity.id == value, DocumentEntity.deleted_at.is_(None))
@@ -457,7 +459,7 @@ class DatabaseSignatureWorkflowService:
 
     def _request(self, db, identifier: str, lock: bool = False) -> SignatureRequestEntity:
         try:
-            value = int(identifier)
+            value = UUID(str(identifier))
         except ValueError as exc:
             raise WorkflowError("Signature request not found", 404) from exc
         statement = select(SignatureRequestEntity).where(SignatureRequestEntity.id == value, SignatureRequestEntity.deleted_at.is_(None))
@@ -476,27 +478,27 @@ class DatabaseSignatureWorkflowService:
     def _request_read(self, db, item: SignatureRequestEntity) -> SignatureRequestRead:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
-        return SignatureRequestRead(id=str(item.id), document_id=str(item.document_id), document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count)
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count)
 
     @staticmethod
     def _document_read(x: DocumentEntity) -> DocumentRead:
-        return DocumentRead(id=str(x.id), organization_id=x.organization_id, title=x.title, original_filename=x.original_filename, content_type=x.content_type, sha256=x.sha256, version=x.version, status=x.status, created_by=x.created_by, created_at=x.created_at, updated_at=x.updated_at)
+        return DocumentRead(id=x.id, organization_id=x.organization_id, title=x.title, original_filename=x.original_filename, content_type=x.content_type, sha256=x.sha256, version=x.version, status=x.status, created_by=x.created_by, created_at=x.created_at, updated_at=x.updated_at)
 
     @staticmethod
     def _version_read(x: DocumentVersionEntity) -> DocumentVersionRead:
-        return DocumentVersionRead(document_id=str(x.document_id), version=x.version, original_filename=x.original_filename, content_type=x.content_type, sha256=x.sha256, size_bytes=x.size_bytes, created_by=x.created_by, created_at=x.created_at)
+        return DocumentVersionRead(document_id=x.document_id, version=x.version, original_filename=x.original_filename, content_type=x.content_type, sha256=x.sha256, size_bytes=x.size_bytes, created_by=x.created_by, created_at=x.created_at)
 
     @staticmethod
     def _signer_read(x: SignerEntity) -> SignerRead:
-        return SignerRead(id=str(x.id), signature_request_id=str(x.signature_request_id), auth_user_id=x.auth_user_id, name=x.name, email=x.email, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
+        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
 
     @staticmethod
     def _signing_url(request_id: str) -> str:
         return f"{settings.SIGNING_APP_URL.rstrip('/')}/{request_id}"
 
     @staticmethod
-    def _audit(db, request_id: int | None, actor_id: str, action: str, entity_type: str, entity_id: object, metadata: dict[str, object]) -> None:
-        db.add(AuditEventEntity(signature_request_id=request_id, occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=str(entity_id), correlation_id=str(uuid4()), metadata_sanitized=metadata))
+    def _audit(db, request_id: UUID | None, actor_id: str, action: str, entity_type: str, entity_id: object, metadata: dict[str, object]) -> None:
+        db.add(AuditEventEntity(signature_request_id=request_id, occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=UUID(str(entity_id)), correlation_id=uuid4(), metadata_sanitized=metadata))
 
 
 database_workflow_service = DatabaseSignatureWorkflowService(LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH)))

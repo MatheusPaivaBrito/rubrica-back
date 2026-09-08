@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
-from sqlalchemy import DateTime, Integer, JSON, String, Text
+from sqlalchemy import DateTime, Integer, JSON, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eventing_api.infrastructure.database.base import BaseEntity
@@ -16,7 +17,7 @@ class OutboxStatus:
 
 class OutboxEvent(BaseEntity):
     __tablename__ = "event_outbox"
-    event_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, nullable=False)
+    event_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), unique=True, index=True, nullable=False)
     event_type: Mapped[str] = mapped_column(String(180), index=True, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     source: Mapped[str] = mapped_column(String(80), index=True, nullable=False)

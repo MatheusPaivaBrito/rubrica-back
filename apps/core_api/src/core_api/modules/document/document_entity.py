@@ -1,4 +1,6 @@
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, UniqueConstraint
+from uuid import UUID
+
+from sqlalchemy import BigInteger, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -8,7 +10,7 @@ class DocumentEntity(BaseEntity):
     __tablename__ = "documents"
 
     organization_id: Mapped[str] = mapped_column(String(120), index=True)
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id", ondelete="RESTRICT"), index=True)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True)
     title: Mapped[str] = mapped_column(String(240), index=True)
     original_filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(160))
@@ -23,7 +25,7 @@ class DocumentVersionEntity(BaseEntity):
     __tablename__ = "document_versions"
     __table_args__ = (UniqueConstraint("document_id", "version"),)
 
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="RESTRICT"), index=True)
+    document_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="RESTRICT"), index=True)
     version: Mapped[int] = mapped_column(Integer)
     original_filename: Mapped[str] = mapped_column(String(255))
     content_type: Mapped[str] = mapped_column(String(160))

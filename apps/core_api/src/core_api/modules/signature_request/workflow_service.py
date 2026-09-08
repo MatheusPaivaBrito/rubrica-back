@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from secrets import token_urlsafe
 from threading import RLock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_schema import (
@@ -53,22 +53,22 @@ class SignatureWorkflowService:
 
     def __init__(self, storage: DocumentStorage) -> None:
         self.storage = storage
-        self.documents: dict[str, DocumentRead] = {}
-        self.versions: dict[str, list[StoredVersion]] = {}
-        self.requests: dict[str, SignatureRequestRead] = {}
-        self.signers: dict[str, SignerRead] = {}
-        self.request_signers: dict[str, list[str]] = {}
-        self.request_token_index: dict[str, str] = {}
-        self.signatures: set[tuple[str, str]] = set()
-        self.signature_evidence: dict[tuple[str, str], StampPosition] = {}
-        self.audit: dict[str, list[AuditEventRead]] = {}
+        self.documents: dict[UUID, DocumentRead] = {}
+        self.versions: dict[UUID, list[StoredVersion]] = {}
+        self.requests: dict[UUID, SignatureRequestRead] = {}
+        self.signers: dict[UUID, SignerRead] = {}
+        self.request_signers: dict[UUID, list[UUID]] = {}
+        self.request_token_index: dict[str, UUID] = {}
+        self.signatures: set[tuple[UUID, UUID]] = set()
+        self.signature_evidence: dict[tuple[UUID, UUID], StampPosition] = {}
+        self.audit: dict[UUID, list[AuditEventRead]] = {}
         self._lock = RLock()
 
     def create_document(self, payload: DocumentCreate, content: bytes) -> DocumentRead:
         if not content:
             raise WorkflowError("Document content cannot be empty")
         now = DateTimeService.utc_now()
-        document_id = str(uuid4())
+        document_id = uuid4()
         digest = sha256(content).hexdigest()
         key, size = self.storage.put(BytesIO(content), filename=payload.original_filename)
         item = DocumentRead(
@@ -135,7 +135,7 @@ class SignatureWorkflowService:
         now = DateTimeService.utc_now()
         if payload.expires_at <= now:
             raise WorkflowError("Expiration must be in the future")
-        item = SignatureRequestRead(id=str(uuid4()), document_id=document.id, document_version=document.version, document_sha256=document.sha256, status=RequestStatus.DRAFT, expires_at=payload.expires_at, created_by=payload.created_by, created_at=now)
+        item = SignatureRequestRead(id=uuid4(), document_id=document.id, document_version=document.version, document_sha256=document.sha256, status=RequestStatus.DRAFT, expires_at=payload.expires_at, created_by=payload.created_by, created_at=now)
         with self._lock:
             self.requests[item.id] = item
             self.request_signers[item.id] = []
@@ -158,7 +158,7 @@ class SignatureWorkflowService:
             if any(self.signers[sid].auth_user_id == email for sid in self.request_signers[request_id]):
                 raise WorkflowError("This authenticated user is already a signer", 409)
             now = DateTimeService.utc_now()
-            signer = SignerRead(id=str(uuid4()), signature_request_id=request_id, auth_user_id=email, name=payload.name, email=email, status=SignerStatus.PENDING, token_expires_at=now + timedelta(seconds=payload.token_ttl_seconds))
+            signer = SignerRead(id=uuid4(), signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, status=SignerStatus.PENDING, token_expires_at=now + timedelta(seconds=payload.token_ttl_seconds))
             self.signers[signer.id] = signer
             self.request_signers[request_id].append(signer.id)
             self._audit(request_id, actor_id, "signer.link_created", "signer", signer.id, {"token_expires_at": signer.token_expires_at.isoformat()})
@@ -310,8 +310,8 @@ class SignatureWorkflowService:
         except KeyError as exc:
             raise WorkflowError("Signature request not found", 404) from exc
 
-    def _audit(self, scope_id: str, actor_id: str, action: str, entity_type: str, entity_id: str, metadata: dict[str, object]) -> None:
-        event = AuditEventRead(id=str(uuid4()), occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id, correlation_id=str(uuid4()), metadata_sanitized=metadata)
+    def _audit(self, scope_id: UUID, actor_id: str, action: str, entity_type: str, entity_id: UUID, metadata: dict[str, object]) -> None:
+        event = AuditEventRead(id=uuid4(), occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=entity_id, correlation_id=uuid4(), metadata_sanitized=metadata)
         self.audit.setdefault(scope_id, []).append(event)
 
     @staticmethod

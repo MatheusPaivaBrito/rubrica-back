@@ -149,7 +149,7 @@ def generate_core_domain(
     relationship_lines = []
 
     if parent_domain and parent_field:
-        create_fields.append(f"    {parent_field}: str | None = None")
+        create_fields.append(f"    {parent_field}: UUID | None = None")
         update_fields.append(f"    {parent_field}: str | None = None")
         read_fields.append(f"    {parent_field}: str | None = None")
         create_kwargs.append(f"            {parent_field}=payload.{parent_field},")
@@ -169,9 +169,9 @@ def generate_core_domain(
     if related_fields:
         relationship_lines.extend(["## Many To Many", ""])
         for related_domain, related_field in related_fields:
-            create_fields.append(f"    {related_field}: list[str] = Field(default_factory=list)")
-            update_fields.append(f"    {related_field}: list[str] | None = None")
-            read_fields.append(f"    {related_field}: list[str] = Field(default_factory=list)")
+            create_fields.append(f"    {related_field}: list[UUID] = Field(default_factory=list)")
+            update_fields.append(f"    {related_field}: list[UUID] | None = None")
+            read_fields.append(f"    {related_field}: list[UUID] = Field(default_factory=list)")
             create_kwargs.append(f"            {related_field}=payload.{related_field},")
             update_kwargs.append(
                 f'                "{related_field}": payload.{related_field} if payload.{related_field} is not None else current.{related_field},'
@@ -216,6 +216,7 @@ def generate_core_domain(
         ''',
         domain_dir / f"{entity_name}_schema.py": f'''
             from datetime import datetime
+            from uuid import UUID
 
             from pydantic import BaseModel, Field
 
@@ -233,7 +234,7 @@ def generate_core_domain(
 
 
             class {entity_class}Read(BaseModel):
-                id: str
+                id: UUID
                 name: str
                 code: str
 {read_fields_text}
@@ -242,7 +243,7 @@ def generate_core_domain(
                 deleted_at: datetime | None = None
         ''',
         domain_dir / f"{entity_name}_service.py": f'''
-            from uuid import uuid4
+            from uuid import UUID, uuid4
 
             from core_api.modules.{domain_name}.{entity_name}_schema import (
                 {entity_class}Create,
@@ -254,7 +255,7 @@ def generate_core_domain(
 
             class {entity_class}Service:
                 def __init__(self) -> None:
-                    self._items: dict[str, {entity_class}Read] = {{}}
+                    self._items: dict[UUID, {entity_class}Read] = {{}}
 
                 def list(self, *, include_deleted: bool = False) -> list[{entity_class}Read]:
                     items = list(self._items.values())
@@ -262,13 +263,13 @@ def generate_core_domain(
                         return items
                     return [item for item in items if item.deleted_at is None]
 
-                def get(self, item_id: str) -> {entity_class}Read | None:
+                def get(self, item_id: UUID) -> {entity_class}Read | None:
                     return self._items.get(item_id)
 
                 def create(self, payload: {entity_class}Create) -> {entity_class}Read:
                     now = DateTimeService.utc_now()
                     item = {entity_class}Read(
-                        id=str(uuid4()),
+                        id=uuid4(),
                         name=payload.name,
                         code=payload.code,
 {create_kwargs_text}
@@ -278,7 +279,7 @@ def generate_core_domain(
                     self._items[item.id] = item
                     return item
 
-                def update(self, item_id: str, payload: {entity_class}Update) -> {entity_class}Read | None:
+                def update(self, item_id: UUID, payload: {entity_class}Update) -> {entity_class}Read | None:
                     current = self._items.get(item_id)
                     if current is None:
                         return None
@@ -293,7 +294,7 @@ def generate_core_domain(
                     self._items[item_id] = updated
                     return updated
 
-                def delete(self, item_id: str) -> {entity_class}Read | None:
+                def delete(self, item_id: UUID) -> {entity_class}Read | None:
                     current = self._items.get(item_id)
                     if current is None:
                         return None
@@ -306,7 +307,7 @@ def generate_core_domain(
                     self._items[item_id] = deleted
                     return deleted
 
-                def restore(self, item_id: str) -> {entity_class}Read | None:
+                def restore(self, item_id: UUID) -> {entity_class}Read | None:
                     current = self._items.get(item_id)
                     if current is None:
                         return None
@@ -319,44 +320,44 @@ def generate_core_domain(
                     self._items[item_id] = restored
                     return restored
 
-                def list_by_parent(self, *, parent_field: str, parent_id: str, include_deleted: bool = False) -> list[{entity_class}Read]:
+                def list_by_parent(self, *, parent_field: str, parent_id: UUID, include_deleted: bool = False) -> list[{entity_class}Read]:
                     return [
                         item
                         for item in self.list(include_deleted=include_deleted)
                         if getattr(item, parent_field, None) == parent_id
                     ]
 
-                def get_by_parent(self, *, parent_field: str, parent_id: str, item_id: str) -> {entity_class}Read | None:
+                def get_by_parent(self, *, parent_field: str, parent_id: UUID, item_id: UUID) -> {entity_class}Read | None:
                     item = self.get(item_id)
                     if item is None or getattr(item, parent_field, None) != parent_id:
                         return None
                     return item
 
-                def create_for_parent(self, *, parent_field: str, parent_id: str, payload: {entity_class}Create) -> {entity_class}Read:
+                def create_for_parent(self, *, parent_field: str, parent_id: UUID, payload: {entity_class}Create) -> {entity_class}Read:
                     return self.create(payload.model_copy(update={{parent_field: parent_id}}))
 
-                def update_by_parent(self, *, parent_field: str, parent_id: str, item_id: str, payload: {entity_class}Update) -> {entity_class}Read | None:
+                def update_by_parent(self, *, parent_field: str, parent_id: UUID, item_id: UUID, payload: {entity_class}Update) -> {entity_class}Read | None:
                     if self.get_by_parent(parent_field=parent_field, parent_id=parent_id, item_id=item_id) is None:
                         return None
                     return self.update(item_id, payload)
 
-                def delete_by_parent(self, *, parent_field: str, parent_id: str, item_id: str) -> {entity_class}Read | None:
+                def delete_by_parent(self, *, parent_field: str, parent_id: UUID, item_id: UUID) -> {entity_class}Read | None:
                     if self.get_by_parent(parent_field=parent_field, parent_id=parent_id, item_id=item_id) is None:
                         return None
                     return self.delete(item_id)
 
-                def restore_by_parent(self, *, parent_field: str, parent_id: str, item_id: str) -> {entity_class}Read | None:
+                def restore_by_parent(self, *, parent_field: str, parent_id: UUID, item_id: UUID) -> {entity_class}Read | None:
                     if self.get_by_parent(parent_field=parent_field, parent_id=parent_id, item_id=item_id) is None:
                         return None
                     return self.restore(item_id)
 
-                def list_related(self, *, item_id: str, related_field: str) -> list[str] | None:
+                def list_related(self, *, item_id: UUID, related_field: str) -> list[UUID] | None:
                     current = self.get(item_id)
                     if current is None:
                         return None
                     return list(getattr(current, related_field, []))
 
-                def link_related(self, *, item_id: str, related_field: str, related_id: str) -> {entity_class}Read | None:
+                def link_related(self, *, item_id: UUID, related_field: str, related_id: UUID) -> {entity_class}Read | None:
                     current = self.get(item_id)
                     if current is None:
                         return None
@@ -369,7 +370,7 @@ def generate_core_domain(
                     self._items[item_id] = updated
                     return updated
 
-                def unlink_related(self, *, item_id: str, related_field: str, related_id: str) -> {entity_class}Read | None:
+                def unlink_related(self, *, item_id: UUID, related_field: str, related_id: UUID) -> {entity_class}Read | None:
                     current = self.get(item_id)
                     if current is None:
                         return None
@@ -384,6 +385,8 @@ def generate_core_domain(
             {entity_name}_service = {entity_class}Service()
         ''',
         domain_dir / f"{entity_name}_router.py": f'''
+            from uuid import UUID
+
             from fastapi import APIRouter, HTTPException, Path, status
 
             from core_api.modules.{domain_name}.{entity_name}_schema import (
@@ -421,36 +424,36 @@ def generate_core_domain(
 
             if PARENT_FIELD and PARENT_ROUTE_PREFIX:
                 @router.get(PARENT_ROUTE_PREFIX, response_model=list[{entity_class}Read], tags=[f"{{DOMAIN_TAG}} - query"])
-                async def list_by_parent(parent_id: str = Path(alias=PARENT_FIELD), include_deleted: bool = False) -> list[{entity_class}Read]:
+                async def list_by_parent(parent_id: UUID = Path(alias=PARENT_FIELD), include_deleted: bool = False) -> list[{entity_class}Read]:
                     return {entity_name}_service.list_by_parent(parent_field=PARENT_FIELD, parent_id=parent_id, include_deleted=include_deleted)
 
                 @router.get(f"{{PARENT_ROUTE_PREFIX}}/{{{{resource_id}}}}", response_model={entity_class}Read, tags=[f"{{DOMAIN_TAG}} - query"])
-                async def get_by_parent(resource_id: str, parent_id: str = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
+                async def get_by_parent(resource_id: UUID, parent_id: UUID = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
                     resource = {entity_name}_service.get_by_parent(parent_field=PARENT_FIELD, parent_id=parent_id, item_id=resource_id)
                     if resource is None:
                         _not_found()
                     return resource
 
                 @router.post(PARENT_ROUTE_PREFIX, response_model={entity_class}Read, status_code=status.HTTP_201_CREATED, tags=[f"{{DOMAIN_TAG}} - command"])
-                async def create_for_parent(payload: {entity_class}Create, parent_id: str = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
+                async def create_for_parent(payload: {entity_class}Create, parent_id: UUID = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
                     return {entity_name}_service.create_for_parent(parent_field=PARENT_FIELD, parent_id=parent_id, payload=payload)
 
                 @router.patch(f"{{PARENT_ROUTE_PREFIX}}/{{{{resource_id}}}}", response_model={entity_class}Read, tags=[f"{{DOMAIN_TAG}} - command"])
-                async def update_by_parent(resource_id: str, payload: {entity_class}Update, parent_id: str = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
+                async def update_by_parent(resource_id: UUID, payload: {entity_class}Update, parent_id: UUID = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
                     resource = {entity_name}_service.update_by_parent(parent_field=PARENT_FIELD, parent_id=parent_id, item_id=resource_id, payload=payload)
                     if resource is None:
                         _not_found()
                     return resource
 
                 @router.delete(f"{{PARENT_ROUTE_PREFIX}}/{{{{resource_id}}}}", response_model={entity_class}Read, tags=[f"{{DOMAIN_TAG}} - command"])
-                async def delete_by_parent(resource_id: str, parent_id: str = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
+                async def delete_by_parent(resource_id: UUID, parent_id: UUID = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
                     resource = {entity_name}_service.delete_by_parent(parent_field=PARENT_FIELD, parent_id=parent_id, item_id=resource_id)
                     if resource is None:
                         _not_found()
                     return resource
 
                 @router.post(f"{{PARENT_ROUTE_PREFIX}}/{{{{resource_id}}}}/restore", response_model={entity_class}Read, tags=[f"{{DOMAIN_TAG}} - command"])
-                async def restore_by_parent(resource_id: str, parent_id: str = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
+                async def restore_by_parent(resource_id: UUID, parent_id: UUID = Path(alias=PARENT_FIELD)) -> {entity_class}Read:
                     resource = {entity_name}_service.restore_by_parent(parent_field=PARENT_FIELD, parent_id=parent_id, item_id=resource_id)
                     if resource is None:
                         _not_found()
@@ -458,7 +461,7 @@ def generate_core_domain(
 
 
             def _list_related_endpoint(related_field: str):
-                async def endpoint(resource_id: str) -> list[str]:
+                async def endpoint(resource_id: UUID) -> list[UUID]:
                     related_ids = {entity_name}_service.list_related(item_id=resource_id, related_field=related_field)
                     if related_ids is None:
                         _not_found()
@@ -467,7 +470,7 @@ def generate_core_domain(
 
 
             def _link_related_endpoint(related_field: str):
-                async def endpoint(resource_id: str, related_id: str) -> {entity_class}Read:
+                async def endpoint(resource_id: UUID, related_id: UUID) -> {entity_class}Read:
                     resource = {entity_name}_service.link_related(item_id=resource_id, related_field=related_field, related_id=related_id)
                     if resource is None:
                         _not_found()
@@ -476,7 +479,7 @@ def generate_core_domain(
 
 
             def _unlink_related_endpoint(related_field: str):
-                async def endpoint(resource_id: str, related_id: str) -> {entity_class}Read:
+                async def endpoint(resource_id: UUID, related_id: UUID) -> {entity_class}Read:
                     resource = {entity_name}_service.unlink_related(item_id=resource_id, related_field=related_field, related_id=related_id)
                     if resource is None:
                         _not_found()
@@ -487,7 +490,7 @@ def generate_core_domain(
             for related_domain, related_field in RELATED_RELATIONS.items():
                 related_tag = f"{{DOMAIN_TAG}}-{{related_domain.replace('_', '-')}}"
                 relation_prefix = f"/{domain_name.replace("_", "-")}/{{{{resource_id}}}}/{{related_domain.replace('_', '-')}}"
-                router.add_api_route(relation_prefix, _list_related_endpoint(related_field), methods=["GET"], response_model=list[str], tags=[f"{{related_tag}} - query"])
+                router.add_api_route(relation_prefix, _list_related_endpoint(related_field), methods=["GET"], response_model=list[UUID], tags=[f"{{related_tag}} - query"])
                 router.add_api_route(f"{{relation_prefix}}/{{{{related_id}}}}", _link_related_endpoint(related_field), methods=["POST"], response_model={entity_class}Read, tags=[f"{{related_tag}} - command"])
                 router.add_api_route(f"{{relation_prefix}}/{{{{related_id}}}}", _unlink_related_endpoint(related_field), methods=["DELETE"], response_model={entity_class}Read, tags=[f"{{related_tag}} - command"])
         ''',

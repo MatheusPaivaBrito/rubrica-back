@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from uuid import UUID
 
 from core_api.infrastructure.auth_context import AuthContext, authenticated_context, require_permission
 from core_api.modules.signature_request.workflow_schema import (
@@ -31,7 +32,7 @@ async def list_requests(context: AuthContext = Depends(require_permission("signa
 
 
 @router.get("/signature-requests/{request_id}", response_model=SignatureRequestRead, tags=["signature requests - query"])
-async def get_request(request_id: str, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> SignatureRequestRead:
+async def get_request(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> SignatureRequestRead:
     return workflow_service.get_request(request_id, context.subject)
 
 
@@ -41,52 +42,52 @@ async def create_request(payload: SignatureRequestInput, context: AuthContext = 
 
 
 @router.get("/signature-requests/{request_id}/signers", response_model=list[SignerRead], tags=["signature requests - query"])
-async def list_signers(request_id: str, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> list[SignerRead]:
+async def list_signers(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> list[SignerRead]:
     return workflow_service.list_signers(request_id, context.subject)
 
 
 @router.post("/signature-requests/{request_id}/signers", response_model=SignerRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
-async def add_signer(request_id: str, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
+async def add_signer(request_id: UUID, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
     return workflow_service.add_signer(request_id, payload, context.subject)
 
 @router.post("/signature-requests/{request_id}/signing-link", response_model=SigningLinkRead, tags=["signature requests - command"])
-async def create_signing_link(request_id: str, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SigningLinkRead:
+async def create_signing_link(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SigningLinkRead:
     return workflow_service.create_signing_link(request_id, context.subject)
 
 
 @router.get("/signature-requests/{request_id}/signing-link", response_model=SigningLinkRead, tags=["signature requests - query"])
-async def get_signing_link(request_id: str, context: AuthContext = Depends(administrator_context)) -> SigningLinkRead:
+async def get_signing_link(request_id: UUID, context: AuthContext = Depends(administrator_context)) -> SigningLinkRead:
     return workflow_service.get_signing_link(request_id, context.subject)
 
 
 @router.get("/signature-requests/{request_id}/evidence", response_model=list[SignatureEvidenceRead], tags=["audit - query"])
-async def signature_evidence(request_id: str, context: AuthContext = Depends(administrator_context)) -> list[SignatureEvidenceRead]:
+async def signature_evidence(request_id: UUID, context: AuthContext = Depends(administrator_context)) -> list[SignatureEvidenceRead]:
     return workflow_service.signature_evidence(request_id, context.subject)
 
 
 @router.get("/signature-requests/{request_id}/signed-document", tags=["signature requests - query"])
-async def signed_document(request_id: str, context: AuthContext = Depends(administrator_context)) -> Response:
+async def signed_document(request_id: UUID, context: AuthContext = Depends(administrator_context)) -> Response:
     filename, digest, content = workflow_service.signed_document(request_id, context.subject)
     return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"', "X-Signed-Document-SHA256": digest})
 
 
 @router.post("/signature-requests/{request_id}/signers/{signer_id}/revoke", response_model=SignerRead, tags=["signature requests - command"])
-async def revoke_signer_link(request_id: str, signer_id: str, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
+async def revoke_signer_link(request_id: UUID, signer_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
     return workflow_service.revoke_signer_link(request_id, signer_id, context.subject)
 
 
 @router.post("/signature-requests/{request_id}/open", response_model=SignatureRequestRead, tags=["signature requests - command"])
-async def open_request(request_id: str, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+async def open_request(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
     return workflow_service.open_request(request_id, context.subject)
 
 
 @router.post("/signature-requests/{request_id}/cancel", response_model=SignatureRequestRead, tags=["signature requests - command"])
-async def cancel_request(request_id: str, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+async def cancel_request(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
     return workflow_service.cancel_request(request_id, context.subject)
 
 
 @router.get("/signature-requests/{request_id}/audit", response_model=list[AuditEventRead], tags=["audit - query"])
-async def request_audit(request_id: str, context: AuthContext = Depends(require_permission("audit:read"))) -> list[AuditEventRead]:
+async def request_audit(request_id: UUID, context: AuthContext = Depends(require_permission("audit:read"))) -> list[AuditEventRead]:
     return workflow_service.audit_events(request_id, context.subject)
 
 

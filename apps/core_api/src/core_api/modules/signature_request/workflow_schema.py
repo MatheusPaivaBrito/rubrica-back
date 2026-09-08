@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -21,19 +22,19 @@ class SignerStatus(StrEnum):
 
 
 class SignatureRequestCreate(BaseModel):
-    document_id: str
+    document_id: UUID
     expires_at: datetime
     created_by: str = Field(min_length=1, max_length=255)
 
 
 class SignatureRequestInput(BaseModel):
-    document_id: str
+    document_id: UUID
     expires_at: datetime
 
 
 class SignatureRequestRead(BaseModel):
-    id: str
-    document_id: str
+    id: UUID
+    document_id: UUID
     document_version: int
     document_sha256: str
     status: RequestStatus
@@ -52,8 +53,8 @@ class SignerCreate(BaseModel):
 
 
 class SignerRead(BaseModel):
-    id: str
-    signature_request_id: str
+    id: UUID
+    signature_request_id: UUID
     auth_user_id: str
     name: str
     email: str
@@ -106,10 +107,10 @@ class SignCommand(BaseModel):
 
 
 class SignatureEvidenceRead(BaseModel):
-    signature_id: str
-    signer_id: str
-    request_id: str
-    document_id: str
+    signature_id: UUID
+    signer_id: UUID
+    request_id: UUID
+    document_id: UUID
     document_version: int
     signed_at: datetime
     signer_name: str
@@ -122,12 +123,12 @@ class SignatureEvidenceRead(BaseModel):
 
 
 class AuditEventRead(BaseModel):
-    id: str
+    id: UUID
     occurred_at: datetime
     actor_type: str
     actor_id: str
     action: str
     entity_type: str
-    entity_id: str
-    correlation_id: str
+    entity_id: UUID
+    correlation_id: UUID
     metadata_sanitized: dict[str, object]

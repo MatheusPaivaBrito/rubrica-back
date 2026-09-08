@@ -2,6 +2,7 @@ import os
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from sqlalchemy import delete, select
@@ -24,7 +25,7 @@ pytestmark = pytest.mark.skipif(os.getenv("RUBRICA_DATABASE_TESTS") != "1", reas
 def test_database_workflow_round_trip(tmp_path: Path) -> None:
     service = DatabaseSignatureWorkflowService(LocalDocumentStorage(tmp_path / "objects"))
     organization = "database-smoke-test"
-    document_id: int | None = None
+    document_id: UUID | None = None
     try:
         source = BytesIO()
         writer = PdfWriter()
@@ -32,7 +33,7 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         writer.write(source)
         original = source.getvalue()
         document = service.create_document(DocumentCreate(organization_id=organization, title="Smoke", original_filename="smoke.pdf", content_type="application/pdf", created_by="operator"), original)
-        document_id = int(document.id)
+        document_id = document.id
         request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
         service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
         service.add_signer(request.id, SignerCreate(name="Second User", email="second@example.com"), "operator")
@@ -48,7 +49,7 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         assert service.get_request(request.id, "operator").status == RequestStatus.COMPLETED
         assert service.get_content(document.id)[1] == original
         with SessionLocal.begin() as db:
-            persisted_request = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.id == int(request.id)))
+            persisted_request = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.id == request.id))
             persisted_request.expires_at = DateTimeService.utc_now() - timedelta(days=730)
         assert service.signing_context(token, "database@example.com").stamp == stamp
         assert service.signing_signed_document(token, "database@example.com")[2].startswith(b"%PDF")
@@ -85,7 +86,7 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
                     db.execute(delete(SignerEntity).where(SignerEntity.id.in_(signer_ids)))
                 if request_ids:
                     db.execute(delete(SignatureRequestEntity).where(SignatureRequestEntity.id.in_(request_ids)))
-                db.execute(delete(AuditEventEntity).where(AuditEventEntity.entity_type == "document", AuditEventEntity.entity_id == str(document_id)))
+                db.execute(delete(AuditEventEntity).where(AuditEventEntity.entity_type == "document", AuditEventEntity.entity_id == document_id))
                 db.execute(delete(DocumentVersionEntity).where(DocumentVersionEntity.document_id == document_id))
                 tenant_id = db.scalar(select(DocumentEntity.tenant_id).where(DocumentEntity.id == document_id))
                 db.execute(delete(DocumentEntity).where(DocumentEntity.id == document_id))

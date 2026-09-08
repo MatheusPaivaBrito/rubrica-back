@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from sqlalchemy import select
 
 from auth_api.infrastructure.database.connection import SessionLocal
@@ -13,7 +15,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
 
 
 class AccessControlService:
-    def context_for_user(self, user_id: int) -> tuple[list[str], list[str]]:
+    def context_for_user(self, user_id: UUID) -> tuple[list[str], list[str]]:
         with SessionLocal() as database:
             roles = list(database.scalars(select(UserRoleEntity.role).where(UserRoleEntity.user_id == user_id).order_by(UserRoleEntity.role)).all())
         permissions = sorted({permission for role in roles for permission in ROLE_PERMISSIONS.get(role, frozenset())})

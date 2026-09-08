@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Body, Depends, Query, Response, status
+from uuid import UUID
 
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead
 from core_api.infrastructure.auth_context import AuthContext, require_permission
@@ -14,23 +15,23 @@ async def list_documents(context: AuthContext = Depends(require_permission("docu
 
 
 @router.get("/{document_id}", response_model=DocumentRead, tags=["documents - query"])
-async def get_document(document_id: str, context: AuthContext = Depends(require_permission("documents:read"))) -> DocumentRead:
+async def get_document(document_id: UUID, context: AuthContext = Depends(require_permission("documents:read"))) -> DocumentRead:
     return workflow_service.get_document(document_id, context.subject)
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["documents - command"])
-async def delete_document(document_id: str, context: AuthContext = Depends(require_permission("documents:write"))) -> Response:
+async def delete_document(document_id: UUID, context: AuthContext = Depends(require_permission("documents:write"))) -> Response:
     workflow_service.delete_document(document_id, context.subject)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{document_id}/download", tags=["documents - query"])
-async def download_document(document_id: str, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
+async def download_document(document_id: UUID, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
     metadata, content = workflow_service.get_content(document_id, version, context.subject)
     return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'attachment; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/{document_id}/preview", tags=["documents - query"])
-async def preview_document(document_id: str, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
+async def preview_document(document_id: UUID, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
     metadata, content = workflow_service.get_content(document_id, version, context.subject)
     return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'inline; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
 
@@ -50,7 +51,7 @@ async def upload_document(
 
 @router.post("/{document_id}/versions", response_model=DocumentRead, tags=["documents - command"])
 async def create_version(
-    document_id: str,
+    document_id: UUID,
     content: bytes = Body(media_type="application/octet-stream"),
     filename: str = Query(min_length=1),
     content_type: str = Query(default="application/octet-stream"),

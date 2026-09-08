@@ -1,4 +1,5 @@
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -9,7 +10,7 @@ class DeliveryPolicy(BaseModel):
 
 
 class DeliveryAccepted(BaseModel):
-    delivery_id: str
+    delivery_id: UUID
     channel: str
     recipient: str
     provider: str

@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -19,7 +20,7 @@ class DocumentCreate(BaseModel):
 
 
 class DocumentRead(BaseModel):
-    id: str
+    id: UUID
     organization_id: str
     title: str
     original_filename: str
@@ -33,7 +34,7 @@ class DocumentRead(BaseModel):
 
 
 class DocumentVersionRead(BaseModel):
-    document_id: str
+    document_id: UUID
     version: int
     original_filename: str
     content_type: str

@@ -1,4 +1,5 @@
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -9,7 +10,7 @@ class TenantCreate(BaseModel):
 
 
 class TenantRead(BaseModel):
-    id: int
+    id: UUID
     name: str
     slug: str
     status: str
