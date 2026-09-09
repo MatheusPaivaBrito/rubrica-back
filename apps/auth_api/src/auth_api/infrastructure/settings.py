@@ -1,8 +1,11 @@
-from pydantic import Field
+from typing import ClassVar
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    DEVELOPMENT_MFA_KEY: ClassVar[str] = "rubrica-development-mfa-key-change-me"
     APP_NAME: str = "Rubrica Auth API"
     ENVIRONMENT: str = "development"
     DEBUG: bool = Field(default=True, validation_alias="APP_DEBUG")
@@ -27,6 +30,18 @@ class Settings(BaseSettings):
     AUTH_MFA_ISSUER: str = "Rubrica"
     AUTH_MFA_ENCRYPTION_KEY: str = "rubrica-development-mfa-key-change-me"
     AUTH_MFA_CHALLENGE_TTL_SECONDS: int = 300
+
+    @model_validator(mode="after")
+    def validate_production_mfa_key(self) -> "Settings":
+        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+            not self.AUTH_MFA_ENCRYPTION_KEY
+            or self.AUTH_MFA_ENCRYPTION_KEY == self.DEVELOPMENT_MFA_KEY
+            or len(self.AUTH_MFA_ENCRYPTION_KEY) < 32
+        ):
+            raise ValueError(
+                "AUTH_MFA_ENCRYPTION_KEY must be set to a secure value in production"
+            )
+        return self
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

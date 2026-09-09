@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from auth_api.infrastructure.database.connection import BaseEntity
@@ -28,6 +28,7 @@ class UserEntity(BaseEntity):
     )
     mfa_secret_ciphertext: Mapped[str | None] = mapped_column(String(512))
     mfa_pending_secret_ciphertext: Mapped[str | None] = mapped_column(String(512))
+    mfa_last_used_step: Mapped[int | None] = mapped_column(Integer)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     token_version: Mapped[int] = mapped_column(default=1, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -59,3 +60,13 @@ class MfaRecoveryCodeEntity(BaseEntity):
     )
     code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class MfaSecurityEventEntity(BaseEntity):
+    __tablename__ = "mfa_security_events"
+
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    metadata_sanitized: Mapped[dict[str, object]] = mapped_column(JSON, nullable=False, default=dict)

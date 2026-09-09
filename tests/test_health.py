@@ -52,6 +52,8 @@ def test_auth_routes_are_registered() -> None:
     assert "/auth/mfa/confirm" in paths
     assert "/auth/mfa" in paths
     assert "/auth/mfa/challenge" in paths
+    assert "/auth/mfa/status" in paths
+    assert "/auth/mfa/recovery-codes" in paths
     assert "/sessions/me" in paths
     assert "/access-control/ui-context" in paths
     assert "/access-control/context" in paths

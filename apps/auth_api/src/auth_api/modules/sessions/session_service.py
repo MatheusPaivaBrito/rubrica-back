@@ -49,20 +49,31 @@ class SessionService:
 
     def complete_mfa_challenge(self, ticket: str, code: str) -> LoginResponse | None:
         challenge_key = self._token_key("mfa", ticket)
+        attempt_key = self._token_key("mfa-attempts", ticket)
+        attempts = self._redis.incr(attempt_key)
+        if attempts == 1:
+            self._redis.expire(attempt_key, settings.AUTH_MFA_CHALLENGE_TTL_SECONDS)
+        if attempts > 5:
+            self._redis.delete(challenge_key, attempt_key)
+            return None
         raw_user_id = self._redis.get(challenge_key)
         if not raw_user_id:
             return None
         with SessionLocal.begin() as database:
-            user = database.get(UserEntity, self._user_identifier(raw_user_id))
-            if (
-                user is None
-                or not user.is_active
-                or not user.email_verified
-                or not user.mfa_enabled
-                or not mfa_service.verify_user_code(database, user, code)
-            ):
+            user = database.scalar(
+                select(UserEntity)
+                .where(UserEntity.id == self._user_identifier(raw_user_id))
+                .with_for_update()
+            )
+            if user is None or not user.is_active or not user.email_verified or not user.mfa_enabled:
                 return None
-            self._redis.delete(challenge_key)
+            if not mfa_service.verify_user_code(database, user, code):
+                mfa_service.audit(database, user, "mfa.challenge_failed")
+                if attempts >= 5:
+                    self._redis.delete(challenge_key, attempt_key)
+                return None
+            mfa_service.audit(database, user, "mfa.challenge_succeeded")
+            self._redis.delete(challenge_key, attempt_key)
             return self._create_session(user)
 
     def refresh(self, refresh_token: str) -> LoginResponse | None:
@@ -100,6 +111,21 @@ class SessionService:
         self._redis.delete(*session_keys)
         return True
 
+    def allow_mfa_operation(
+        self,
+        subject: str,
+        operation: str,
+        *,
+        limit: int = 10,
+        ttl_seconds: int = 300,
+    ) -> bool:
+        digest = sha256(subject.lower().encode("utf-8")).hexdigest()
+        key = f"{settings.AUTH_REDIS_KEY_PREFIX}:mfa-rate:{operation}:{digest}"
+        attempts = self._redis.incr(key)
+        if attempts == 1:
+            self._redis.expire(key, ttl_seconds)
+        return attempts <= limit
+
     def ui_context(self, token: str) -> UiContextResponse | None:
         session = self.current_session(token)
         if session is None:
@@ -112,13 +138,16 @@ class SessionService:
             user = database.get(UserEntity, self._user_identifier(state["user_id"]))
             preferred_locale = user.preferred_locale if user is not None else "en"
         fingerprint = sha256(f"{session.subject}:{session.session_id}".encode("utf-8")).hexdigest()
+        setup_required = bool({"signature_admin", "signature_operator"} & set(roles)) and not bool(
+            user and user.mfa_enabled
+        )
         return UiContextResponse(
             subject=session.subject,
             preferred_locale=preferred_locale,
             mfa_enabled=bool(user and user.mfa_enabled),
-            mfa_setup_required="signature_admin" in roles and not bool(user and user.mfa_enabled),
+            mfa_setup_required=setup_required,
             roles=roles,
-            permission_keys=permission_keys,
+            permission_keys=[] if setup_required else permission_keys,
             capability_hash=fingerprint,
         )
 

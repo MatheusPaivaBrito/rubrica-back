@@ -79,6 +79,10 @@ services:
           AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
           REDIS_HOST: redis
           REDIS_PORT: "6379"
+          AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:8080}
+          AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
+          AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY:-rubrica-development-mfa-key-change-me}
+          AUTH_MFA_CHALLENGE_TTL_SECONDS: ${AUTH_MFA_CHALLENGE_TTL_SECONDS:-300}
         ports:
           - "${AUTH_API_PORT:-8101}:8000"
 
