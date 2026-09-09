@@ -29,7 +29,11 @@ def test_core_routes_are_registered() -> None:
     assert "/signature-requests/{request_id}/evidence" in paths
     assert "/tenants" in paths
     assert "/tenants/{tenant_id}/members" in paths
+    assert "/tenants/{tenant_id}/preferences" in paths
     assert "/billing/tenants/{tenant_id}/account" in paths
+    assert "/billing/tenants/{tenant_id}/checkout" in paths
+    assert "/billing/tenants/{tenant_id}/portal" in paths
+    assert "/billing/webhooks/stripe" in paths
 
 def test_auth_routes_are_registered() -> None:
     paths = {route.path for route in auth_app.routes}
@@ -39,10 +43,20 @@ def test_auth_routes_are_registered() -> None:
     assert "/auth/refresh" in paths
     assert "/auth/logout" in paths
     assert "/auth/logout-all" in paths
+    assert "/auth/register" in paths
+    assert "/auth/verify-email/request" in paths
+    assert "/auth/verify-email" in paths
+    assert "/auth/password-recovery" in paths
+    assert "/auth/password-reset" in paths
+    assert "/auth/mfa/setup" in paths
+    assert "/auth/mfa/confirm" in paths
+    assert "/auth/mfa" in paths
+    assert "/auth/mfa/challenge" in paths
     assert "/sessions/me" in paths
     assert "/access-control/ui-context" in paths
     assert "/access-control/context" in paths
     assert "/users/signers" in paths
+    assert "/users/me/preferences" in paths
 
 
 def test_core_business_routes_require_an_access_token() -> None:

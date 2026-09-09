@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 
+from shared_kernel.localization import SupportedLocale
+
 
 class LoginRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
@@ -11,6 +13,17 @@ class LoginResponse(BaseModel):
     refresh_token: str
     session_id: str
     token_type: str = "bearer"
+
+
+class MfaChallengeResponse(BaseModel):
+    mfa_required: bool = True
+    mfa_ticket: str
+    expires_in: int
+
+
+class MfaChallengeRequest(BaseModel):
+    mfa_ticket: str = Field(min_length=32, max_length=255)
+    code: str = Field(min_length=6, max_length=32)
 
 
 class RefreshRequest(BaseModel):
@@ -27,8 +40,11 @@ class LogoutResponse(BaseModel):
 
 
 class UiContextResponse(BaseModel):
-    version: int = 1
+    version: int = 2
     subject: str
+    preferred_locale: SupportedLocale = "en"
+    mfa_enabled: bool = False
+    mfa_setup_required: bool = False
     roles: list[str] = Field(default_factory=lambda: ["project_user"])
     permission_keys: list[str]
     capability_hash: str

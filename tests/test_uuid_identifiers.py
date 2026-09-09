@@ -32,6 +32,17 @@ def test_legacy_signing_link_token_can_be_reconstructed_after_uuid_migration() -
 
 def test_uuid_schema_serializes_as_uuid_string() -> None:
     identifier = uuid4()
-    item = TenantRead(id=identifier, name="Tenant", slug="tenant", status="active", role="admin", created_at=DateTimeService.utc_now())
+    item = TenantRead(
+        id=identifier,
+        name="Tenant",
+        slug="tenant",
+        status="active",
+        role="admin",
+        created_at=DateTimeService.utc_now(),
+        default_locale="en",
+        country_code=None,
+        timezone="UTC",
+        currency="USD",
+    )
 
     assert item.model_dump(mode="json")["id"] == str(identifier)

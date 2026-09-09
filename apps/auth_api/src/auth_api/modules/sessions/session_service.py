@@ -13,10 +13,12 @@ from auth_api.infrastructure.settings import settings
 from auth_api.modules.sessions.session_schema import (
     LoginRequest,
     LoginResponse,
+    MfaChallengeResponse,
     SessionRead,
     UiContextResponse,
 )
 from auth_api.modules.access_control.access_control_service import access_control_service
+from auth_api.modules.mfa.mfa_service import mfa_service
 from auth_api.modules.users.passwords import verify_password
 from auth_api.modules.users.user_entity import UserEntity
 
@@ -30,17 +32,37 @@ class SessionService:
             socket_timeout=1.0,
         )
 
-    def login(self, payload: LoginRequest) -> LoginResponse | None:
+    def login(self, payload: LoginRequest) -> LoginResponse | MfaChallengeResponse | None:
         with SessionLocal() as database:
             user = database.scalar(
                 select(UserEntity)
                 .where(UserEntity.email == payload.email.strip().lower())
                 .limit(1)
             )
-            if user is None or not user.is_active:
+            if user is None or not user.is_active or not user.email_verified:
                 return None
             if not verify_password(payload.password, user.password_hash):
                 return None
+            if user.mfa_enabled:
+                return self._create_mfa_challenge(user)
+            return self._create_session(user)
+
+    def complete_mfa_challenge(self, ticket: str, code: str) -> LoginResponse | None:
+        challenge_key = self._token_key("mfa", ticket)
+        raw_user_id = self._redis.get(challenge_key)
+        if not raw_user_id:
+            return None
+        with SessionLocal.begin() as database:
+            user = database.get(UserEntity, self._user_identifier(raw_user_id))
+            if (
+                user is None
+                or not user.is_active
+                or not user.email_verified
+                or not user.mfa_enabled
+                or not mfa_service.verify_user_code(database, user, code)
+            ):
+                return None
+            self._redis.delete(challenge_key)
             return self._create_session(user)
 
     def refresh(self, refresh_token: str) -> LoginResponse | None:
@@ -86,9 +108,15 @@ class SessionService:
         if state is None:
             return None
         roles, permission_keys = access_control_service.context_for_user(self._user_identifier(state["user_id"]))
+        with SessionLocal() as database:
+            user = database.get(UserEntity, self._user_identifier(state["user_id"]))
+            preferred_locale = user.preferred_locale if user is not None else "en"
         fingerprint = sha256(f"{session.subject}:{session.session_id}".encode("utf-8")).hexdigest()
         return UiContextResponse(
             subject=session.subject,
+            preferred_locale=preferred_locale,
+            mfa_enabled=bool(user and user.mfa_enabled),
+            mfa_setup_required="signature_admin" in roles and not bool(user and user.mfa_enabled),
             roles=roles,
             permission_keys=permission_keys,
             capability_hash=fingerprint,
@@ -99,6 +127,18 @@ class SessionService:
             session_id=token_urlsafe(18),
             user_id=user.id,
             subject=user.email,
+        )
+
+    def _create_mfa_challenge(self, user: UserEntity) -> MfaChallengeResponse:
+        ticket = token_urlsafe(48)
+        self._redis.set(
+            self._token_key("mfa", ticket),
+            str(user.id),
+            ex=settings.AUTH_MFA_CHALLENGE_TTL_SECONDS,
+        )
+        return MfaChallengeResponse(
+            mfa_ticket=ticket,
+            expires_in=settings.AUTH_MFA_CHALLENGE_TTL_SECONDS,
         )
 
     def _create_session_from_state(self, state: dict[str, object]) -> LoginResponse:

@@ -14,6 +14,9 @@ class BillingAccountEntity(BaseEntity):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="not_configured", index=True)
     provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     provider_customer_id: Mapped[str | None] = mapped_column(String(160), nullable=True, unique=True)
+    provider_subscription_id: Mapped[str | None] = mapped_column(
+        String(160), nullable=True, unique=True
+    )
     current_product_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     current_period_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

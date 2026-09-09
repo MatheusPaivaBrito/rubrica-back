@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -72,6 +73,10 @@ class StampPosition(BaseModel):
     page: int = Field(ge=1)
     x: float = Field(ge=0, le=1)
     y: float = Field(ge=0, le=1)
+    template: Literal["BR", "JP", "INTL"] = "INTL"
+    country_code: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
+    show_flag: bool = False
+    template_version: Literal["rubrica-stamp-v2"] = "rubrica-stamp-v2"
 
 
 class ClientEvidence(BaseModel):

@@ -58,8 +58,21 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.setLineWidth(1.5)
     canvas.roundRect(left, bottom, box_width, box_height, 4, fill=1, stroke=1)
     canvas.setFillColor(HexColor("#0D5B4B"))
+    flag_width = 25.0 if stamp.get("show_flag") and stamp.get("country_code") else 0.0
+    if flag_width:
+        _draw_country_flag(
+            canvas,
+            left + box_width - flag_width - 6,
+            bottom + 27,
+            str(stamp["country_code"]),
+        )
     canvas.setFont("Helvetica-Bold", 6)
-    canvas.drawString(left + 7, bottom + 34, "ASSINADO ELETRONICAMENTE POR")
+    label = {
+        "BR": "ASSINADO ELETRONICAMENTE POR",
+        "JP": "ELECTRONICALLY SIGNED BY",
+        "INTL": "ELECTRONICALLY SIGNED BY",
+    }.get(str(stamp.get("template", "INTL")), "ELECTRONICALLY SIGNED BY")
+    canvas.drawString(left + 7, bottom + 34, label)
     canvas.setFont("Helvetica-Bold", 9)
     canvas.drawString(left + 7, bottom + 21, str(item["signer_name"])[:38])
     canvas.setFont("Helvetica", 6.5)
@@ -67,3 +80,34 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.save()
     stream.seek(0)
     return stream
+
+
+def _draw_country_flag(canvas: Canvas, left: float, bottom: float, country_code: str) -> None:
+    canvas.saveState()
+    if country_code == "BR":
+        canvas.setFillColor(HexColor("#009C3B"))
+        canvas.rect(left, bottom, 24, 14, fill=1, stroke=0)
+        canvas.setFillColor(HexColor("#FFDF00"))
+        path = canvas.beginPath()
+        path.moveTo(left + 12, bottom + 12)
+        path.lineTo(left + 21, bottom + 7)
+        path.lineTo(left + 12, bottom + 2)
+        path.lineTo(left + 3, bottom + 7)
+        path.close()
+        canvas.drawPath(path, fill=1, stroke=0)
+        canvas.setFillColor(HexColor("#002776"))
+        canvas.circle(left + 12, bottom + 7, 3.2, fill=1, stroke=0)
+    elif country_code == "JP":
+        canvas.setFillColor(white)
+        canvas.setStrokeColor(HexColor("#D9DEE7"))
+        canvas.rect(left, bottom, 24, 14, fill=1, stroke=1)
+        canvas.setFillColor(HexColor("#BC002D"))
+        canvas.circle(left + 12, bottom + 7, 4.2, fill=1, stroke=0)
+    else:
+        canvas.setFillColor(HexColor("#EFF3F8"))
+        canvas.setStrokeColor(HexColor("#8A96A8"))
+        canvas.rect(left, bottom, 24, 14, fill=1, stroke=1)
+        canvas.setFillColor(HexColor("#26364D"))
+        canvas.setFont("Helvetica-Bold", 6)
+        canvas.drawCentredString(left + 12, bottom + 4, country_code[:2])
+    canvas.restoreState()

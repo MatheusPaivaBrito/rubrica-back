@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     AUTH_REDIS_KEY_PREFIX: str = "auth"
     AUTH_ACCESS_TTL_SECONDS: int = 900
     AUTH_SESSION_TTL_SECONDS: int = 604800
+    AUTH_EMAIL_VERIFICATION_TTL_SECONDS: int = 86400
+    AUTH_PASSWORD_RESET_TTL_SECONDS: int = 3600
+    AUTH_PUBLIC_WEB_URL: str = "http://localhost:8080"
+    NOTIFICATION_API_URL: str = "http://localhost:8103"
+    AUTH_MFA_ISSUER: str = "Rubrica"
+    AUTH_MFA_ENCRYPTION_KEY: str = "rubrica-development-mfa-key-change-me"
+    AUTH_MFA_CHALLENGE_TTL_SECONDS: int = 300
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

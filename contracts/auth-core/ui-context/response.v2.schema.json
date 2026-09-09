@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Auth UI Context Response v2",
+  "type": "object",
+  "required": [
+    "version",
+    "subject",
+    "preferred_locale",
+    "mfa_enabled",
+    "mfa_setup_required",
+    "roles",
+    "permission_keys",
+    "capability_hash"
+  ],
+  "properties": {
+    "version": {
+      "const": 2
+    },
+    "subject": {
+      "type": "string"
+    },
+    "preferred_locale": {
+      "enum": ["pt-BR", "en", "ja-JP"]
+    },
+    "mfa_enabled": {
+      "type": "boolean"
+    },
+    "mfa_setup_required": {
+      "type": "boolean"
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "permission_keys": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "capability_hash": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

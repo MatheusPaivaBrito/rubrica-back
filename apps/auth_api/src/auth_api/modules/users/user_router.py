@@ -9,7 +9,7 @@ from auth_api.modules.sessions.session_router import require_authenticated_sessi
 from auth_api.modules.sessions.session_schema import SessionRead
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import UserEntity
-from auth_api.modules.users.user_schema import UserCreate, UserRead
+from auth_api.modules.users.user_schema import UserCreate, UserPreferencesUpdate, UserRead
 
 
 router = APIRouter(prefix="/users", tags=["users - command"])
@@ -47,7 +47,48 @@ async def list_signers(session: SessionRead = Depends(require_authenticated_sess
             .distinct()
             .order_by(UserEntity.name, UserEntity.email)
         ).all()
-        return [UserRead(id=item.id, name=item.name or item.email, email=item.email, role="signature_signer", is_active=item.is_active) for item in rows]
+        return [
+            UserRead(
+                id=item.id,
+                name=item.name or item.email,
+                email=item.email,
+                role="signature_signer",
+                is_active=item.is_active,
+                preferred_locale=item.preferred_locale,
+            )
+            for item in rows
+        ]
+
+
+@router.patch("/me/preferences", response_model=UserRead)
+async def update_my_preferences(
+    payload: UserPreferencesUpdate,
+    session: SessionRead = Depends(require_authenticated_session),
+) -> UserRead:
+    with SessionLocal.begin() as database:
+        item = database.scalar(
+            select(UserEntity).where(UserEntity.email == session.subject).limit(1)
+        )
+        if item is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+            )
+        roles, _ = access_control_service.context_for_user(item.id)
+        role = next(
+            (candidate for candidate in roles if candidate.startswith("signature_")),
+            "signature_signer",
+        )
+        item.preferred_locale = payload.preferred_locale
+        database.flush()
+        return UserRead(
+            id=item.id,
+            name=item.name or item.email,
+            email=item.email,
+            role=role,
+            is_active=item.is_active,
+            preferred_locale=item.preferred_locale,
+        )
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
@@ -59,11 +100,26 @@ async def create_user(payload: UserCreate, session: SessionRead = Depends(requir
         roles, _ = access_control_service.context_for_user(actor.id)
         if "signature_admin" not in roles:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator role is required")
-        item = UserEntity(name=payload.name.strip(), email=payload.email.lower(), cpf_hash=hash_password(_cpf_digits(payload.cpf)), password_hash=hash_password(payload.password), is_active=True)
+        item = UserEntity(
+            name=payload.name.strip(),
+            email=payload.email.lower(),
+            cpf_hash=hash_password(_cpf_digits(payload.cpf)),
+            password_hash=hash_password(payload.password),
+            preferred_locale=payload.preferred_locale,
+            email_verified=True,
+            is_active=True,
+        )
         database.add(item)
         try:
             database.flush()
         except IntegrityError as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A user with this email already exists") from exc
         database.add(UserRoleEntity(user_id=item.id, role=payload.role))
-        return UserRead(id=item.id, name=item.name or item.email, email=item.email, role=payload.role, is_active=item.is_active)
+        return UserRead(
+            id=item.id,
+            name=item.name or item.email,
+            email=item.email,
+            role=payload.role,
+            is_active=item.is_active,
+            preferred_locale=item.preferred_locale,
+        )

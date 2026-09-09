@@ -8,6 +8,8 @@ from auth_api.modules.sessions.session_schema import (
     LogoutResponse,
     RefreshRequest,
     SessionRead,
+    MfaChallengeRequest,
+    MfaChallengeResponse,
 )
 from auth_api.modules.sessions.session_service import session_service
 
@@ -25,11 +27,33 @@ async def require_authenticated_session(
     return session
 
 
-@router.post("/auth/login", response_model=LoginResponse)
-async def login(payload: LoginRequest, response: Response) -> LoginResponse:
+@router.post("/auth/login", response_model=LoginResponse | MfaChallengeResponse)
+async def login(
+    payload: LoginRequest,
+    response: Response,
+) -> LoginResponse | MfaChallengeResponse:
     authenticated = session_service.login(payload)
     if authenticated is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if isinstance(authenticated, LoginResponse):
+        _set_auth_cookies(response, authenticated)
+    return authenticated
+
+
+@router.post("/auth/mfa/challenge", response_model=LoginResponse)
+async def complete_mfa_challenge(
+    payload: MfaChallengeRequest,
+    response: Response,
+) -> LoginResponse:
+    authenticated = session_service.complete_mfa_challenge(
+        payload.mfa_ticket,
+        payload.code,
+    )
+    if authenticated is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="MFA challenge is invalid or expired",
+        )
     _set_auth_cookies(response, authenticated)
     return authenticated
 

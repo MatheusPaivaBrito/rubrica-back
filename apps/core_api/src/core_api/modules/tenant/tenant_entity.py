@@ -12,6 +12,16 @@ class TenantEntity(BaseEntity):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     slug: Mapped[str] = mapped_column(String(120), nullable=False, unique=True, index=True)
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="active", index=True)
+    default_locale: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="en", server_default="en"
+    )
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="UTC", server_default="UTC"
+    )
+    currency: Mapped[str] = mapped_column(
+        String(3), nullable=False, default="USD", server_default="USD"
+    )
 
 
 class TenantMemberEntity(BaseEntity):
