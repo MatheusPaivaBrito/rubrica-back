@@ -2,13 +2,15 @@ import os
 from datetime import timedelta
 from io import BytesIO
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import delete, select
 from pypdf import PdfReader, PdfWriter
 
 from core_api.infrastructure.database.connection import SessionLocal
+from core_api.modules.billing.billing_entity import BillingAccountEntity
+from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate
 from core_api.modules.document.storage import LocalDocumentStorage
@@ -16,10 +18,59 @@ from core_api.modules.signature_request.database_workflow_service import Databas
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.workflow_schema import RequestStatus, SignatureRequestCreate, SignerCreate, StampPosition
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
+from core_api.modules.signature_request.workflow_service import WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
 
 
 pytestmark = pytest.mark.skipif(os.getenv("RUBRICA_DATABASE_TESTS") != "1", reason="requires Rubrica PostgreSQL")
+
+
+def test_signature_entitlement_limit_and_active_subscription() -> None:
+    tenant_id = uuid4()
+    with SessionLocal.begin() as db:
+        db.add(TenantEntity(id=tenant_id, name="Entitlement test", slug=f"entitlement-{tenant_id}"))
+        db.flush()
+        db.add(
+            BillingAccountEntity(
+                tenant_id=tenant_id,
+                status="not_configured",
+                signatures_used=4,
+                free_signatures_limit=5,
+            )
+        )
+
+    try:
+        with SessionLocal.begin() as db:
+            billing_service.consume_signature(db, tenant_id)
+
+        with pytest.raises(WorkflowError) as error:
+            with SessionLocal.begin() as db:
+                billing_service.consume_signature(db, tenant_id)
+        assert error.value.status_code == 402
+
+        with SessionLocal.begin() as db:
+            account = db.scalar(
+                select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)
+            )
+            assert account is not None
+            assert account.signatures_used == 5
+            account.status = "active"
+
+        with SessionLocal.begin() as db:
+            billing_service.consume_signature(db, tenant_id)
+
+        with SessionLocal() as db:
+            account = db.scalar(
+                select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)
+            )
+            assert account is not None
+            assert account.signatures_used == 6
+    finally:
+        with SessionLocal.begin() as db:
+            db.execute(
+                delete(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)
+            )
+            db.execute(delete(TenantEntity).where(TenantEntity.id == tenant_id))
 
 
 def test_database_workflow_round_trip(tmp_path: Path) -> None:
@@ -74,6 +125,18 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         assert evidence[0].evidence_sha256
         assert evidence[0].subject_hmac_sha256 != "database@example.com"
         assert "signature.completed" in [event.action for event in service.audit_events(request.id, "operator")]
+        with SessionLocal() as db:
+            tenant_id = db.scalar(
+                select(DocumentEntity.tenant_id).where(DocumentEntity.id == document.id)
+            )
+            billing_account = db.scalar(
+                select(BillingAccountEntity).where(
+                    BillingAccountEntity.tenant_id == tenant_id
+                )
+            )
+            assert billing_account is not None
+            assert billing_account.signatures_used == 2
+            assert billing_account.free_signatures_limit == 5
     finally:
         if document_id is not None:
             with SessionLocal.begin() as db:
@@ -91,5 +154,10 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
                 tenant_id = db.scalar(select(DocumentEntity.tenant_id).where(DocumentEntity.id == document_id))
                 db.execute(delete(DocumentEntity).where(DocumentEntity.id == document_id))
                 if tenant_id is not None:
+                    db.execute(
+                        delete(BillingAccountEntity).where(
+                            BillingAccountEntity.tenant_id == tenant_id
+                        )
+                    )
                     db.execute(delete(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id))
                     db.execute(delete(TenantEntity).where(TenantEntity.id == tenant_id))

@@ -3,6 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from uuid import UUID
 
 from core_api.infrastructure.database.connection import SessionLocal
+from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_schema import (
@@ -41,6 +42,7 @@ class TenantService:
             except IntegrityError as exc:
                 raise WorkflowError("Tenant slug is already in use", 409) from exc
             db.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id=subject.lower(), role="admin"))
+            db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
             db.flush()
             return self._read(tenant, "admin")
 

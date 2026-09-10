@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -19,6 +19,18 @@ class BillingAccountEntity(BaseEntity):
     )
     current_product_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     current_period_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    free_signatures_limit: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=5,
+        server_default="5",
+    )
+    signatures_used: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
 
 
 class BillingEventEntity(BaseEntity):

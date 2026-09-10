@@ -13,6 +13,8 @@ from sqlalchemy.exc import IntegrityError
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
+from core_api.modules.billing.billing_entity import BillingAccountEntity
+from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
@@ -42,6 +44,7 @@ class DatabaseSignatureWorkflowService:
                     db.add(tenant)
                     db.flush()
                     db.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id=payload.created_by.lower(), role="admin"))
+                    db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
                 else:
                     tenant_service.require_role(db, tenant.id, payload.created_by, {"admin", "member"})
                 item = DocumentEntity(**payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
@@ -292,6 +295,10 @@ class DatabaseSignatureWorkflowService:
                 version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
                 if version is None or version.sha256 != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
+                document = db.get(DocumentEntity, request.document_id)
+                if document is None or document.deleted_at is not None:
+                    raise WorkflowError("Document not found", 404)
+                billing_service.consume_signature(db, document.tenant_id)
                 with self.storage.get(version.storage_key) as stream:
                     original = stream.read()
                 if sha256(original).hexdigest() != request.document_sha256:

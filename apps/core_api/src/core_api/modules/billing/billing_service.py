@@ -28,6 +28,25 @@ class BillingService:
     def initialize(self, tenant_id: UUID, subject: str) -> BillingAccountRead:
         return self._account(tenant_id, subject, {"admin"})
 
+    def consume_signature(self, database, tenant_id: UUID) -> None:
+        account = database.scalar(
+            select(BillingAccountEntity)
+            .where(BillingAccountEntity.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if account is None:
+            account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")
+            database.add(account)
+            database.flush()
+        elif account.deleted_at is not None:
+            account.deleted_at = None
+        if account.status != "active" and account.signatures_used >= account.free_signatures_limit:
+            raise WorkflowError(
+                "Free signature allowance exhausted. An active subscription is required",
+                402,
+            )
+        account.signatures_used += 1
+
     def create_checkout(self, tenant_id: UUID, subject: str) -> BillingCheckoutRead:
         self._configure_stripe()
         with SessionLocal.begin() as database:
@@ -144,7 +163,8 @@ class BillingService:
             subscription = resource.get("subscription")
             account.provider_subscription_id = str(subscription) if subscription else None
             account.current_product_code = "rubrica_mvp"
-            account.status = "active"
+            if account.status != "active":
+                account.status = "pending"
             return
         if event_type.startswith("customer.subscription."):
             account.provider_subscription_id = str(resource.get("id"))
@@ -201,15 +221,14 @@ class BillingService:
     @staticmethod
     def _account_entity(database, tenant_id: UUID) -> BillingAccountEntity:
         account = database.scalar(
-            select(BillingAccountEntity).where(
-                BillingAccountEntity.tenant_id == tenant_id,
-                BillingAccountEntity.deleted_at.is_(None),
-            )
+            select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)
         )
         if account is None:
             account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")
             database.add(account)
             database.flush()
+        elif account.deleted_at is not None:
+            account.deleted_at = None
         return account
 
     @staticmethod
@@ -217,7 +236,26 @@ class BillingService:
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, roles)
             account = BillingService._account_entity(database, tenant_id)
-            return BillingAccountRead.model_validate(account)
+            unlimited = account.status == "active"
+            return BillingAccountRead(
+                id=account.id,
+                tenant_id=account.tenant_id,
+                status=account.status,
+                provider=account.provider,
+                provider_customer_id=account.provider_customer_id,
+                provider_subscription_id=account.provider_subscription_id,
+                current_product_code=account.current_product_code,
+                current_period_ends_at=account.current_period_ends_at,
+                free_signatures_limit=account.free_signatures_limit,
+                signatures_used=account.signatures_used,
+                signatures_remaining=(
+                    None
+                    if unlimited
+                    else max(account.free_signatures_limit - account.signatures_used, 0)
+                ),
+                unlimited_signatures=unlimited,
+                created_at=account.created_at,
+            )
 
 
 billing_service = BillingService()
