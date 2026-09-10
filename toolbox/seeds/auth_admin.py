@@ -18,9 +18,18 @@ def main() -> None:
     with SessionLocal.begin() as database:
         user = database.scalar(select(UserEntity).where(UserEntity.email == email))
         if user is None:
-            user = UserEntity(email=email, password_hash=hash_password(password), is_active=True)
+            user = UserEntity(
+                email=email,
+                password_hash=hash_password(password),
+                email_verified=True,
+                is_active=True,
+            )
             database.add(user)
             database.flush()
+        else:
+            user.password_hash = hash_password(password)
+            user.email_verified = True
+            user.is_active = True
         role = database.scalar(select(UserRoleEntity).where(UserRoleEntity.user_id == user.id, UserRoleEntity.role == "signature_admin"))
         if role is None:
             database.add(UserRoleEntity(user_id=user.id, role="signature_admin"))
