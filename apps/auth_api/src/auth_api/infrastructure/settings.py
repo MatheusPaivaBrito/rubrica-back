@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     AUTH_PASSWORD_RESET_TTL_SECONDS: int = 3600
     AUTH_PUBLIC_WEB_URL: str = "http://localhost:8080"
     NOTIFICATION_API_URL: str = "http://localhost:8103"
+    NOTIFICATION_INTERNAL_SERVICE_KEY: str = ""
     AUTH_MFA_ISSUER: str = "Rubrica"
     AUTH_MFA_ENCRYPTION_KEY: str = "rubrica-development-mfa-key-change-me"
     AUTH_MFA_CHALLENGE_TTL_SECONDS: int = 300

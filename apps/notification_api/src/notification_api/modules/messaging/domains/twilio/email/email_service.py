@@ -1,6 +1,6 @@
 from notification_api.infrastructure.providers import accept_delivery
-from notification_api.modules.messaging.domains.email.email_schema import EmailMessage
-from notification_api.modules.messaging.schemas import DeliveryAccepted
+from notification_api.modules.messaging.domains.twilio.email.email_schema import EmailMessage
+from notification_api.modules.messaging.contracts.delivery import DeliveryAccepted
 
 
 def request_email_delivery(payload: EmailMessage) -> DeliveryAccepted:

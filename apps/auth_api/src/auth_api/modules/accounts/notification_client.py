@@ -18,13 +18,16 @@ def request_account_email(
 ) -> None:
     try:
         response = httpx.post(
-            f"{settings.NOTIFICATION_API_URL.rstrip('/')}/messaging/email/messages",
+            f"{settings.NOTIFICATION_API_URL.rstrip('/')}/internal/providers/resend/emails",
             json={
-                "to": recipient,
+                "recipient": recipient,
                 "subject": subject,
-                "body": body,
+                "content": body,
                 "idempotency_key": idempotency_key,
-                "metadata": metadata,
+            },
+            headers={
+                "X-Rubrica-Service": "auth_api",
+                "X-Rubrica-Service-Key": settings.NOTIFICATION_INTERNAL_SERVICE_KEY,
             },
             timeout=5.0,
         )

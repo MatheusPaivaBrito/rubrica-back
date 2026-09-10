@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from notification_api.modules.messaging.schemas import DeliveryPolicy
+from notification_api.modules.messaging.contracts.delivery import DeliveryPolicy
 
 
 class EmailMessage(BaseModel):
