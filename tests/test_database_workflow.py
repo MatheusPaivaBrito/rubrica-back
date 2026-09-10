@@ -97,7 +97,16 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         assert service.signing_signed_document(token, "second@example.com")[2].startswith(b"%PDF")
         service.sign(token, "second@example.com", True, StampPosition(page=1, x=0.35, y=0.7))
 
-        assert service.get_request(request.id, "operator").status == RequestStatus.COMPLETED
+        completed_request = service.get_request(request.id, "operator")
+        assert completed_request.status == RequestStatus.COMPLETED
+        assert completed_request.document_title == "Smoke"
+        assert completed_request.original_filename == "smoke.pdf"
+        listed_document = next(
+            item for item in service.list_documents("operator") if item.id == document.id
+        )
+        assert listed_document.size_bytes == len(original)
+        assert listed_document.signature_request_count == 1
+        assert listed_document.completed_signature_count == 2
         assert service.get_content(document.id)[1] == original
         with SessionLocal.begin() as db:
             persisted_request = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.id == request.id))

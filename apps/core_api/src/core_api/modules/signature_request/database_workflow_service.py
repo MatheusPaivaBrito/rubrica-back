@@ -53,7 +53,7 @@ class DatabaseSignatureWorkflowService:
                 db.add(DocumentVersionEntity(document_id=item.id, version=1, original_filename=item.original_filename, content_type=item.content_type, storage_key=key, sha256=digest, size_bytes=size, created_by=item.created_by))
                 db.flush()
                 self._audit(db, None, payload.created_by, "document.uploaded", "document", item.id, {"version": 1, "sha256": digest})
-                result = self._document_read(item)
+                result = self._document_read(db, item)
             return result
         except Exception:
             self.storage.delete(key)
@@ -80,7 +80,7 @@ class DatabaseSignatureWorkflowService:
                 db.add(DocumentVersionEntity(document_id=item.id, version=item.version, original_filename=filename, content_type=content_type, storage_key=key, sha256=digest, size_bytes=size, created_by=actor_id))
                 db.flush()
                 self._audit(db, None, actor_id, "document.version_created", "document", item.id, {"version": item.version, "sha256": digest})
-                result = self._document_read(item)
+                result = self._document_read(db, item)
             return result
         except Exception:
             if key:
@@ -90,13 +90,13 @@ class DatabaseSignatureWorkflowService:
     def list_documents(self, actor_id: str) -> list[DocumentRead]:
         with SessionLocal() as db:
             statement = select(DocumentEntity).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(DocumentEntity.id)
-            return [self._document_read(item) for item in db.scalars(statement).all()]
+            return [self._document_read(db, item) for item in db.scalars(statement).all()]
 
     def get_document(self, document_id: str, actor_id: str) -> DocumentRead:
         with SessionLocal() as db:
             item = self._document(db, document_id)
             tenant_service.require_role(db, item.tenant_id, actor_id)
-            return self._document_read(item)
+            return self._document_read(db, item)
 
     def delete_document(self, document_id: str, actor_id: str) -> None:
         with SessionLocal.begin() as db:
@@ -485,11 +485,15 @@ class DatabaseSignatureWorkflowService:
     def _request_read(self, db, item: SignatureRequestEntity) -> SignatureRequestRead:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
-        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count)
+        document = db.get(DocumentEntity, item.document_id)
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "")
 
     @staticmethod
-    def _document_read(x: DocumentEntity) -> DocumentRead:
-        return DocumentRead(id=x.id, organization_id=x.organization_id, title=x.title, original_filename=x.original_filename, content_type=x.content_type, sha256=x.sha256, version=x.version, status=x.status, created_by=x.created_by, created_at=x.created_at, updated_at=x.updated_at)
+    def _document_read(db, x: DocumentEntity) -> DocumentRead:
+        size_bytes = db.scalar(select(DocumentVersionEntity.size_bytes).where(DocumentVersionEntity.document_id == x.id, DocumentVersionEntity.version == x.version))
+        request_count = db.scalar(select(func.count()).select_from(SignatureRequestEntity).where(SignatureRequestEntity.document_id == x.id, SignatureRequestEntity.deleted_at.is_(None))) or 0
+        completed_signature_count = db.scalar(select(func.count()).select_from(SignerEntity).join(SignatureRequestEntity, SignatureRequestEntity.id == SignerEntity.signature_request_id).where(SignatureRequestEntity.document_id == x.id, SignatureRequestEntity.deleted_at.is_(None), SignerEntity.status == SignerStatus.SIGNED.value)) or 0
+        return DocumentRead(id=x.id, organization_id=x.organization_id, title=x.title, original_filename=x.original_filename, content_type=x.content_type, sha256=x.sha256, version=x.version, status=x.status, created_by=x.created_by, created_at=x.created_at, updated_at=x.updated_at, size_bytes=size_bytes, signature_request_count=request_count, completed_signature_count=completed_signature_count)
 
     @staticmethod
     def _version_read(x: DocumentVersionEntity) -> DocumentVersionRead:

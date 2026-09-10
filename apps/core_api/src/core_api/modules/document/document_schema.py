@@ -31,6 +31,9 @@ class DocumentRead(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    size_bytes: int | None = None
+    signature_request_count: int = 0
+    completed_signature_count: int = 0
 
 
 class DocumentVersionRead(BaseModel):

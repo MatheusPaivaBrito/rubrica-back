@@ -45,6 +45,8 @@ class SignatureRequestRead(BaseModel):
     completed_at: datetime | None = None
     signer_count: int = 0
     signed_count: int = 0
+    document_title: str = ""
+    original_filename: str = ""
 
 
 class SignerCreate(BaseModel):
