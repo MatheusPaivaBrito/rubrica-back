@@ -2,18 +2,26 @@ from datetime import UTC, datetime
 from hashlib import sha256
 from uuid import UUID
 
-import stripe
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
-from core_api.modules.billing.billing_entity import BillingAccountEntity, BillingEventEntity
+from core_api.modules.billing.billing_entity import (
+    BillingAccountEntity,
+    BillingEventEntity,
+)
 from core_api.modules.billing.billing_schema import (
     BillingAccountRead,
     BillingCheckoutRead,
     BillingPortalRead,
     BillingWebhookRead,
+)
+from core_api.modules.billing.providers import billing_provider
+from core_api.modules.billing.providers.protocol import (
+    BillingProvider,
+    BillingProviderError,
+    InvalidWebhookSignatureError,
 )
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity
@@ -22,6 +30,15 @@ from shared_kernel.time.datetime_service import DateTimeService
 
 
 class BillingService:
+    def __init__(self, provider: BillingProvider | None = None) -> None:
+        self._provider = provider
+
+    def _get_provider(self) -> BillingProvider:
+        try:
+            return self._provider or billing_provider()
+        except BillingProviderError as exc:
+            raise WorkflowError(str(exc), 503) from exc
+
     def account(self, tenant_id: UUID, subject: str) -> BillingAccountRead:
         return self._account(tenant_id, subject, {"admin", "auditor"})
 
@@ -40,7 +57,10 @@ class BillingService:
             database.flush()
         elif account.deleted_at is not None:
             account.deleted_at = None
-        if account.status != "active" and account.signatures_used >= account.free_signatures_limit:
+        if (
+            account.status != "active"
+            and account.signatures_used >= account.free_signatures_limit
+        ):
             raise WorkflowError(
                 "Free signature allowance exhausted. An active subscription is required",
                 402,
@@ -48,7 +68,7 @@ class BillingService:
         account.signatures_used += 1
 
     def create_checkout(self, tenant_id: UUID, subject: str) -> BillingCheckoutRead:
-        self._configure_stripe()
+        provider = self._get_provider()
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"})
             tenant = database.get(TenantEntity, tenant_id)
@@ -56,56 +76,53 @@ class BillingService:
                 raise WorkflowError("Tenant not found", 404)
             price_id = self._price_for_currency(tenant.currency)
             account = self._account_entity(database, tenant_id)
-            if not account.provider_customer_id:
-                customer = stripe.Customer.create(
-                    email=subject,
-                    name=tenant.name,
-                    metadata={"tenant_id": str(tenant.id)},
+            try:
+                if not account.provider_customer_id:
+                    customer = provider.create_customer(
+                        email=subject,
+                        name=tenant.name,
+                        metadata={"tenant_id": str(tenant.id)},
+                    )
+                    account.provider = "stripe"
+                    account.provider_customer_id = customer.id
+                checkout = provider.create_checkout_session(
+                    customer_id=account.provider_customer_id,
+                    price_id=price_id,
+                    tenant_id=str(tenant.id),
+                    success_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/billing?checkout=success",
+                    cancel_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/billing?checkout=cancelled",
                 )
-                account.provider = "stripe"
-                account.provider_customer_id = customer.id
-            checkout = stripe.checkout.Session.create(
-                mode="subscription",
-                customer=account.provider_customer_id,
-                line_items=[{"price": price_id, "quantity": 1}],
-                success_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/billing?checkout=success",
-                cancel_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/billing?checkout=cancelled",
-                client_reference_id=str(tenant.id),
-                subscription_data={
-                    "metadata": {
-                        "tenant_id": str(tenant.id),
-                        "product_code": "rubrica_mvp",
-                    }
-                },
-                metadata={"tenant_id": str(tenant.id)},
-            )
-            if not checkout.url:
-                raise WorkflowError("Stripe did not return a checkout URL", 502)
+            except BillingProviderError as exc:
+                raise WorkflowError(str(exc), 502) from exc
             return BillingCheckoutRead(checkout_url=checkout.url)
 
     def create_portal(self, tenant_id: UUID, subject: str) -> BillingPortalRead:
-        self._configure_stripe()
+        provider = self._get_provider()
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"})
             account = self._account_entity(database, tenant_id)
             if not account.provider_customer_id:
                 raise WorkflowError("Stripe customer is not configured", 409)
-            portal = stripe.billing_portal.Session.create(
-                customer=account.provider_customer_id,
-                return_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/billing",
-            )
+            try:
+                portal = provider.create_portal_session(
+                    customer_id=account.provider_customer_id,
+                    return_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/billing",
+                )
+            except BillingProviderError as exc:
+                raise WorkflowError(str(exc), 502) from exc
             return BillingPortalRead(portal_url=portal.url)
 
     def receive_webhook(self, payload: bytes, signature: str) -> BillingWebhookRead:
-        self._configure_stripe(require_webhook=True)
+        provider = self._get_provider()
         try:
-            event = stripe.Webhook.construct_event(
-                payload,
-                signature,
-                settings.STRIPE_WEBHOOK_SECRET,
+            event = provider.construct_webhook_event(
+                payload=payload,
+                signature=signature,
             )
-        except (ValueError, stripe.SignatureVerificationError) as exc:
+        except InvalidWebhookSignatureError as exc:
             raise WorkflowError("Invalid Stripe webhook signature", 400) from exc
+        except BillingProviderError as exc:
+            raise WorkflowError(str(exc), 503) from exc
 
         event_id = str(event["id"])
         with SessionLocal() as database:
@@ -151,7 +168,9 @@ class BillingService:
         return BillingWebhookRead()
 
     @staticmethod
-    def _apply_event(database, event_type: str, resource, tenant_id: UUID | None) -> None:
+    def _apply_event(
+        database, event_type: str, resource, tenant_id: UUID | None
+    ) -> None:
         if tenant_id is None:
             return
         account = BillingService._account_entity(database, tenant_id)
@@ -161,7 +180,9 @@ class BillingService:
             account.provider_customer_id = str(customer)
         if event_type == "checkout.session.completed":
             subscription = resource.get("subscription")
-            account.provider_subscription_id = str(subscription) if subscription else None
+            account.provider_subscription_id = (
+                str(subscription) if subscription else None
+            )
             account.current_product_code = "rubrica_mvp"
             if account.status != "active":
                 account.status = "pending"
@@ -171,7 +192,9 @@ class BillingService:
             account.current_product_code = str(
                 resource.get("metadata", {}).get("product_code", "rubrica_mvp")
             )
-            account.status = BillingService._subscription_status(str(resource.get("status", "")))
+            account.status = BillingService._subscription_status(
+                str(resource.get("status", ""))
+            )
             period_end = resource.get("current_period_end")
             account.current_period_ends_at = (
                 datetime.fromtimestamp(int(period_end), tz=UTC) if period_end else None
@@ -211,17 +234,11 @@ class BillingService:
         return price_id
 
     @staticmethod
-    def _configure_stripe(require_webhook: bool = False) -> None:
-        if not settings.STRIPE_SECRET_KEY:
-            raise WorkflowError("Stripe is not configured", 503)
-        if require_webhook and not settings.STRIPE_WEBHOOK_SECRET:
-            raise WorkflowError("Stripe webhook is not configured", 503)
-        stripe.api_key = settings.STRIPE_SECRET_KEY
-
-    @staticmethod
     def _account_entity(database, tenant_id: UUID) -> BillingAccountEntity:
         account = database.scalar(
-            select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)
+            select(BillingAccountEntity).where(
+                BillingAccountEntity.tenant_id == tenant_id
+            )
         )
         if account is None:
             account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")

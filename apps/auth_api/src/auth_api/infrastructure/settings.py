@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     AUTH_MFA_ISSUER: str = "Rubrica"
     AUTH_MFA_ENCRYPTION_KEY: str = "rubrica-development-mfa-key-change-me"
     AUTH_MFA_CHALLENGE_TTL_SECONDS: int = 300
+    AUTH_IDENTITY_ENCRYPTION_KEY: str = "rubrica-development-identity-key-change-me"
+    AUTH_IDENTITY_HMAC_KEY: str = "rubrica-development-identity-hmac-change-me"
+    AUTH_JP_MY_NUMBER_ENABLED: bool = False
 
     @model_validator(mode="after")
     def validate_production_mfa_key(self) -> "Settings":
@@ -42,6 +45,13 @@ class Settings(BaseSettings):
             raise ValueError(
                 "AUTH_MFA_ENCRYPTION_KEY must be set to a secure value in production"
             )
+        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+            len(self.AUTH_IDENTITY_ENCRYPTION_KEY) < 32
+            or len(self.AUTH_IDENTITY_HMAC_KEY) < 32
+            or self.AUTH_IDENTITY_ENCRYPTION_KEY.startswith("rubrica-development-")
+            or self.AUTH_IDENTITY_HMAC_KEY.startswith("rubrica-development-")
+        ):
+            raise ValueError("Secure Auth identity keys are required in production")
         return self
 
     @property

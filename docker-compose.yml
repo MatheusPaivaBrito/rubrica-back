@@ -82,6 +82,9 @@ services:
           AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:8080}
           AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
           AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY:-rubrica-development-mfa-key-change-me}
+          AUTH_IDENTITY_ENCRYPTION_KEY: ${AUTH_IDENTITY_ENCRYPTION_KEY:-rubrica-development-identity-key-change-me}
+          AUTH_IDENTITY_HMAC_KEY: ${AUTH_IDENTITY_HMAC_KEY:-rubrica-development-identity-hmac-change-me}
+          AUTH_JP_MY_NUMBER_ENABLED: ${AUTH_JP_MY_NUMBER_ENABLED:-false}
           AUTH_MFA_CHALLENGE_TTL_SECONDS: ${AUTH_MFA_CHALLENGE_TTL_SECONDS:-300}
           NOTIFICATION_API_URL: http://notification-api:8000
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}

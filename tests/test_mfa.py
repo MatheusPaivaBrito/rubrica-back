@@ -59,6 +59,8 @@ def test_production_accepts_distinct_mfa_encryption_key() -> None:
     configured = Settings(
         ENVIRONMENT="production",
         AUTH_MFA_ENCRYPTION_KEY="a-distinct-production-mfa-encryption-secret",
+        AUTH_IDENTITY_ENCRYPTION_KEY="a-distinct-production-identity-encryption-secret",
+        AUTH_IDENTITY_HMAC_KEY="a-distinct-production-identity-hmac-secret",
     )
 
     assert configured.ENVIRONMENT == "production"

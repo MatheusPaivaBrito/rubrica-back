@@ -12,6 +12,7 @@ from auth_api.modules.accounts.account_schema import PublicRegistration
 from auth_api.modules.accounts.notification_client import request_account_email
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import AccountTokenEntity, UserEntity
+from auth_api.modules.users.user_identifier_service import add_identifier
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -25,11 +26,6 @@ class InvalidAccountTokenError(Exception):
 
 class AccountService:
     def register(self, payload: PublicRegistration) -> None:
-        identity_value = (
-            self._normalize_identity(payload.identity_document_value)
-            if payload.identity_document_value
-            else None
-        )
         with SessionLocal.begin() as database:
             user = UserEntity(
                 name=payload.name.strip(),
@@ -37,10 +33,6 @@ class AccountService:
                 password_hash=hash_password(payload.password),
                 preferred_locale=payload.preferred_locale,
                 email_verified=False,
-                identity_document_type=payload.identity_document_type,
-                identity_document_country=payload.identity_document_country,
-                identity_document_hash=hash_password(identity_value) if identity_value else None,
-                identity_document_last4=identity_value[-4:] if identity_value else None,
                 is_active=True,
             )
             database.add(user)
@@ -49,6 +41,22 @@ class AccountService:
             except IntegrityError as exc:
                 raise AccountConflictError from exc
             database.add(UserRoleEntity(user_id=user.id, role="signature_signer"))
+            if (
+                payload.identity_document_type
+                and payload.identity_document_country
+                and payload.identity_document_value
+            ):
+                add_identifier(
+                    database,
+                    user_id=user.id,
+                    issuing_country=payload.identity_document_country,
+                    identifier_type=payload.identity_document_type,
+                    value=payload.identity_document_value,
+                )
+                try:
+                    database.flush()
+                except IntegrityError as exc:
+                    raise AccountConflictError from exc
             token = self._issue_token(
                 database,
                 user,
@@ -161,17 +169,16 @@ class AccountService:
     def _user_by_email(database, email: str) -> UserEntity | None:
         return database.scalar(
             select(UserEntity)
-            .where(UserEntity.email == email.strip().lower(), UserEntity.deleted_at.is_(None))
+            .where(
+                UserEntity.email == email.strip().lower(),
+                UserEntity.deleted_at.is_(None),
+            )
             .limit(1)
         )
 
     @staticmethod
     def _digest(value: str) -> str:
         return sha256(value.encode("utf-8")).hexdigest()
-
-    @staticmethod
-    def _normalize_identity(value: str) -> str:
-        return "".join(character for character in value.upper().strip() if character.isalnum())
 
 
 account_service = AccountService()
