@@ -49,3 +49,32 @@ class BillingEventEntity(BaseEntity):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="received")
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(120), nullable=True)
+
+
+class BillingPaymentEntity(BaseEntity):
+    __tablename__ = "billing_payments"
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_payment_id",
+            name="uq_billing_payment_provider_id",
+        ),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_payment_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    provider_subscription_id: Mapped[str | None] = mapped_column(String(160))
+    provider_event_id: Mapped[str] = mapped_column(String(240), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount_due_minor: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    amount_paid_minor: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    period_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    period_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

@@ -12,6 +12,7 @@ Required files:
 - auth_identity_encryption_key
 - auth_identity_hmac_key
 - notification_internal_service_key
+- core_internal_service_key
 - resend_api_key
 - evidence_secret
 - stripe_secret_key
@@ -28,6 +29,7 @@ administrator, encryption, HMAC or service-to-service secret.
     openssl rand -base64 48 > secrets/production/auth_identity_encryption_key
     openssl rand -base64 48 > secrets/production/auth_identity_hmac_key
     openssl rand -base64 48 > secrets/production/notification_internal_service_key
+    openssl rand -base64 48 > secrets/production/core_internal_service_key
     openssl rand -base64 48 > secrets/production/evidence_secret
 
 Paste the Resend and Stripe values into their respective files. For Cloudflare,

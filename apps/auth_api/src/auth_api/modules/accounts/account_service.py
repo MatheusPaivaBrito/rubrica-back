@@ -9,6 +9,7 @@ from auth_api.infrastructure.database.connection import SessionLocal
 from auth_api.infrastructure.settings import settings
 from auth_api.modules.access_control.access_control_entity import UserRoleEntity
 from auth_api.modules.accounts.account_schema import PublicRegistration
+from auth_api.modules.accounts.tenant_client import provision_account_tenant
 from auth_api.modules.accounts.notification_client import request_account_email
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import AccountTokenEntity, UserEntity
@@ -40,7 +41,7 @@ class AccountService:
                 database.flush()
             except IntegrityError as exc:
                 raise AccountConflictError from exc
-            database.add(UserRoleEntity(user_id=user.id, role="signature_signer"))
+            database.add(UserRoleEntity(user_id=user.id, role="signature_admin"))
             if (
                 payload.identity_document_type
                 and payload.identity_document_country
@@ -63,7 +64,8 @@ class AccountService:
                 "verify_email",
                 settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS,
             )
-        self._send_verification(user.email, token)
+            provision_account_tenant(payload)
+            self._send_verification(user.email, token)
 
     def request_email_verification(self, email: str) -> None:
         with SessionLocal.begin() as database:

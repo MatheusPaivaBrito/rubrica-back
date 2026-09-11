@@ -1,17 +1,42 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from uuid import UUID
 
 from core_api.infrastructure.auth_context import AuthContext, require_permission
+from core_api.infrastructure.settings import settings
 from core_api.modules.tenant.tenant_schema import (
     TenantCreate,
     TenantMemberCreate,
+    TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
 )
 from core_api.modules.tenant.tenant_service import tenant_service
+from shared_kernel.security.service_tokens import verify_service_token
 
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
+internal_router = APIRouter(prefix="/internal/tenants", tags=["internal tenants"])
+
+
+@internal_router.post("/provision", response_model=TenantRead, include_in_schema=False)
+async def provision_tenant(
+    payload: TenantProvision,
+    x_rubrica_service: str | None = Header(default=None),
+    x_rubrica_service_key: str | None = Header(default=None),
+) -> TenantRead:
+    if (
+        x_rubrica_service != "auth_api"
+        or not settings.CORE_INTERNAL_SERVICE_KEY
+        or not verify_service_token(
+            x_rubrica_service_key or "",
+            settings.CORE_INTERNAL_SERVICE_KEY,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Service authentication failed",
+        )
+    return tenant_service.provision_owner(payload)
 
 
 @router.get("", response_model=list[TenantRead])

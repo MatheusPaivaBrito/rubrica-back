@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID
@@ -9,12 +11,54 @@ from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEnti
 from core_api.modules.tenant.tenant_schema import (
     TenantCreate,
     TenantMemberCreate,
+    TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
 )
 
 
 class TenantService:
+    def provision_owner(self, payload: TenantProvision) -> TenantRead:
+        owner = payload.owner_email.strip().lower()
+        with SessionLocal.begin() as db:
+            existing = db.execute(
+                select(TenantEntity, TenantMemberEntity.role)
+                .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
+                .where(
+                    TenantMemberEntity.auth_user_id == owner,
+                    TenantMemberEntity.role == "admin",
+                    TenantEntity.deleted_at.is_(None),
+                )
+                .order_by(TenantEntity.created_at)
+            ).first()
+            if existing is not None:
+                return self._read(existing[0], existing[1])
+
+            tenant = TenantEntity(
+                name=payload.name.strip(),
+                slug=f"account-{sha256(owner.encode()).hexdigest()[:20]}",
+                status="active",
+                default_locale=payload.default_locale,
+                country_code=payload.country_code,
+                timezone="UTC",
+                currency={"BR": "BRL", "JP": "JPY"}.get(
+                    payload.country_code,
+                    "USD",
+                ),
+            )
+            db.add(tenant)
+            db.flush()
+            db.add(
+                TenantMemberEntity(
+                    tenant_id=tenant.id,
+                    auth_user_id=owner,
+                    role="admin",
+                )
+            )
+            db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
+            db.flush()
+            return self._read(tenant, "admin")
+
     def list_for(self, subject: str) -> list[TenantRead]:
         with SessionLocal() as db:
             rows = db.execute(

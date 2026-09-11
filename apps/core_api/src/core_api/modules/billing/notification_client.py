@@ -1,24 +1,18 @@
-import logging
-
 import httpx
 
-from auth_api.infrastructure.settings import settings
+from core_api.infrastructure.settings import settings
 
 
-logger = logging.getLogger(__name__)
-
-
-class AccountEmailDeliveryError(RuntimeError):
+class BillingEmailDeliveryError(RuntimeError):
     pass
 
 
-def request_account_email(
+def request_billing_email(
     *,
     recipient: str,
     subject: str,
     body: str,
     idempotency_key: str,
-    metadata: dict[str, object],
 ) -> None:
     try:
         response = httpx.post(
@@ -30,12 +24,11 @@ def request_account_email(
                 "idempotency_key": idempotency_key,
             },
             headers={
-                "X-Rubrica-Service": "auth_api",
+                "X-Rubrica-Service": "core_api",
                 "X-Rubrica-Service-Key": settings.NOTIFICATION_INTERNAL_SERVICE_KEY,
             },
             timeout=5.0,
         )
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        logger.exception("Account email delivery request failed")
-        raise AccountEmailDeliveryError("Account e-mail delivery is unavailable") from exc
+        raise BillingEmailDeliveryError("Billing e-mail delivery is unavailable") from exc

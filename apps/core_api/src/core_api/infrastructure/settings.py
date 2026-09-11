@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     CORE_POSTGRES_DB: str = "rubrica_core"
     DATABASE_URL: str | None = Field(default=None, validation_alias="CORE_DATABASE_URL")
     AUTH_API_URL: str = "http://localhost:8101"
+    CORE_INTERNAL_SERVICE_KEY: str = ""
+    CORE_INTERNAL_SERVICE_KEY_FILE: str | None = None
+    NOTIFICATION_API_URL: str = "http://localhost:8103"
+    NOTIFICATION_INTERNAL_SERVICE_KEY: str = ""
+    NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: str | None = None
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
@@ -30,7 +35,7 @@ class Settings(BaseSettings):
     STRIPE_PRICE_BRL: str | None = None
     STRIPE_PRICE_USD: str | None = None
     STRIPE_PRICE_JPY: str | None = None
-    BILLING_GRACE_PERIOD_DAYS: int = Field(default=3, ge=0, le=30)
+    BILLING_GRACE_PERIOD_DAYS: int = Field(default=10, ge=0, le=30)
 
     @model_validator(mode="after")
     def load_secret_files(self) -> "Settings":
@@ -38,6 +43,8 @@ class Settings(BaseSettings):
             self,
             {
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
+                "CORE_INTERNAL_SERVICE_KEY": "CORE_INTERNAL_SERVICE_KEY_FILE",
+                "NOTIFICATION_INTERNAL_SERVICE_KEY": "NOTIFICATION_INTERNAL_SERVICE_KEY_FILE",
                 "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",
                 "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",

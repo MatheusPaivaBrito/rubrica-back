@@ -84,3 +84,24 @@ class TenantPreferencesUpdate(BaseModel):
 class TenantMemberCreate(BaseModel):
     auth_user_id: str = Field(min_length=3, max_length=255)
     role: str = Field(default="member", pattern=r"^(admin|member|auditor)$")
+
+
+class TenantProvision(BaseModel):
+    owner_email: str = Field(
+        min_length=5,
+        max_length=255,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+    )
+    name: str = Field(min_length=2, max_length=180)
+    default_locale: SupportedLocale = "en"
+    country_code: str | None = None
+
+    @field_validator("default_locale", mode="before")
+    @classmethod
+    def normalize_provision_locale(cls, value: object) -> SupportedLocale:
+        return normalize_locale(value)
+
+    @field_validator("country_code", mode="before")
+    @classmethod
+    def normalize_provision_country(cls, value: object) -> str | None:
+        return normalize_country_code(value)

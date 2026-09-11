@@ -42,6 +42,9 @@ services:
           POSTGRES_PORT: "5432"
           CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
           AUTH_API_URL: http://auth-api:8000
+          CORE_INTERNAL_SERVICE_KEY: ${CORE_INTERNAL_SERVICE_KEY:-rubrica-local-core-key}
+          NOTIFICATION_API_URL: http://notification-api:8000
+          NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
           DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
           SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:8080/signing}
           PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8080}
@@ -51,7 +54,7 @@ services:
           STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
           STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
           STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
-          BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-3}
+          BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
 
         ports:
           - "${CORE_API_PORT:-8100}:8000"
@@ -87,6 +90,8 @@ services:
           REDIS_HOST: redis
           REDIS_PORT: "6379"
           AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:8080}
+          CORE_API_URL: http://core-api:8000
+          CORE_INTERNAL_SERVICE_KEY: ${CORE_INTERNAL_SERVICE_KEY:-rubrica-local-core-key}
           AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
           AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY:-rubrica-development-mfa-key-change-me}
           AUTH_IDENTITY_ENCRYPTION_KEY: ${AUTH_IDENTITY_ENCRYPTION_KEY:-rubrica-development-identity-key-change-me}
@@ -102,6 +107,7 @@ services:
           - postgres
           - redis
           - notification-api
+          - core-api
 
       eventing-api:
         build:

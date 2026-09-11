@@ -51,6 +51,8 @@ services:
       AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:?AUTH_SEED_ADMIN_EMAIL is required}
       AUTH_SEED_ADMIN_PASSWORD_FILE: /run/secrets/auth_seed_admin_password
       AUTH_PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
+      CORE_API_URL: http://core-api:8000
+      CORE_INTERNAL_SERVICE_KEY_FILE: /run/secrets/core_internal_service_key
       NOTIFICATION_API_URL: http://notification-api:8000
       NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
       AUTH_MFA_ENCRYPTION_KEY_FILE: /run/secrets/auth_mfa_encryption_key
@@ -61,6 +63,7 @@ services:
       - postgres_password
       - auth_seed_admin_password
       - notification_internal_service_key
+      - core_internal_service_key
       - auth_mfa_encryption_key
       - auth_identity_encryption_key
       - auth_identity_hmac_key
@@ -68,6 +71,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
       notification-api: { condition: service_started }
+      core-api: { condition: service_started }
     networks: [rubrica_internal]
 
   core-api:
@@ -86,6 +90,9 @@ services:
       POSTGRES_PORT: "5432"
       CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
       AUTH_API_URL: http://auth-api:8000
+      CORE_INTERNAL_SERVICE_KEY_FILE: /run/secrets/core_internal_service_key
+      NOTIFICATION_API_URL: http://notification-api:8000
+      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
       DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
       SIGNING_APP_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}/signing
       PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
@@ -95,17 +102,19 @@ services:
       STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:?STRIPE_PRICE_BRL is required}
       STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:?STRIPE_PRICE_USD is required}
       STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:?STRIPE_PRICE_JPY is required}
-      BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-3}
+      BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
     secrets:
       - postgres_password
       - evidence_secret
+      - core_internal_service_key
+      - notification_internal_service_key
       - stripe_secret_key
       - stripe_webhook_secret
     volumes:
       - document_storage:/var/lib/rubrica/documents
     depends_on:
       postgres: { condition: service_healthy }
-      auth-api: { condition: service_started }
+      notification-api: { condition: service_started }
     networks: [rubrica_internal, rubrica_external]
 
   eventing-api:
@@ -201,7 +210,7 @@ services:
 
   web:
     build:
-      context: ../rubrica-web
+      context: ${RUBRICA_WEB_CONTEXT:-../rubrica-web}
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:
@@ -255,6 +264,8 @@ secrets:
     file: ${SECRETS_DIR:-./secrets/production}/auth_identity_hmac_key
   notification_internal_service_key:
     file: ${SECRETS_DIR:-./secrets/production}/notification_internal_service_key
+  core_internal_service_key:
+    file: ${SECRETS_DIR:-./secrets/production}/core_internal_service_key
   resend_api_key:
     file: ${SECRETS_DIR:-./secrets/production}/resend_api_key
   evidence_secret:

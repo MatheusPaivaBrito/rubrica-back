@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from core_api.infrastructure.auth_context import authenticated_context
@@ -31,9 +32,25 @@ def test_core_routes_are_registered() -> None:
     assert "/tenants/{tenant_id}/members" in paths
     assert "/tenants/{tenant_id}/preferences" in paths
     assert "/billing/tenants/{tenant_id}/account" in paths
+    assert "/billing/tenants/{tenant_id}/payments" in paths
     assert "/billing/tenants/{tenant_id}/checkout" in paths
     assert "/billing/tenants/{tenant_id}/portal" in paths
     assert "/billing/webhooks/stripe" in paths
+    assert "/internal/tenants/provision" in paths
+
+
+def test_internal_tenant_provisioning_requires_service_authentication() -> None:
+    response = TestClient(core_app).post(
+        "/internal/tenants/provision",
+        json={
+            "owner_email": "owner@example.com",
+            "name": "Owner",
+            "default_locale": "en",
+        },
+    )
+
+    assert response.status_code == 403
+
 
 def test_auth_routes_are_registered() -> None:
     paths = {route.path for route in auth_app.routes}

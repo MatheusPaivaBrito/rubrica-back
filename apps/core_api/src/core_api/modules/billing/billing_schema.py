@@ -34,3 +34,22 @@ class BillingPortalRead(BaseModel):
 class BillingWebhookRead(BaseModel):
     accepted: bool = True
     duplicate: bool = False
+
+
+class BillingPaymentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    provider: str
+    provider_payment_id: str
+    provider_subscription_id: str | None
+    status: str
+    currency: str
+    amount_due_minor: int
+    amount_paid_minor: int
+    period_starts_at: datetime | None
+    period_ends_at: datetime | None
+    paid_at: datetime | None
+    created_at: datetime
+    updated_at: datetime

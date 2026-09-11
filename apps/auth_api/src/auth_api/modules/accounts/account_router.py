@@ -13,6 +13,8 @@ from auth_api.modules.accounts.account_service import (
     InvalidAccountTokenError,
     account_service,
 )
+from auth_api.modules.accounts.notification_client import AccountEmailDeliveryError
+from auth_api.modules.accounts.tenant_client import TenantProvisioningError
 
 
 router = APIRouter(prefix="/auth", tags=["account lifecycle"])
@@ -24,6 +26,11 @@ async def register(payload: PublicRegistration) -> AccountActionAccepted:
         account_service.register(payload)
     except AccountConflictError:
         pass
+    except (AccountEmailDeliveryError, TenantProvisioningError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
     return AccountActionAccepted()
 
 
@@ -31,7 +38,10 @@ async def register(payload: PublicRegistration) -> AccountActionAccepted:
 async def request_email_verification(
     payload: EmailVerificationRequest,
 ) -> AccountActionAccepted:
-    account_service.request_email_verification(payload.email)
+    try:
+        account_service.request_email_verification(payload.email)
+    except AccountEmailDeliveryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return AccountActionAccepted()
 
 
@@ -51,7 +61,10 @@ async def verify_email(payload: EmailVerification) -> AccountActionAccepted:
 async def request_password_recovery(
     payload: PasswordRecoveryRequest,
 ) -> AccountActionAccepted:
-    account_service.request_password_recovery(payload.email)
+    try:
+        account_service.request_password_recovery(payload.email)
+    except AccountEmailDeliveryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return AccountActionAccepted()
 
 
