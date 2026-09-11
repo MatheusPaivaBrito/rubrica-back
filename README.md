@@ -105,19 +105,19 @@ continues to use `nginx.local.conf` on port 8080.
 
 ```bash
 cp .env.production.example .env.production
-mkdir -p secrets
-cp secrets/cloudflare.ini.example secrets/cloudflare.ini
-chmod 600 secrets/cloudflare.ini
+mkdir -p secrets/production
+cp secrets/production/cloudflare.ini.example secrets/production/cloudflare.ini
+# Create every secret listed in secrets/production/README.md
+chmod 600 secrets/production/*
 
 docker compose --env-file .env.production -f docker-compose.prod.yml run --rm certbot-init
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
-docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
-docker compose --env-file .env.production -f docker-compose.prod.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
-docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api python toolbox/seeds/auth_admin.py
+make production-up
+make production-migrate
+make production-seed
 ```
 
 Create a Cloudflare API token restricted to DNS editing for only the Rubrica
-zone and place it in `secrets/cloudflare.ini`. In Cloudflare, proxy the DNS
+zone and place it in `secrets/production/cloudflare.ini`. In Cloudflare, proxy the DNS
 record and select SSL/TLS mode **Full (strict)**. At the server firewall, allow
 ports 80/443 only from Cloudflare's published address ranges; the Nginx file
 contains the same ranges solely to restore the signer's real client IP.
@@ -133,3 +133,21 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
 docker compose --env-file .env.production -f docker-compose.prod.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
 ```
+
+### Production backup and restore verification
+
+Create a consistent backup of every Rubrica PostgreSQL database and the signed
+document volume:
+
+    make backup-production
+
+The command writes an ignored, permission-restricted timestamped directory under
+backups. Copy that directory to encrypted storage outside the application host.
+
+Prove that a backup is restorable without touching production:
+
+    make verify-backup path=backups/YYYYmmddTHHMMSSZ
+
+Verification checks SHA-256 hashes, restores every database into a disposable
+PostgreSQL container and checks that the document archive can be read. Run this
+after the first deployment and periodically thereafter.

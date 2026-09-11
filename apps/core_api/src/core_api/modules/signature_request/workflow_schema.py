@@ -79,6 +79,8 @@ class StampPosition(BaseModel):
     country_code: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
     show_flag: bool = False
     template_version: Literal["rubrica-stamp-v2"] = "rubrica-stamp-v2"
+    locale: Literal["pt-BR", "en", "ja-JP"] = "en"
+    timezone: str = Field(default="UTC", min_length=1, max_length=80)
 
 
 class ClientEvidence(BaseModel):

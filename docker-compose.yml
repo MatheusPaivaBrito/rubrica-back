@@ -44,7 +44,14 @@ services:
           AUTH_API_URL: http://auth-api:8000
           DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
           SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:8080/signing}
+          PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8080}
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
+          STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+          STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+          STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
+          STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
+          STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
+          BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-3}
 
         ports:
           - "${CORE_API_PORT:-8100}:8000"

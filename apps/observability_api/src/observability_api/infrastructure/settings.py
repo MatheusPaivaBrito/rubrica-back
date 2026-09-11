@@ -1,7 +1,9 @@
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from shared_kernel.config import apply_secret_files
 
 from shared_kernel.http import CorsConfig, parse_cors_origins
 
@@ -14,6 +16,7 @@ class ObservabilitySettings(BaseSettings):
     OBSERVABILITY_DATABASE_URL: str | None = None
     POSTGRES_USER: str = "rubrica"
     POSTGRES_PASSWORD: str = "rubrica"
+    POSTGRES_PASSWORD_FILE: str | None = None
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     OBSERVABILITY_POSTGRES_DB: str = "rubrica_observability"
@@ -31,7 +34,18 @@ class ObservabilitySettings(BaseSettings):
     ALLOY_READY_URL: str = "http://localhost:12345/-/ready"
 
     SENTRY_DSN: str | None = None
+    SENTRY_DSN_FILE: str | None = None
     SENTRY_ENVIRONMENT: str = Field(default="development")
+
+    @model_validator(mode="after")
+    def load_secret_files(self) -> "ObservabilitySettings":
+        return apply_secret_files(
+            self,
+            {
+                "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
+                "SENTRY_DSN": "SENTRY_DSN_FILE",
+            },
+        )
 
     @property
     def PERSISTENCE_ENABLED(self) -> bool:

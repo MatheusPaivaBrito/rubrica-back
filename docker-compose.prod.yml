@@ -4,9 +4,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-rubrica}
       POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification},${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
+    secrets: [postgres_password]
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
@@ -41,17 +42,32 @@ services:
       APP_DEBUG: "false"
       PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:?AUTH_SEED_ADMIN_EMAIL is required}
-      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:?AUTH_SEED_ADMIN_PASSWORD is required}
+      AUTH_SEED_ADMIN_PASSWORD_FILE: /run/secrets/auth_seed_admin_password
+      AUTH_PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
+      NOTIFICATION_API_URL: http://notification-api:8000
+      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
+      AUTH_MFA_ENCRYPTION_KEY_FILE: /run/secrets/auth_mfa_encryption_key
+      AUTH_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/auth_identity_encryption_key
+      AUTH_IDENTITY_HMAC_KEY_FILE: /run/secrets/auth_identity_hmac_key
+      AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
+    secrets:
+      - postgres_password
+      - auth_seed_admin_password
+      - notification_internal_service_key
+      - auth_mfa_encryption_key
+      - auth_identity_encryption_key
+      - auth_identity_hmac_key
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+      notification-api: { condition: service_started }
     networks: [rubrica_internal]
 
   core-api:
@@ -65,20 +81,32 @@ services:
       APP_DEBUG: "false"
       PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
       AUTH_API_URL: http://auth-api:8000
       DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
       SIGNING_APP_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}/signing
-      EVIDENCE_SECRET: ${EVIDENCE_SECRET:?EVIDENCE_SECRET is required}
+      PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
+      EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
+      STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
+      STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
+      STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:?STRIPE_PRICE_BRL is required}
+      STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:?STRIPE_PRICE_USD is required}
+      STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:?STRIPE_PRICE_JPY is required}
+      BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-3}
+    secrets:
+      - postgres_password
+      - evidence_secret
+      - stripe_secret_key
+      - stripe_webhook_secret
     volumes:
       - document_storage:/var/lib/rubrica/documents
     depends_on:
       postgres: { condition: service_healthy }
       auth-api: { condition: service_started }
-    networks: [rubrica_internal]
+    networks: [rubrica_internal, rubrica_external]
 
   eventing-api:
     build:
@@ -88,12 +116,13 @@ services:
     environment:
       ENVIRONMENT: production
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
       EVENTING_DEFAULT_EVENT_TOPIC: rubrica.events
       EVENTING_DEAD_LETTER_TOPIC: rubrica.events.dead_letter
+    secrets: [postgres_password]
     depends_on:
       postgres: { condition: service_healthy }
     networks: [rubrica_internal]
@@ -106,17 +135,24 @@ services:
     environment:
       ENVIRONMENT: production
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       NOTIFICATION_POSTGRES_DB: ${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
       NOTIFICATION_PERSISTENCE_MODE: durable
-      NOTIFICATION_EMAIL_PROVIDER: ${NOTIFICATION_EMAIL_PROVIDER:-local_ack}
+      NOTIFICATION_EMAIL_PROVIDER: resend
       NOTIFICATION_DEFAULT_FROM_EMAIL: ${NOTIFICATION_DEFAULT_FROM_EMAIL:?NOTIFICATION_DEFAULT_FROM_EMAIL is required}
-      SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
+      RESEND_API_KEY_FILE: /run/secrets/resend_api_key
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:?RESEND_FROM_EMAIL is required}
+      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
+      NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
+    secrets:
+      - postgres_password
+      - resend_api_key
+      - notification_internal_service_key
     depends_on:
       postgres: { condition: service_healthy }
-    networks: [rubrica_internal]
+    networks: [rubrica_internal, rubrica_external]
 
   observability-api:
     build:
@@ -126,12 +162,13 @@ services:
     environment:
       ENVIRONMENT: production
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
       OBSERVABILITY_PERSISTENCE_MODE: incidents
-      SENTRY_DSN: ${SENTRY_DSN:-}
+    secrets:
+      - postgres_password
     depends_on:
       postgres: { condition: service_healthy }
     networks: [rubrica_internal]
@@ -157,7 +194,9 @@ services:
         -d "$${RUBRICA_DOMAIN}"
     volumes:
       - letsencrypt:/etc/letsencrypt
-      - ./secrets/cloudflare.ini:/run/secrets/cloudflare.ini:ro
+    secrets:
+      - source: cloudflare_ini
+        target: cloudflare.ini
     networks: [rubrica_external]
 
   web:
@@ -196,10 +235,36 @@ services:
         done
     volumes:
       - letsencrypt:/etc/letsencrypt
-      - ./secrets/cloudflare.ini:/run/secrets/cloudflare.ini:ro
+    secrets:
+      - source: cloudflare_ini
+        target: cloudflare.ini
     depends_on:
       web: { condition: service_started }
     networks: [rubrica_external]
+
+secrets:
+  postgres_password:
+    file: ${SECRETS_DIR:-./secrets/production}/postgres_password
+  auth_seed_admin_password:
+    file: ${SECRETS_DIR:-./secrets/production}/auth_seed_admin_password
+  auth_mfa_encryption_key:
+    file: ${SECRETS_DIR:-./secrets/production}/auth_mfa_encryption_key
+  auth_identity_encryption_key:
+    file: ${SECRETS_DIR:-./secrets/production}/auth_identity_encryption_key
+  auth_identity_hmac_key:
+    file: ${SECRETS_DIR:-./secrets/production}/auth_identity_hmac_key
+  notification_internal_service_key:
+    file: ${SECRETS_DIR:-./secrets/production}/notification_internal_service_key
+  resend_api_key:
+    file: ${SECRETS_DIR:-./secrets/production}/resend_api_key
+  evidence_secret:
+    file: ${SECRETS_DIR:-./secrets/production}/evidence_secret
+  stripe_secret_key:
+    file: ${SECRETS_DIR:-./secrets/production}/stripe_secret_key
+  stripe_webhook_secret:
+    file: ${SECRETS_DIR:-./secrets/production}/stripe_webhook_secret
+  cloudflare_ini:
+    file: ${SECRETS_DIR:-./secrets/production}/cloudflare.ini
 
 volumes:
   postgres_data:

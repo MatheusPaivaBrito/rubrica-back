@@ -1,5 +1,7 @@
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from shared_kernel.config import apply_secret_files
 
 
 class Settings(BaseSettings):
@@ -8,6 +10,7 @@ class Settings(BaseSettings):
     SERVICE_NAME: str = Field(default="eventing_api", validation_alias=AliasChoices("EVENTING_SERVICE_NAME", "SERVICE_NAME"))
     POSTGRES_USER: str = "rubrica"
     POSTGRES_PASSWORD: str = "rubrica"
+    POSTGRES_PASSWORD_FILE: str | None = None
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     EVENTING_POSTGRES_DB: str = "rubrica_eventing"
@@ -18,6 +21,10 @@ class Settings(BaseSettings):
     KAFKA_BOOTSTRAP_SERVERS: str | None = None
     EVENTING_DEFAULT_EVENT_TOPIC: str = "rubrica.events"
     EVENTING_DEAD_LETTER_TOPIC: str = "rubrica.events.dead_letter"
+
+    @model_validator(mode="after")
+    def load_secret_files(self) -> "Settings":
+        return apply_secret_files(self, {"POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE"})
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

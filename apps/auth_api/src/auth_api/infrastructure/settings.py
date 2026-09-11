@@ -3,6 +3,8 @@ from typing import ClassVar
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from shared_kernel.config import apply_secret_files
+
 
 class Settings(BaseSettings):
     DEVELOPMENT_MFA_KEY: ClassVar[str] = "rubrica-development-mfa-key-change-me"
@@ -13,6 +15,7 @@ class Settings(BaseSettings):
     API_PORT: int = 8001
     POSTGRES_USER: str = "rubrica"
     POSTGRES_PASSWORD: str = "rubrica"
+    POSTGRES_PASSWORD_FILE: str | None = None
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     AUTH_POSTGRES_DB: str = "rubrica_auth"
@@ -28,15 +31,29 @@ class Settings(BaseSettings):
     AUTH_PUBLIC_WEB_URL: str = "http://localhost:8080"
     NOTIFICATION_API_URL: str = "http://localhost:8103"
     NOTIFICATION_INTERNAL_SERVICE_KEY: str = ""
+    NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: str | None = None
     AUTH_MFA_ISSUER: str = "Rubrica"
     AUTH_MFA_ENCRYPTION_KEY: str = "rubrica-development-mfa-key-change-me"
+    AUTH_MFA_ENCRYPTION_KEY_FILE: str | None = None
     AUTH_MFA_CHALLENGE_TTL_SECONDS: int = 300
     AUTH_IDENTITY_ENCRYPTION_KEY: str = "rubrica-development-identity-key-change-me"
+    AUTH_IDENTITY_ENCRYPTION_KEY_FILE: str | None = None
     AUTH_IDENTITY_HMAC_KEY: str = "rubrica-development-identity-hmac-change-me"
+    AUTH_IDENTITY_HMAC_KEY_FILE: str | None = None
     AUTH_JP_MY_NUMBER_ENABLED: bool = False
 
     @model_validator(mode="after")
-    def validate_production_mfa_key(self) -> "Settings":
+    def load_secrets_and_validate_production(self) -> "Settings":
+        apply_secret_files(
+            self,
+            {
+                "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
+                "NOTIFICATION_INTERNAL_SERVICE_KEY": "NOTIFICATION_INTERNAL_SERVICE_KEY_FILE",
+                "AUTH_MFA_ENCRYPTION_KEY": "AUTH_MFA_ENCRYPTION_KEY_FILE",
+                "AUTH_IDENTITY_ENCRYPTION_KEY": "AUTH_IDENTITY_ENCRYPTION_KEY_FILE",
+                "AUTH_IDENTITY_HMAC_KEY": "AUTH_IDENTITY_HMAC_KEY_FILE",
+            },
+        )
         if self.ENVIRONMENT.lower() in {"production", "prod"} and (
             not self.AUTH_MFA_ENCRYPTION_KEY
             or self.AUTH_MFA_ENCRYPTION_KEY == self.DEVELOPMENT_MFA_KEY

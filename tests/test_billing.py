@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from types import SimpleNamespace
 from uuid import uuid4
@@ -101,3 +103,19 @@ def test_active_subscription_is_unlimited_but_keeps_lifetime_usage() -> None:
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
 
     assert account.signatures_used == 32
+
+
+def test_older_subscription_event_is_ignored(monkeypatch) -> None:
+    tenant_id = uuid4()
+    current = datetime(2026, 9, 10, tzinfo=UTC)
+    account = SimpleNamespace(status="active", provider=None, provider_customer_id=None, provider_subscription_id="sub_test", current_product_code="rubrica_mvp", current_period_ends_at=None, grace_period_ends_at=None, last_provider_event_created_at=current)
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args: account)
+    applied = BillingService._apply_event(object(), "customer.subscription.updated", {"id": "sub_test", "status": "canceled", "metadata": {}}, tenant_id, current - timedelta(minutes=1))
+    assert applied is False
+    assert account.status == "active"
+
+
+def test_past_due_account_keeps_access_during_grace_period() -> None:
+    account = SimpleNamespace(status="past_due", signatures_used=5, free_signatures_limit=5, deleted_at=None, grace_period_ends_at=datetime.now(UTC) + timedelta(days=1))
+    BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
+    assert account.signatures_used == 6

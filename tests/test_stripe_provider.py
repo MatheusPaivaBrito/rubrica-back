@@ -39,8 +39,8 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> No
         customer_id="cus_test",
         price_id="price_jpy",
         tenant_id="019c-tenant",
-        success_url="https://rubrica.test/billing?checkout=success",
-        cancel_url="https://rubrica.test/billing?checkout=cancelled",
+        success_url="https://rubrica.test/plan?checkout=success",
+        cancel_url="https://rubrica.test/plan?checkout=cancelled",
     )
 
     assert session.url == "https://checkout.stripe.test/session"

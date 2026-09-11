@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !.env.local.example
+!.env.production.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -22,4 +23,8 @@ site/
 .rubrica-storage/
 data/
 secrets/*.ini
+secrets/production/*
 !secrets/*.example
+!secrets/production/*.example
+!secrets/production/README.md
+backups/

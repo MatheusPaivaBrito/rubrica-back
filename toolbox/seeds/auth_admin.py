@@ -1,6 +1,7 @@
 """Create the local development administrator only when explicitly requested."""
 
 import os
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -13,6 +14,9 @@ from auth_api.modules.users.user_entity import UserEntity
 def main() -> None:
     email = os.getenv("AUTH_SEED_ADMIN_EMAIL", "admin@example.local").strip().lower()
     password = os.getenv("AUTH_SEED_ADMIN_PASSWORD", "")
+    password_file = os.getenv("AUTH_SEED_ADMIN_PASSWORD_FILE")
+    if password_file:
+        password = Path(password_file).read_text(encoding="utf-8").strip()
     if len(password) < 8:
         raise ValueError("AUTH_SEED_ADMIN_PASSWORD must be set and have at least 8 characters")
     with SessionLocal.begin() as database:

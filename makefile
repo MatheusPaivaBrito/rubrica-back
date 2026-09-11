@@ -32,9 +32,13 @@ EVENTING_PYTHONPATH = apps/eventing_api/src:$(SHARED_PYTHONPATH)
 NOTIFICATION_PYTHONPATH = apps/notification_api/src:$(SHARED_PYTHONPATH)
 OBSERVABILITY_PYTHONPATH = apps/observability_api/src:$(SHARED_PYTHONPATH)
 TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/observability_api/src:apps/worker/src:packages/shared_kernel/src
+COMPOSE_PROD_FILE ?= docker-compose.prod.yml
+PROD_ENV_FILE ?= .env.production
+BACKUP_ROOT ?= backups
+
 MIGRATION_ENV = env -u DEBUG -u DATABASE_URL -u CORE_DATABASE_URL -u AUTH_DATABASE_URL -u EVENTING_DATABASE_URL -u NOTIFICATION_DATABASE_URL -u OBSERVABILITY_DATABASE_URL -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_HOST_PORT -u POSTGRES_DB -u CORE_POSTGRES_DB -u AUTH_POSTGRES_DB -u EVENTING_POSTGRES_DB -u NOTIFICATION_POSTGRES_DB -u OBSERVABILITY_POSTGRES_DB
 
-.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint docs-build compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth
+.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint docs-build compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth production-config production-up production-migrate production-seed backup backup-production verify-backup
 
 help:
 	@echo "Rubrica"
@@ -60,6 +64,11 @@ help:
 	@echo "  make compose-up          Start Docker Compose"
 	@echo "  make compose-down        Stop Docker Compose"
 	@echo "  make bootstrap           Build containers, migrate databases and create the local admin"
+	@echo "  make production-config  Validate the production Compose and secrets"
+	@echo "  make production-up      Build and start the production stack"
+	@echo "  make production-migrate Apply every production migration"
+	@echo "  make backup-production  Back up all databases and signed documents"
+	@echo "  make verify-backup path=backups/TIMESTAMP"
 
 
 	@echo ""
@@ -174,11 +183,31 @@ bootstrap: compose-up migrate seed-auth
 compose-down:
 	docker compose --profile "*" down --remove-orphans
 
+production-config:
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) config --quiet
 
+production-up: production-config
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) up -d --build --wait
 
+production-migrate:
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T auth-api alembic -c apps/auth_api/alembic.ini upgrade head
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T core-api alembic -c apps/core_api/alembic.ini upgrade head
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T eventing-api alembic -c apps/eventing_api/alembic.ini upgrade head
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T notification-api alembic -c apps/notification_api/alembic.ini upgrade head
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T observability-api alembic -c apps/observability_api/alembic.ini upgrade head
 
+production-seed:
+	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T auth-api python toolbox/seeds/auth_admin.py
 
+backup:
+	COMPOSE_FILE=docker-compose.yml ENV_FILE=$(ENV_FILE) toolbox/operations/backup.sh $(BACKUP_ROOT)
 
+backup-production:
+	COMPOSE_FILE=$(COMPOSE_PROD_FILE) ENV_FILE=$(PROD_ENV_FILE) toolbox/operations/backup.sh $(BACKUP_ROOT)
+
+verify-backup:
+	@test -n "$(path)" || (echo "Usage: make verify-backup path=backups/TIMESTAMP"; exit 2)
+	toolbox/operations/verify_backup.sh "$(path)"
 
 smoke:
 	@$(MAKE) --no-print-directory smoke-all

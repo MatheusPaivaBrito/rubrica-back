@@ -1,5 +1,7 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from shared_kernel.config import apply_secret_files
 
 
 class Settings(BaseSettings):
@@ -10,6 +12,7 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     POSTGRES_USER: str = "rubrica"
     POSTGRES_PASSWORD: str = "rubrica"
+    POSTGRES_PASSWORD_FILE: str | None = None
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5435
     CORE_POSTGRES_DB: str = "rubrica_core"
@@ -18,12 +21,28 @@ class Settings(BaseSettings):
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
+    EVIDENCE_SECRET_FILE: str | None = None
     PUBLIC_WEB_URL: str = "http://localhost:8080"
     STRIPE_SECRET_KEY: str | None = None
+    STRIPE_SECRET_KEY_FILE: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
+    STRIPE_WEBHOOK_SECRET_FILE: str | None = None
     STRIPE_PRICE_BRL: str | None = None
     STRIPE_PRICE_USD: str | None = None
     STRIPE_PRICE_JPY: str | None = None
+    BILLING_GRACE_PERIOD_DAYS: int = Field(default=3, ge=0, le=30)
+
+    @model_validator(mode="after")
+    def load_secret_files(self) -> "Settings":
+        return apply_secret_files(
+            self,
+            {
+                "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
+                "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",
+                "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
+                "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",
+            },
+        )
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

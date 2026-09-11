@@ -19,6 +19,8 @@ class BillingAccountEntity(BaseEntity):
     )
     current_product_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     current_period_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    grace_period_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_provider_event_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     free_signatures_limit: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

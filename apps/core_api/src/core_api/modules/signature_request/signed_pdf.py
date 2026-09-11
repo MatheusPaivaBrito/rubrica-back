@@ -8,6 +8,11 @@ from typing import Any
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen.canvas import Canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+
+
+pdfmetrics.registerFont(UnicodeCIDFont("HeiseiMin-W3"))
 
 
 def canonical_json(payload: dict[str, Any]) -> bytes:
@@ -66,17 +71,21 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
             bottom + 27,
             str(stamp["country_code"]),
         )
-    canvas.setFont("Helvetica-Bold", 6)
+    locale = str(stamp.get("locale", "en"))
+    japanese = locale == "ja-JP"
     label = {
-        "BR": "ASSINADO ELETRONICAMENTE POR",
-        "JP": "ELECTRONICALLY SIGNED BY",
-        "INTL": "ELECTRONICALLY SIGNED BY",
-    }.get(str(stamp.get("template", "INTL")), "ELECTRONICALLY SIGNED BY")
+        "pt-BR": "ASSINADO ELETRONICAMENTE POR",
+        "en": "ELECTRONICALLY SIGNED BY",
+        "ja-JP": "電子署名者",
+    }.get(locale, "ELECTRONICALLY SIGNED BY")
+    canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica-Bold", 7 if japanese else 6)
     canvas.drawString(left + 7, bottom + 34, label)
-    canvas.setFont("Helvetica-Bold", 9)
+    canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica-Bold", 9)
     canvas.drawString(left + 7, bottom + 21, str(item["signer_name"])[:38])
-    canvas.setFont("Helvetica", 6.5)
-    canvas.drawString(left + 7, bottom + 9, f'{item["signed_at"]}  evidencia {item["evidence_sha256"][:12]}')
+    canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica", 6.5)
+    evidence_label = {"pt-BR": "evidência", "en": "evidence", "ja-JP": "証拠"}.get(locale, "evidence")
+    timezone = str(stamp.get("timezone", "UTC"))[:32]
+    canvas.drawString(left + 7, bottom + 9, f'{item["signed_at"]} {timezone}  {evidence_label} {item["evidence_sha256"][:12]}')
     canvas.save()
     stream.seek(0)
     return stream
