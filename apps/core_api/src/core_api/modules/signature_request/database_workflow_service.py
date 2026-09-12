@@ -245,6 +245,7 @@ class DatabaseSignatureWorkflowService:
             )
             administrative_view = administrator and authenticated_signer is None
             if administrative_view:
+                self._require_request_access(db, request, auth_user_id)
                 signer = db.scalar(
                     select(SignerEntity)
                     .where(SignerEntity.signature_request_id == request.id)
@@ -263,6 +264,10 @@ class DatabaseSignatureWorkflowService:
     def signing_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
             request = self._request_from_token(db, token) if administrator else self._resolve_request(db, token, auth_user_id, allow_completed=True)[1]
+            if administrator:
+                signer = db.scalar(select(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.auth_user_id == auth_user_id.lower()))
+                if signer is None:
+                    self._require_request_access(db, request, auth_user_id)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
             if version is None:
                 raise WorkflowError("Document version not found", 404)
@@ -351,6 +356,9 @@ class DatabaseSignatureWorkflowService:
         with SessionLocal() as db:
             if administrator:
                 request = self._request_from_token(db, token)
+                signer = db.scalar(select(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.auth_user_id == auth_user_id.lower()))
+                if signer is None:
+                    self._require_request_access(db, request, auth_user_id)
             else:
                 _, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             request_id = str(request.id)

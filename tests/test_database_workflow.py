@@ -117,6 +117,18 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         historical_link = service.create_signing_link(request.id, "operator")
         historical_token = historical_link.signing_url.rsplit("/", maxsplit=1)[-1]
         assert service.signing_signed_document(historical_token, "database@example.com")[2].startswith(b"%PDF")
+        with pytest.raises(WorkflowError) as denied:
+            service.signing_context(historical_token, "outside-admin@example.com", administrator=True)
+        assert denied.value.status_code == 403
+        with pytest.raises(WorkflowError) as denied:
+            service.signing_document(historical_token, "outside-admin@example.com", administrator=True)
+        assert denied.value.status_code == 403
+        with pytest.raises(WorkflowError) as denied:
+            service.signing_signed_document(historical_token, "outside-admin@example.com", administrator=True)
+        assert denied.value.status_code == 403
+        with SessionLocal.begin() as db:
+            owner_tenant_id = db.scalar(select(DocumentEntity.tenant_id).where(DocumentEntity.id == document.id))
+            db.add(TenantMemberEntity(tenant_id=owner_tenant_id, auth_user_id="admin@example.local", role="admin"))
         administrator_view = service.signing_context(historical_token, "admin@example.local", administrator=True)
         assert administrator_view.viewer_mode == "administrator"
         assert administrator_view.request.status == RequestStatus.COMPLETED
