@@ -14,12 +14,8 @@ tokens neste arquivo, no .env ou no Git. Os valores secretos ficam somente em
   https://dash.cloudflare.com/
 - Criar registros DNS:
   https://developers.cloudflare.com/dns/manage-dns-records/how-to/create-dns-records/
-- Criar API Token:
-  https://developers.cloudflare.com/fundamentals/api/get-started/create-token/
-- Certbot DNS Cloudflare:
-  https://certbot-dns-cloudflare.readthedocs.io/en/stable/
-- SSL Full (strict):
-  https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/
+- Criar Cloudflare Tunnel:
+  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/
 
 ### Resend
 
@@ -58,41 +54,32 @@ repita produtos, preços e webhook no modo live.
 
 1. Compre o domínio e adicione-o à Cloudflare.
 2. Defina o hostname público. Exemplo: app.seudominio.com.
-3. Em DNS, crie um registro A:
-   - Nome: app
-   - Conteúdo: IPv4 público do servidor
-   - Proxy: ativado
-4. Em SSL/TLS, selecione Full (strict).
-5. Libere TCP 80 e 443 no firewall do servidor.
+3. Crie um Cloudflare Tunnel dedicado ao Rubrica.
+4. No hostname público do túnel, use o serviço HTTP `http://web:80`.
+5. Não publique portas do Compose nem libere 80/443 para o Rubrica no firewall.
 6. Não exponha PostgreSQL, Redis ou portas 8100-8104 publicamente.
 
 No arquivo .env.production, RUBRICA_DOMAIN deve conter somente o hostname, sem
 https e sem barra:
 
     RUBRICA_DOMAIN=app.seudominio.com
-    LETSENCRYPT_EMAIL=infra@seudominio.com
     RUBRICA_WEB_CONTEXT=../rubrica-web
 
-## 3. Criar o token Cloudflare para o certificado
+## 3. Criar o Cloudflare Tunnel
 
-No painel Cloudflare:
+No painel Cloudflare Zero Trust:
 
-1. Acesse My Profile > API Tokens > Create Token.
-2. Use o modelo Edit Zone DNS.
-3. Permissão: Zone > DNS > Edit.
-4. Recurso: inclua somente a zona do domínio do Rubrica.
-5. Copie o token uma única vez.
-6. No servidor:
+1. Acesse Networks > Tunnels e crie um túnel Cloudflared dedicado ao Rubrica.
+2. Adicione o hostname `rubricasignature.com`.
+3. Configure o serviço de origem como HTTP e URL `web:80`.
+4. Copie o token do comando Docker apresentado pela Cloudflare.
+5. No servidor:
 
     sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
-    sudoedit /etc/rubrica/secrets/cloudflare.ini
-    sudo chmod 600 /etc/rubrica/secrets/cloudflare.ini
+    sudoedit /etc/rubrica/secrets/cloudflare_tunnel_token
+    sudo chmod 600 /etc/rubrica/secrets/cloudflare_tunnel_token
 
-Conteúdo:
-
-    dns_cloudflare_api_token = COLE_O_TOKEN_AQUI
-
-Não use a Global API Key da Cloudflare.
+O arquivo contém somente o token do túnel, sem o comando `docker run`.
 
 ## 4. Configurar o Resend
 
@@ -199,7 +186,7 @@ Arquivos esperados:
 - evidence_secret
 - stripe_secret_key
 - stripe_webhook_secret
-- cloudflare.ini
+- cloudflare_tunnel_token
 
 ## 7. Preparar o ambiente
 
@@ -210,7 +197,6 @@ Arquivos esperados:
 Preencha:
 
 - RUBRICA_DOMAIN;
-- LETSENCRYPT_EMAIL;
 - e-mail administrativo;
 - remetente Resend;
 - ID do preço Stripe BRL e, quando disponíveis, os preços USD e JPY;
@@ -226,7 +212,6 @@ O comando deve terminar sem erro e sem imprimir valores secretos.
 
 ## 8. Primeiro deploy
 
-    docker compose --env-file .env.production -f docker-compose.prod.yml run --rm certbot-init
     make production-up
     make production-migrate
     make production-seed

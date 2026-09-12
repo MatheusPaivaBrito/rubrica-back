@@ -97,33 +97,28 @@ make test
 make lint
 ```
 
-## Production with Cloudflare and HTTPS
+## Production with Cloudflare Tunnel
 
-Production uses `docker-compose.prod.yml`, the frontend `Dockerfile.prod`, the
-Nginx production template and Certbot's Cloudflare DNS challenge. Local Docker
-continues to use `nginx.local.conf` on port 8080.
+Production uses `docker-compose.prod.yml`, the frontend `Dockerfile.prod` and a
+dedicated Cloudflare Tunnel. Cloudflare terminates HTTPS; Nginx is reachable only
+inside the Compose network and does not occupy host ports 80/443.
 
 ```bash
 cp .env.production.example .env.production
 sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
-# Create every secret listed in docs/PRODUCTION_MVP_SETUP.md
+# Create every secret listed in docs/PRODUCTION_MVP_SETUP.md, including
+# cloudflare_tunnel_token.
 sudo chmod 600 /etc/rubrica/secrets/*
 
-docker compose --env-file .env.production -f docker-compose.prod.yml run --rm certbot-init
 make production-up
 make production-migrate
 make production-seed
 ```
 
-Create a Cloudflare API token restricted to DNS editing for only the Rubrica
-zone and place it in `/etc/rubrica/secrets/cloudflare.ini`. In Cloudflare, proxy the DNS
-record and select SSL/TLS mode **Full (strict)**. At the server firewall, allow
-ports 80/443 only from Cloudflare's published address ranges; the Nginx file
-contains the same ranges solely to restore the signer's real client IP.
-
-Certbot checks renewal every 12 hours and reloads Nginx only after a successful
-renewal. Keep PostgreSQL, Redis, Auth and Core unexposed; the production Compose
-publishes only Nginx ports 80 and 443.
+Create a dedicated remotely managed tunnel for Rubrica, configure the public
+hostname to use the HTTP service `http://web:80`, and store its token in
+`/etc/rubrica/secrets/cloudflare_tunnel_token`. Keep every application service
+and database unexposed; the tunnel makes outbound connections to Cloudflare.
 
 For subsequent deployments, keep the existing named volumes and run:
 

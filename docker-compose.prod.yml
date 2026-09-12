@@ -182,32 +182,6 @@ services:
       postgres: { condition: service_healthy }
     networks: [rubrica_internal]
 
-  certbot-init:
-    image: certbot/dns-cloudflare:v5.7.0
-    restart: "no"
-    environment:
-      RUBRICA_DOMAIN: ${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
-      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:?LETSENCRYPT_EMAIL is required}
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - >-
-        certbot certonly --dns-cloudflare
-        --dns-cloudflare-credentials /run/secrets/cloudflare.ini
-        --dns-cloudflare-propagation-seconds 30
-        --non-interactive --agree-tos
-        --email "$${LETSENCRYPT_EMAIL}"
-        --cert-name rubrica
-        --key-type ecdsa
-        --keep-until-expiring
-        -d "$${RUBRICA_DOMAIN}"
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-    secrets:
-      - source: cloudflare_ini
-        target: cloudflare.ini
-    networks: [rubrica_external]
-
   web:
     build:
       context: ${RUBRICA_WEB_CONTEXT:-../rubrica-web}
@@ -215,41 +189,22 @@ services:
     restart: unless-stopped
     environment:
       RUBRICA_DOMAIN: ${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - letsencrypt:/etc/letsencrypt:ro
     depends_on:
       auth-api: { condition: service_started }
       core-api: { condition: service_started }
       eventing-api: { condition: service_started }
       notification-api: { condition: service_started }
       observability-api: { condition: service_started }
-      certbot-init: { condition: service_completed_successfully }
     networks: [rubrica_internal]
 
-  certbot-renew:
-    image: certbot/dns-cloudflare:v5.7.0
+  cloudflared:
+    image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    pid: service:web
-    entrypoint: /bin/sh
-    command:
-      - -c
-      - >-
-        trap exit TERM;
-        while :; do
-          certbot renew --quiet --deploy-hook "kill -HUP 1";
-          sleep 12h & wait $${!};
-        done
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-    secrets:
-      - source: cloudflare_ini
-        target: cloudflare.ini
+    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
+    secrets: [cloudflare_tunnel_token]
     depends_on:
       web: { condition: service_started }
-    networks: [rubrica_external]
+    networks: [rubrica_internal, rubrica_external]
 
 secrets:
   postgres_password:
@@ -274,14 +229,13 @@ secrets:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_secret_key
   stripe_webhook_secret:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_webhook_secret
-  cloudflare_ini:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/cloudflare.ini
+  cloudflare_tunnel_token:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/cloudflare_tunnel_token
 
 volumes:
   postgres_data:
   redis_data:
   document_storage:
-  letsencrypt:
 
 networks:
   rubrica_internal:
