@@ -100,8 +100,8 @@ services:
       STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
       STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
       STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:?STRIPE_PRICE_BRL is required}
-      STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:?STRIPE_PRICE_USD is required}
-      STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:?STRIPE_PRICE_JPY is required}
+      STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
+      STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
       BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
     secrets:
       - postgres_password
@@ -253,29 +253,29 @@ services:
 
 secrets:
   postgres_password:
-    file: ${SECRETS_DIR:-./secrets/production}/postgres_password
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/postgres_password
   auth_seed_admin_password:
-    file: ${SECRETS_DIR:-./secrets/production}/auth_seed_admin_password
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_seed_admin_password
   auth_mfa_encryption_key:
-    file: ${SECRETS_DIR:-./secrets/production}/auth_mfa_encryption_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_mfa_encryption_key
   auth_identity_encryption_key:
-    file: ${SECRETS_DIR:-./secrets/production}/auth_identity_encryption_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_identity_encryption_key
   auth_identity_hmac_key:
-    file: ${SECRETS_DIR:-./secrets/production}/auth_identity_hmac_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_identity_hmac_key
   notification_internal_service_key:
-    file: ${SECRETS_DIR:-./secrets/production}/notification_internal_service_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/notification_internal_service_key
   core_internal_service_key:
-    file: ${SECRETS_DIR:-./secrets/production}/core_internal_service_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/core_internal_service_key
   resend_api_key:
-    file: ${SECRETS_DIR:-./secrets/production}/resend_api_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/resend_api_key
   evidence_secret:
-    file: ${SECRETS_DIR:-./secrets/production}/evidence_secret
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/evidence_secret
   stripe_secret_key:
-    file: ${SECRETS_DIR:-./secrets/production}/stripe_secret_key
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_secret_key
   stripe_webhook_secret:
-    file: ${SECRETS_DIR:-./secrets/production}/stripe_webhook_secret
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_webhook_secret
   cloudflare_ini:
-    file: ${SECRETS_DIR:-./secrets/production}/cloudflare.ini
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/cloudflare.ini
 
 volumes:
   postgres_data:

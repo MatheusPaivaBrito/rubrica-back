@@ -2,7 +2,7 @@
 
 Este documento é o roteiro operacional para colocar o Rubrica no ar. Não grave
 tokens neste arquivo, no .env ou no Git. Os valores secretos ficam somente em
-secrets/production no servidor, com permissão 0600.
+`/etc/rubrica/secrets` no servidor, com permissão 0600.
 
 ## 1. Contas e links necessários
 
@@ -71,7 +71,7 @@ https e sem barra:
 
     RUBRICA_DOMAIN=app.seudominio.com
     LETSENCRYPT_EMAIL=infra@seudominio.com
-    RUBRICA_WEB_CONTEXT=../rubrica-front
+    RUBRICA_WEB_CONTEXT=../rubrica-web
 
 ## 3. Criar o token Cloudflare para o certificado
 
@@ -84,10 +84,9 @@ No painel Cloudflare:
 5. Copie o token uma única vez.
 6. No servidor:
 
-    cd ~/rubrica/rubrica-back
-    cp secrets/production/cloudflare.ini.example secrets/production/cloudflare.ini
-    nano secrets/production/cloudflare.ini
-    chmod 600 secrets/production/cloudflare.ini
+    sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
+    sudoedit /etc/rubrica/secrets/cloudflare.ini
+    sudo chmod 600 /etc/rubrica/secrets/cloudflare.ini
 
 Conteúdo:
 
@@ -110,8 +109,8 @@ a reputação dos e-mails transacionais.
    opção estiver disponível.
 7. Salve a chave no servidor:
 
-    nano secrets/production/resend_api_key
-    chmod 600 secrets/production/resend_api_key
+    sudoedit /etc/rubrica/secrets/resend_api_key
+    sudo chmod 600 /etc/rubrica/secrets/resend_api_key
 
 8. Configure no .env.production:
 
@@ -128,22 +127,19 @@ falha de pagamento. O vencimento é controlado pelo período informado pelo Stri
 
 1. Ative o modo de teste ou crie uma Sandbox.
 2. Crie um produto chamado Rubrica - Assinaturas ilimitadas.
-3. Crie três preços recorrentes mensais para esse produto:
-   - BRL;
-   - USD;
-   - JPY.
-4. Copie os três IDs iniciados por price_.
-5. Preencha no .env.production:
+3. Crie o preço recorrente mensal em BRL. USD e JPY podem ser adicionados depois.
+4. Copie o ID iniciado por price_.
+5. Preencha no .env.production; deixe moedas ainda não disponíveis vazias:
 
     STRIPE_PRICE_BRL=price_COLE_O_ID_BRL
-    STRIPE_PRICE_USD=price_COLE_O_ID_USD
-    STRIPE_PRICE_JPY=price_COLE_O_ID_JPY
+    STRIPE_PRICE_USD=
+    STRIPE_PRICE_JPY=
 
 6. Em Developers > API Keys, copie a secret key de teste iniciada por sk_test_.
 7. Salve-a somente neste arquivo:
 
-    nano secrets/production/stripe_secret_key
-    chmod 600 secrets/production/stripe_secret_key
+    sudoedit /etc/rubrica/secrets/stripe_secret_key
+    sudo chmod 600 /etc/rubrica/secrets/stripe_secret_key
 
 8. Crie um webhook público:
 
@@ -160,8 +156,8 @@ falha de pagamento. O vencimento é controlado pelo período informado pelo Stri
     escolha cancelar a assinatura se a recuperação falhar.
 11. Copie o signing secret iniciado por whsec_ para:
 
-    nano secrets/production/stripe_webhook_secret
-    chmod 600 secrets/production/stripe_webhook_secret
+    sudoedit /etc/rubrica/secrets/stripe_webhook_secret
+    sudo chmod 600 /etc/rubrica/secrets/stripe_webhook_secret
 
 Chaves, produtos, preços e webhooks do modo teste não existem no modo live. A
 troca para produção exige recriar esses objetos no modo live e substituir todos
@@ -171,24 +167,24 @@ os respectivos arquivos e IDs.
 
 Execute no servidor. Cada valor deve ser independente:
 
-    cd ~/rubrica/rubrica-back
+    sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
     umask 077
-    openssl rand -base64 48 > secrets/production/postgres_password
-    openssl rand -base64 48 > secrets/production/auth_mfa_encryption_key
-    openssl rand -base64 48 > secrets/production/auth_identity_encryption_key
-    openssl rand -base64 48 > secrets/production/auth_identity_hmac_key
-    openssl rand -base64 48 > secrets/production/notification_internal_service_key
-    openssl rand -base64 48 > secrets/production/core_internal_service_key
-    openssl rand -base64 48 > secrets/production/evidence_secret
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/postgres_password >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/auth_mfa_encryption_key >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/auth_identity_encryption_key >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/auth_identity_hmac_key >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/notification_internal_service_key >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/core_internal_service_key >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/evidence_secret >/dev/null
 
 Crie a senha inicial do administrador no gerenciador de senhas e grave-a em:
 
-    nano secrets/production/auth_seed_admin_password
+    sudoedit /etc/rubrica/secrets/auth_seed_admin_password
 
 Confira os onze arquivos exigidos:
 
-    find secrets/production -maxdepth 1 -type f ! -name '*.example' ! -name README.md -printf '%f\n' | sort
-    chmod 600 secrets/production/*
+    sudo find /etc/rubrica/secrets -maxdepth 1 -type f -printf '%f\n' | sort
+    sudo chmod 600 /etc/rubrica/secrets/*
 
 Arquivos esperados:
 
@@ -217,7 +213,7 @@ Preencha:
 - LETSENCRYPT_EMAIL;
 - e-mail administrativo;
 - remetente Resend;
-- IDs dos três preços Stripe;
+- ID do preço Stripe BRL e, quando disponíveis, os preços USD e JPY;
 - quantidades de workers, se necessário.
 
 Não coloque senhas ou tokens no .env.production.
@@ -310,7 +306,7 @@ Somente depois de todo o teste passar:
 3. Recrie produto e preços live.
 4. Crie o webhook live com a mesma URL e eventos.
 5. Substitua stripe_secret_key e stripe_webhook_secret.
-6. Substitua os três STRIPE_PRICE no .env.production.
+6. Substitua os STRIPE_PRICE disponíveis no .env.production.
 7. Reinicie Core:
 
     docker compose --env-file .env.production -f docker-compose.prod.yml up -d --force-recreate core-api

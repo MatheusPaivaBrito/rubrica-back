@@ -105,10 +105,9 @@ continues to use `nginx.local.conf` on port 8080.
 
 ```bash
 cp .env.production.example .env.production
-mkdir -p secrets/production
-cp secrets/production/cloudflare.ini.example secrets/production/cloudflare.ini
-# Create every secret listed in secrets/production/README.md
-chmod 600 secrets/production/*
+sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
+# Create every secret listed in docs/PRODUCTION_MVP_SETUP.md
+sudo chmod 600 /etc/rubrica/secrets/*
 
 docker compose --env-file .env.production -f docker-compose.prod.yml run --rm certbot-init
 make production-up
@@ -117,7 +116,7 @@ make production-seed
 ```
 
 Create a Cloudflare API token restricted to DNS editing for only the Rubrica
-zone and place it in `secrets/production/cloudflare.ini`. In Cloudflare, proxy the DNS
+zone and place it in `/etc/rubrica/secrets/cloudflare.ini`. In Cloudflare, proxy the DNS
 record and select SSL/TLS mode **Full (strict)**. At the server firewall, allow
 ports 80/443 only from Cloudflare's published address ranges; the Nginx file
 contains the same ranges solely to restore the signer's real client IP.
