@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -28,6 +30,7 @@ class Settings(BaseSettings):
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
     EVIDENCE_SECRET_FILE: str | None = None
     PUBLIC_WEB_URL: str = "http://localhost:8080"
+    BILLING_PROVIDER: Literal["fake", "stripe"] = "stripe"
     STRIPE_SECRET_KEY: str | None = None
     STRIPE_SECRET_KEY_FILE: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None

@@ -20,7 +20,7 @@
       "type": "string"
     },
     "preferred_locale": {
-      "enum": ["pt-BR", "en", "ja-JP"]
+      "enum": ["pt-BR", "en", "es", "ja-JP"]
     },
     "mfa_enabled": {
       "type": "boolean"

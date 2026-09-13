@@ -49,8 +49,7 @@ services:
           SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:8080/signing}
           PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8080}
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
-          STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
-          STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
+          BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
           STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
           STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
           STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
@@ -60,14 +59,12 @@ services:
           - "${CORE_API_PORT:-8100}:8000"
         volumes:
           - ./data/documents:/var/lib/rubrica/documents
-        secrets:
-          - stripe_secret_key
-          - stripe_webhook_secret
         depends_on:
           - postgres
 
 
       stripe-cli:
+        profiles: ["stripe"]
         image: stripe/stripe-cli:latest
         entrypoint: ["/bin/sh", "-ec"]
         command:
@@ -162,14 +159,11 @@ services:
           NOTIFICATION_EMAIL_PROVIDER: ${NOTIFICATION_EMAIL_PROVIDER:-local_ack}
           NOTIFICATION_DEFAULT_FROM_EMAIL: ${NOTIFICATION_DEFAULT_FROM_EMAIL:-no-reply@rubrica.local}
           SENDGRID_API_KEY: ${SENDGRID_API_KEY:-}
-          RESEND_API_KEY_FILE: /run/secrets/resend_api_key
           RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Rubrica <onboarding@resend.dev>}
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
           NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
         ports:
           - "${NOTIFICATION_API_PORT:-8103}:8000"
-        secrets:
-          - resend_api_key
         depends_on:
           postgres:
             condition: service_healthy

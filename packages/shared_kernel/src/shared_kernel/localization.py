@@ -2,8 +2,8 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
-SupportedLocale = Literal["pt-BR", "en", "ja-JP"]
-SUPPORTED_LOCALES: tuple[SupportedLocale, ...] = ("pt-BR", "en", "ja-JP")
+SupportedLocale = Literal["pt-BR", "en", "es", "ja-JP"]
+SUPPORTED_LOCALES: tuple[SupportedLocale, ...] = ("pt-BR", "en", "es", "ja-JP")
 DEFAULT_LOCALE: SupportedLocale = "en"
 
 
@@ -13,6 +13,8 @@ def normalize_locale(value: object) -> SupportedLocale:
         return "pt-BR"
     if candidate == "ja" or candidate.startswith("ja-"):
         return "ja-JP"
+    if candidate == "es" or candidate.startswith("es-"):
+        return "es"
     if candidate == "en" or candidate.startswith("en-"):
         return "en"
     return DEFAULT_LOCALE

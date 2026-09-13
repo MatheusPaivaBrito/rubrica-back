@@ -101,7 +101,7 @@ class BillingService:
                         name=tenant.name,
                         metadata={"tenant_id": str(tenant.id)},
                     )
-                    account.provider = "stripe"
+                    account.provider = settings.BILLING_PROVIDER
                     account.provider_customer_id = customer.id
                 checkout = provider.create_checkout_session(
                     customer_id=account.provider_customer_id,
@@ -334,6 +334,14 @@ class BillingService:
                 "paid": ("Rubrica お支払い確認", "Stripe が {tenant} のお支払いを確認しました。"),
                 "failed": ("Rubrica お支払い失敗", "{tenant} のお支払いを確認できませんでした。請求ポータルでお支払い方法をご確認ください。"),
                 "paused": ("Rubrica サブスクリプション一時停止", "{tenant} のサブスクリプションは一時停止されています。請求ポータルで状態をご確認ください。"),
+            },
+            "es": {
+                "checkout": ("Pago recibido por Rubrica", "Recibimos el pago de {tenant}. El plan se habilitará cuando Stripe confirme la suscripción."),
+                "active": ("Suscripción Rubrica activa", "La suscripción de {tenant} está activa."),
+                "cancelled": ("Suscripción Rubrica cancelada", "La suscripción de {tenant} fue cancelada."),
+                "paid": ("Pago Rubrica confirmado", "Stripe confirmó el pago de {tenant}."),
+                "failed": ("Error en el pago de Rubrica", "Stripe no pudo confirmar el pago de {tenant}. Revisa el método de pago en el portal de facturación."),
+                "paused": ("Suscripción Rubrica pausada", "La suscripción de {tenant} fue pausada. Revisa su estado en el portal de facturación."),
             },
         }
         return messages.get(locale, messages["en"])[key]

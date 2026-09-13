@@ -97,6 +97,7 @@ services:
       SIGNING_APP_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}/signing
       PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
       EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
+      BILLING_PROVIDER: stripe
       STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
       STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
       STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:?STRIPE_PRICE_BRL is required}

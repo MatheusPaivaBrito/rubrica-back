@@ -12,6 +12,7 @@ from auth_api.modules.sessions.session_schema import (
     MfaChallengeResponse,
 )
 from auth_api.modules.sessions.session_service import session_service
+from auth_api.infrastructure.settings import settings
 
 
 router = APIRouter(tags=["auth"])
@@ -97,8 +98,25 @@ async def logout_all(
 
 
 def _set_auth_cookies(response: Response, payload: LoginResponse) -> None:
-    response.set_cookie("access_token", payload.access_token, httponly=True, samesite="lax", path="/")
-    response.set_cookie("refresh_token", payload.refresh_token, httponly=True, samesite="lax", path="/")
+    secure = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    response.set_cookie(
+        "access_token",
+        payload.access_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=settings.AUTH_ACCESS_TTL_SECONDS,
+        path="/",
+    )
+    response.set_cookie(
+        "refresh_token",
+        payload.refresh_token,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        max_age=settings.AUTH_SESSION_TTL_SECONDS,
+        path="/",
+    )
 
 
 def _clear_auth_cookies(response: Response) -> None:

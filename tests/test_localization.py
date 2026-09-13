@@ -15,6 +15,7 @@ from shared_kernel.localization import (
 def test_locale_variants_are_normalized_with_a_safe_fallback() -> None:
     assert normalize_locale("pt_BR") == "pt-BR"
     assert normalize_locale("ja") == "ja-JP"
+    assert normalize_locale("es_MX") == "es"
     assert normalize_locale("en-US") == "en"
     assert normalize_locale("unsupported") == "en"
 

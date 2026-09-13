@@ -75,6 +75,7 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     japanese = locale == "ja-JP"
     label = {
         "pt-BR": "ASSINADO ELETRONICAMENTE POR",
+        "es": "FIRMADO ELECTRÓNICAMENTE POR",
         "en": "ELECTRONICALLY SIGNED BY",
         "ja-JP": "電子署名者",
     }.get(locale, "ELECTRONICALLY SIGNED BY")
@@ -83,7 +84,7 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica-Bold", 9)
     canvas.drawString(left + 7, bottom + 21, str(item["signer_name"])[:38])
     canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica", 6.5)
-    evidence_label = {"pt-BR": "evidência", "en": "evidence", "ja-JP": "証拠"}.get(locale, "evidence")
+    evidence_label = {"pt-BR": "evidência", "en": "evidence", "es": "evidencia", "ja-JP": "証拠"}.get(locale, "evidence")
     timezone = str(stamp.get("timezone", "UTC"))[:32]
     canvas.drawString(left + 7, bottom + 9, f'{item["signed_at"]} {timezone}  {evidence_label} {item["evidence_sha256"][:12]}')
     canvas.save()

@@ -193,7 +193,7 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
     assert account.grace_period_ends_at is None
 
 
-@pytest.mark.parametrize("locale", ["en", "pt-BR", "ja-JP"])
+@pytest.mark.parametrize("locale", ["en", "pt-BR", "es", "ja-JP"])
 def test_billing_messages_are_localized(locale: str) -> None:
     message = BillingService._billing_message(locale, "invoice.payment_failed")
 

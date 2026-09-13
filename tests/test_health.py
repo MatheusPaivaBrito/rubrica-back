@@ -2,12 +2,15 @@ import asyncio
 
 import pytest
 from fastapi import HTTPException
+from fastapi import Response
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from core_api.infrastructure.auth_context import authenticated_context
 from core_api.main import app as core_app
 from auth_api.main import app as auth_app
+from auth_api.modules.sessions.session_router import _set_auth_cookies
+from auth_api.modules.sessions.session_schema import LoginResponse
 
 
 def test_core_routes_are_registered() -> None:
@@ -76,6 +79,20 @@ def test_auth_routes_are_registered() -> None:
     assert "/access-control/context" in paths
     assert "/users/signers" in paths
     assert "/users/me/preferences" in paths
+
+
+def test_production_auth_cookies_are_secure_and_persistent(monkeypatch) -> None:
+    monkeypatch.setattr("auth_api.modules.sessions.session_router.settings.ENVIRONMENT", "production")
+    response = Response()
+
+    _set_auth_cookies(
+        response,
+        LoginResponse(access_token="access-token", refresh_token="refresh-token", session_id="session-id"),
+    )
+
+    cookies = response.headers.getlist("set-cookie")
+    assert any("access_token=" in cookie and "Max-Age=900" in cookie and "Secure" in cookie and "HttpOnly" in cookie for cookie in cookies)
+    assert any("refresh_token=" in cookie and "Max-Age=604800" in cookie and "Secure" in cookie and "HttpOnly" in cookie for cookie in cookies)
 
 
 def test_core_business_routes_require_an_access_token() -> None:
