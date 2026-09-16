@@ -31,10 +31,12 @@ class AccountService:
             user = UserEntity(
                 name=payload.name.strip(),
                 email=payload.email.strip().lower(),
-                password_hash=hash_password(payload.password),
+                # A non-recoverable placeholder preserves the non-null database
+                # invariant until the e-mail owner chooses the initial password.
+                password_hash=hash_password(token_urlsafe(48)),
                 preferred_locale=payload.preferred_locale,
                 email_verified=False,
-                is_active=True,
+                is_active=False,
             )
             database.add(user)
             try:
@@ -70,7 +72,7 @@ class AccountService:
     def request_email_verification(self, email: str) -> None:
         with SessionLocal.begin() as database:
             user = self._user_by_email(database, email)
-            if user is None or user.email_verified or not user.is_active:
+            if user is None or user.email_verified:
                 return
             token = self._issue_token(
                 database,
@@ -80,13 +82,16 @@ class AccountService:
             )
         self._send_verification(user.email, token)
 
-    def verify_email(self, raw_token: str) -> None:
+    def verify_email(self, raw_token: str, new_password: str) -> None:
         with SessionLocal.begin() as database:
             token = self._consume_token(database, raw_token, "verify_email")
             user = database.get(UserEntity, token.user_id)
             if user is None:
                 raise InvalidAccountTokenError
+            user.password_hash = hash_password(new_password)
             user.email_verified = True
+            user.is_active = True
+            user.token_version += 1
 
     def request_password_recovery(self, email: str) -> None:
         with SessionLocal.begin() as database:
@@ -121,8 +126,8 @@ class AccountService:
         url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/verify-email?token={token}"
         request_account_email(
             recipient=email,
-            subject="Verify your Rubrica email",
-            body=f"Use this link to verify your email: {url}",
+            subject="Activate your Rubrica account",
+            body=f"Use this link to confirm your email and create your password: {url}",
             idempotency_key=f"email-verification:{self._digest(token)}",
             metadata={"template": "email_verification", "verification_url": url},
         )

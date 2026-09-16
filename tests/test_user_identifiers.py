@@ -58,7 +58,18 @@ def test_partial_identity_document_is_rejected() -> None:
         PublicRegistration(
             name="Incomplete Identity",
             email="identity@example.com",
-            password="a-secure-password",
             preferred_locale="ja-JP",
             identity_document_type="PASSPORT",
+        )
+
+
+def test_public_registration_does_not_accept_a_password() -> None:
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        PublicRegistration.model_validate(
+            {
+                "name": "New account",
+                "email": "new@example.com",
+                "password": "must-not-be-collected",
+                "preferred_locale": "pt-BR",
+            }
         )

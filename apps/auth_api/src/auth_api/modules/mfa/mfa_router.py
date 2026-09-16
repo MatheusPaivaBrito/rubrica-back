@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from auth_api.modules.mfa.mfa_schema import (
     MfaCodeRequest,
@@ -38,6 +38,14 @@ async def setup_mfa(
     _enforce_rate_limit(session.subject, "setup", limit=5)
     secret, provisioning_uri = mfa_service.setup(session.subject)
     return MfaSetupResponse(secret=secret, provisioning_uri=provisioning_uri)
+
+
+@router.post("/defer", status_code=status.HTTP_204_NO_CONTENT)
+async def defer_mfa(
+    session: SessionRead = Depends(require_authenticated_session),
+) -> Response:
+    session_service.defer_mfa_for_session(session.session_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/confirm", response_model=MfaConfirmResponse)

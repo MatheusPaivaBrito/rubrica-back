@@ -138,7 +138,6 @@ def test_auth_client_provisions_tenant_with_internal_contract(monkeypatch) -> No
         PublicRegistration(
             name="Owner",
             email="OWNER@example.com",
-            password="secure-password",
             preferred_locale="pt-BR",
         )
     )

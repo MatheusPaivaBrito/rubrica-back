@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from shared_kernel.localization import (
     SupportedLocale,
@@ -27,11 +27,12 @@ IdentityDocumentType = Literal[
 
 
 class PublicRegistration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=2, max_length=180)
     email: str = Field(
         min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
     )
-    password: str = Field(min_length=8, max_length=128)
     preferred_locale: SupportedLocale = "en"
     identity_document_type: IdentityDocumentType | None = None
     identity_document_country: str | None = None
@@ -78,6 +79,7 @@ class AccountActionAccepted(BaseModel):
 
 class EmailVerification(BaseModel):
     token: str = Field(min_length=32, max_length=255)
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 class EmailVerificationRequest(BaseModel):

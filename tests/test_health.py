@@ -69,6 +69,7 @@ def test_auth_routes_are_registered() -> None:
     assert "/auth/password-recovery" in paths
     assert "/auth/password-reset" in paths
     assert "/auth/mfa/setup" in paths
+    assert "/auth/mfa/defer" in paths
     assert "/auth/mfa/confirm" in paths
     assert "/auth/mfa" in paths
     assert "/auth/mfa/challenge" in paths

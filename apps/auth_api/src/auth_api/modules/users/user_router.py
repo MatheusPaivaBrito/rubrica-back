@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -16,12 +16,53 @@ from auth_api.modules.users.user_identifier_service import add_identifier
 from auth_api.modules.users.user_schema import (
     UserCreate,
     UserIdentifierRead,
+    UserIdentitySummary,
     UserPreferencesUpdate,
     UserRead,
 )
 
 
 router = APIRouter(prefix="/users", tags=["users - command"])
+
+
+@router.get("/internal/identity-summary", response_model=UserIdentitySummary, include_in_schema=False)
+async def identity_summary(
+    email: str,
+    x_rubrica_service: str | None = Header(default=None),
+    x_rubrica_service_key: str | None = Header(default=None),
+) -> UserIdentitySummary:
+    from auth_api.infrastructure.settings import settings
+    from shared_kernel.security.service_tokens import verify_service_token
+
+    if (
+        x_rubrica_service != "core_api"
+        or not settings.CORE_INTERNAL_SERVICE_KEY
+        or not verify_service_token(
+            x_rubrica_service_key or "", settings.CORE_INTERNAL_SERVICE_KEY
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Service authentication failed",
+        )
+    with SessionLocal() as database:
+        identifier = database.scalar(
+            select(UserIdentifierEntity)
+            .join(UserEntity, UserEntity.id == UserIdentifierEntity.user_id)
+            .where(
+                UserEntity.email == email.strip().lower(),
+                UserEntity.deleted_at.is_(None),
+                UserIdentifierEntity.deleted_at.is_(None),
+            )
+            .order_by(UserIdentifierEntity.created_at)
+        )
+        if identifier is None:
+            return UserIdentitySummary()
+        return UserIdentitySummary(
+            identifier_type=identifier.identifier_type,
+            issuing_country=identifier.issuing_country,
+            masked_display=identifier.masked_display,
+        )
 
 
 def _cpf_digits(value: str) -> str:
@@ -47,6 +88,13 @@ def _cpf_digits(value: str) -> str:
 async def list_signers(
     session: SessionRead = Depends(require_authenticated_session),
 ) -> list[UserRead]:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Global signer discovery was removed; invite a signer by e-mail",
+    )
+
+    # Kept temporarily for migration history; this branch is intentionally
+    # unreachable until a tenant-scoped directory replaces it.
     with SessionLocal() as database:
         actor = database.scalar(
             select(UserEntity).where(UserEntity.email == session.subject).limit(1)
@@ -151,6 +199,13 @@ async def list_my_identifiers(
 async def create_user(
     payload: UserCreate, session: SessionRead = Depends(require_authenticated_session)
 ) -> UserRead:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Direct global user creation was removed; invite a signer by e-mail",
+    )
+
+    # Kept temporarily for migration history; this branch is intentionally
+    # unreachable until tenant-scoped member invitations are implemented.
     with SessionLocal.begin() as database:
         actor = database.scalar(
             select(UserEntity).where(UserEntity.email == session.subject).limit(1)

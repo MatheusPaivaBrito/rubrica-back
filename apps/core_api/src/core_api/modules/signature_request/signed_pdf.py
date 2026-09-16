@@ -50,8 +50,8 @@ def generate_signed_pdf(
 
 def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO:
     stamp = item["stamp"]
-    box_width = min(205.0, width * 0.42)
-    box_height = 48.0
+    box_width = min(255.0, width * 0.48)
+    box_height = 72.0
     center_x = float(stamp["x"]) * width
     center_y = (1 - float(stamp["y"])) * height
     left = min(max(4.0, center_x - box_width / 2), width - box_width - 4.0)
@@ -68,7 +68,7 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
         _draw_country_flag(
             canvas,
             left + box_width - flag_width - 6,
-            bottom + 27,
+            bottom + 49,
             str(stamp["country_code"]),
         )
     locale = str(stamp.get("locale", "en"))
@@ -79,17 +79,37 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
         "en": "ELECTRONICALLY SIGNED BY",
         "ja-JP": "電子署名者",
     }.get(locale, "ELECTRONICALLY SIGNED BY")
-    canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica-Bold", 7 if japanese else 6)
-    canvas.drawString(left + 7, bottom + 34, label)
-    canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica-Bold", 9)
-    canvas.drawString(left + 7, bottom + 21, str(item["signer_name"])[:38])
-    canvas.setFont("HeiseiMin-W3" if japanese else "Helvetica", 6.5)
+    bold_font = "HeiseiMin-W3" if japanese else "Helvetica-Bold"
+    regular_font = "HeiseiMin-W3" if japanese else "Helvetica"
+    text_width = box_width - flag_width - 16
+    canvas.setFont(bold_font, 7 if japanese else 6)
+    canvas.drawString(left + 7, bottom + 58, _fit_text(label, bold_font, 7 if japanese else 6, text_width))
+    canvas.setFont(bold_font, 9)
+    canvas.drawString(left + 7, bottom + 43, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
+    identity_type = str(item.get("identity_document_type") or "").replace("BR_", "").replace("PT_", "")
+    identity_masked = str(item.get("identity_document_masked") or "")
+    identity_text = f"{identity_type}: {identity_masked}" if identity_type and identity_masked else ""
+    canvas.setFont(regular_font, 7)
+    if identity_text:
+        canvas.drawString(left + 7, bottom + 30, _fit_text(identity_text, regular_font, 7, box_width - 14))
     evidence_label = {"pt-BR": "evidência", "en": "evidence", "es": "evidencia", "ja-JP": "証拠"}.get(locale, "evidence")
     timezone = str(stamp.get("timezone", "UTC"))[:32]
-    canvas.drawString(left + 7, bottom + 9, f'{item["signed_at"]} {timezone}  {evidence_label} {item["evidence_sha256"][:12]}')
+    canvas.setFont(regular_font, 6.5)
+    canvas.drawString(left + 7, bottom + 18, _fit_text(f'{item["signed_at"]} · {timezone}', regular_font, 6.5, box_width - 14))
+    canvas.drawString(left + 7, bottom + 7, _fit_text(f'{evidence_label}: {item["evidence_sha256"][:16]}', regular_font, 6.5, box_width - 14))
     canvas.save()
     stream.seek(0)
     return stream
+
+
+def _fit_text(value: str, font_name: str, font_size: float, max_width: float) -> str:
+    if pdfmetrics.stringWidth(value, font_name, font_size) <= max_width:
+        return value
+    suffix = "…"
+    fitted = value
+    while fitted and pdfmetrics.stringWidth(fitted + suffix, font_name, font_size) > max_width:
+        fitted = fitted[:-1]
+    return fitted.rstrip() + suffix
 
 
 def _draw_country_flag(canvas: Canvas, left: float, bottom: float, country_code: str) -> None:

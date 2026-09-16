@@ -96,3 +96,9 @@ class UserIdentifierRead(BaseModel):
     identifier_type: str
     masked_display: str
     verification_status: str
+
+
+class UserIdentitySummary(BaseModel):
+    identifier_type: str | None = None
+    issuing_country: str | None = None
+    masked_display: str | None = None

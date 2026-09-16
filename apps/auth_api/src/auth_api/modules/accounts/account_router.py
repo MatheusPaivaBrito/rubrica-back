@@ -48,7 +48,7 @@ async def request_email_verification(
 @router.post("/verify-email", response_model=AccountActionAccepted)
 async def verify_email(payload: EmailVerification) -> AccountActionAccepted:
     try:
-        account_service.verify_email(payload.token)
+        account_service.verify_email(payload.token, payload.new_password)
     except InvalidAccountTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

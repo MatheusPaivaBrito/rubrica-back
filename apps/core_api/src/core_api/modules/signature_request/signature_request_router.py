@@ -15,6 +15,8 @@ from core_api.modules.signature_request.workflow_schema import (
     SigningRead,
 )
 from core_api.modules.signature_request.database_workflow_service import database_workflow_service as workflow_service
+from core_api.modules.signature_request.notification_client import SignatureInvitationDeliveryError
+from core_api.modules.signature_request.identity_client import identity_summary
 
 
 router = APIRouter()
@@ -43,7 +45,18 @@ async def create_request(payload: SignatureRequestInput, context: AuthContext = 
 
 @router.get("/signature-requests/{request_id}/signers", response_model=list[SignerRead], tags=["signature requests - query"])
 async def list_signers(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> list[SignerRead]:
-    return workflow_service.list_signers(request_id, context.subject)
+    signers = workflow_service.list_signers(request_id, context.subject)
+    return [
+        signer.model_copy(
+            update={
+                "identity_document_type": summary.identifier_type,
+                "identity_document_country": summary.issuing_country,
+                "identity_document_masked": summary.masked_display,
+            }
+        )
+        for signer in signers
+        for summary in [identity_summary(signer.email)]
+    ]
 
 
 @router.post("/signature-requests/{request_id}/signers", response_model=SignerRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
@@ -52,7 +65,13 @@ async def add_signer(request_id: UUID, payload: SignerCreate, context: AuthConte
 
 @router.post("/signature-requests/{request_id}/signing-link", response_model=SigningLinkRead, tags=["signature requests - command"])
 async def create_signing_link(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SigningLinkRead:
-    return workflow_service.create_signing_link(request_id, context.subject)
+    try:
+        return workflow_service.create_signing_link(request_id, context.subject)
+    except SignatureInvitationDeliveryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/signature-requests/{request_id}/signing-link", response_model=SigningLinkRead, tags=["signature requests - query"])
@@ -93,7 +112,19 @@ async def request_audit(request_id: UUID, context: AuthContext = Depends(require
 
 @router.get("/signing/links/{token}", response_model=SigningRead, tags=["signing - query"])
 async def signing_context(token: str, context: AuthContext = Depends(authenticated_context)) -> SigningRead:
-    return workflow_service.signing_context(token, context.subject, administrator=_is_administrator(context))
+    signing = workflow_service.signing_context(token, context.subject, administrator=_is_administrator(context))
+    summary = identity_summary(signing.signer.email)
+    return signing.model_copy(
+        update={
+            "signer": signing.signer.model_copy(
+                update={
+                    "identity_document_type": summary.identifier_type,
+                    "identity_document_country": summary.issuing_country,
+                    "identity_document_masked": summary.masked_display,
+                }
+            )
+        }
+    )
 
 @router.get("/signing/links/{token}/document", tags=["signing - query"])
 async def signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:

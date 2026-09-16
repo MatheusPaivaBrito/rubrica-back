@@ -19,6 +19,8 @@ from core_api.modules.document.document_entity import DocumentEntity, DocumentVe
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
+from core_api.modules.signature_request.notification_client import send_signature_invitation
+from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
 from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
@@ -175,7 +177,29 @@ class DatabaseSignatureWorkflowService:
             token = self._request_token(request.id, request.signing_token_nonce)
             request.signing_token_hash = sha256(token.encode()).hexdigest()
             self._audit(db, request.id, actor_id, "signature_request.link_created", "signature_request", request.id, {})
-            return SigningLinkRead(signing_url=self._signing_url(token))
+            signing_url = self._signing_url(token)
+            document = self._document(db, str(request.document_id))
+            signers = db.scalars(
+                select(SignerEntity).where(
+                    SignerEntity.signature_request_id == request.id,
+                    SignerEntity.status.in_([SignerStatus.PENDING.value, SignerStatus.VIEWED.value]),
+                    SignerEntity.link_revoked_at.is_(None),
+                )
+            ).all()
+            invitations = [
+                (signer.email, signer.name, f"signature-invite:{request.id}:{signer.id}:{request.signing_token_nonce}")
+                for signer in signers
+            ]
+            document_title = document.title
+        for recipient, signer_name, idempotency_key in invitations:
+            send_signature_invitation(
+                recipient=recipient,
+                signer_name=signer_name,
+                document_title=document_title,
+                signing_url=signing_url,
+                idempotency_key=idempotency_key,
+            )
+        return SigningLinkRead(signing_url=signing_url)
 
     def get_signing_link(self, request_id: str, actor_id: str) -> SigningLinkRead:
         with SessionLocal() as db:
@@ -291,6 +315,7 @@ class DatabaseSignatureWorkflowService:
     def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v1", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown") -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
+        signer_identity = identity_summary(auth_user_id)
         artifact_key: str | None = None
         try:
             with SessionLocal.begin() as db:
@@ -309,7 +334,7 @@ class DatabaseSignatureWorkflowService:
                 if sha256(original).hexdigest() != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
                 now = DateTimeService.utc_now()
-                evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent)
+                evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity)
                 evidence_hash = evidence_sha256(evidence)
                 existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
                 stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
@@ -417,7 +442,7 @@ class DatabaseSignatureWorkflowService:
         return request
 
     @staticmethod
-    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str) -> dict[str, object]:
+    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str, identity: IdentitySummary | None = None) -> dict[str, object]:
         subject_hash = hmac_new(settings.EVIDENCE_SECRET.encode(), auth_user_id.lower().encode(), "sha256").hexdigest()
         identity_binding = hmac_new(settings.EVIDENCE_SECRET.encode(), f"{auth_user_id.lower()}|{request.id}|{signer.id}|{request.document_id}|{request.document_version}".encode(), "sha256").hexdigest()
         normalized_agent = user_agent[:1000] or "unknown"
@@ -435,6 +460,9 @@ class DatabaseSignatureWorkflowService:
             "subject_hmac_sha256": subject_hash,
             "identity_binding_hmac_sha256": identity_binding,
             "signer_name": signer.name,
+            "identity_document_type": identity.identifier_type if identity else None,
+            "identity_document_country": identity.issuing_country if identity else None,
+            "identity_document_masked": identity.masked_display if identity else None,
             "signer_email": signer.email,
             "signed_at": signed_at.isoformat(),
             "stamp": stamp.model_dump(),
