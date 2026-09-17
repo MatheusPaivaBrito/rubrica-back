@@ -2,17 +2,17 @@ ENV_FILE ?= .env
 -include $(ENV_FILE)
 export
 
-CORE_API_PORT ?= 8100
+CORE_API_PORT ?= 7100
 CORE_WEB_CONCURRENCY ?= 2
-AUTH_API_PORT ?= 8101
-EVENTING_API_PORT ?= 8102
-NOTIFICATION_API_PORT ?= 8103
-OBSERVABILITY_API_PORT ?= 8104
+AUTH_API_PORT ?= 7101
+EVENTING_API_PORT ?= 7102
+NOTIFICATION_API_PORT ?= 7103
+OBSERVABILITY_API_PORT ?= 7104
 AUTH_WEB_CONCURRENCY ?= 2
-GATEWAY_HOST_PORT ?= 8180
+GATEWAY_HOST_PORT ?= 7171
 GATEWAY_PORT ?= $(GATEWAY_HOST_PORT)
-POSTGRES_HOST_PORT ?= 5435
-REDIS_HOST_PORT ?= 6381
+POSTGRES_HOST_PORT ?= 7435
+REDIS_HOST_PORT ?= 7381
 KAFKA_HOST_PORT ?= 9092
 LOKI_HOST_PORT ?= 3100
 GRAFANA_HOST_PORT ?= 3000
@@ -175,13 +175,13 @@ seed-auth: migrate-auth
 
 
 compose-up:
-	docker compose up -d --build
+	docker compose -f docker-compose.yml -f docker-compose.gateway.yml --profile gateway up -d --build
 
 bootstrap: compose-up migrate seed-auth
-	@echo "[ok] Rubrica is ready at http://localhost:8080"
+	@echo "[ok] Rubrica is ready at http://localhost:7171"
 
 compose-down:
-	docker compose --profile "*" down --remove-orphans
+	docker compose -f docker-compose.yml -f docker-compose.gateway.yml --profile "*" down --remove-orphans
 
 production-config:
 	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) config --quiet

@@ -8,7 +8,7 @@ services:
           POSTGRES_DB: ${POSTGRES_DB:-rubrica}
           POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification},${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
         ports:
-          - "${POSTGRES_HOST_PORT:-5435}:5432"
+          - "${POSTGRES_HOST_PORT:-7435}:5432"
         volumes:
           - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
         healthcheck:
@@ -21,7 +21,7 @@ services:
       redis:
         image: redis:7-alpine
         ports:
-          - "${REDIS_HOST_PORT:-6381}:6379"
+          - "${REDIS_HOST_PORT:-7381}:6379"
         healthcheck:
           test: ["CMD", "redis-cli", "ping"]
           interval: 2s
@@ -46,8 +46,8 @@ services:
           NOTIFICATION_API_URL: http://notification-api:8000
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
           DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
-          SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:8080/signing}
-          PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:8080}
+          SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:7171/signing}
+          PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:7171}
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
           BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
           STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
@@ -56,7 +56,7 @@ services:
           BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
 
         ports:
-          - "${CORE_API_PORT:-8100}:8000"
+          - "${CORE_API_PORT:-7100}:8000"
         volumes:
           - ./data/documents:/var/lib/rubrica/documents
         depends_on:
@@ -87,7 +87,7 @@ services:
           context: ../rubrica-web
           dockerfile: Dockerfile
         ports:
-          - "${RUBRICA_WEB_PORT:-8080}:80"
+          - "${RUBRICA_WEB_PORT:-7070}:80"
         depends_on:
           - core-api
           - auth-api
@@ -107,7 +107,7 @@ services:
           AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
           REDIS_HOST: redis
           REDIS_PORT: "6379"
-          AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:8080}
+          AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:7171}
           CORE_API_URL: http://core-api:8000
           CORE_INTERNAL_SERVICE_KEY: ${CORE_INTERNAL_SERVICE_KEY:-rubrica-local-core-key}
           AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
@@ -119,7 +119,7 @@ services:
           NOTIFICATION_API_URL: http://notification-api:8000
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
         ports:
-          - "${AUTH_API_PORT:-8101}:8000"
+          - "${AUTH_API_PORT:-7101}:8000"
 
         depends_on:
           - postgres
@@ -140,7 +140,7 @@ services:
           EVENTING_DEFAULT_EVENT_TOPIC: ${EVENTING_DEFAULT_EVENT_TOPIC:-rubrica.events}
           EVENTING_DEAD_LETTER_TOPIC: ${EVENTING_DEAD_LETTER_TOPIC:-rubrica.events.dead_letter}
         ports:
-          - "${EVENTING_API_PORT:-8102}:8000"
+          - "${EVENTING_API_PORT:-7102}:8000"
         depends_on:
           postgres:
             condition: service_healthy
@@ -164,7 +164,7 @@ services:
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
           NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
         ports:
-          - "${NOTIFICATION_API_PORT:-8103}:8000"
+          - "${NOTIFICATION_API_PORT:-7103}:8000"
         secrets:
           - resend_api_key
         depends_on:
@@ -184,7 +184,7 @@ services:
           OBSERVABILITY_PERSISTENCE_MODE: ${OBSERVABILITY_PERSISTENCE_MODE:-incidents}
           SENTRY_DSN: ${SENTRY_DSN:-}
         ports:
-          - "${OBSERVABILITY_API_PORT:-8104}:8000"
+          - "${OBSERVABILITY_API_PORT:-7104}:8000"
         depends_on:
           postgres:
             condition: service_healthy

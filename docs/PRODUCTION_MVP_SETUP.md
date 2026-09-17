@@ -57,7 +57,7 @@ repita produtos, preços e webhook no modo live.
 3. Crie um Cloudflare Tunnel dedicado ao Rubrica.
 4. No hostname público do túnel, use o serviço HTTP `http://web:80`.
 5. Não publique portas do Compose nem libere 80/443 para o Rubrica no firewall.
-6. Não exponha PostgreSQL, Redis ou portas 8100-8104 publicamente.
+6. Não exponha PostgreSQL, Redis ou portas internas das APIs publicamente.
 
 No arquivo .env.production, RUBRICA_DOMAIN deve conter somente o hostname, sem
 https e sem barra:
