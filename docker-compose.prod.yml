@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: ${POSTGRES_DB:-rubrica}
-      POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification},${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
+      POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
     secrets: [postgres_password]
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -164,25 +164,6 @@ services:
       postgres: { condition: service_healthy }
     networks: [rubrica_internal, rubrica_external]
 
-  observability-api:
-    build:
-      context: .
-      dockerfile: apps/observability_api/dockerfile
-    restart: unless-stopped
-    environment:
-      ENVIRONMENT: production
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
-      OBSERVABILITY_PERSISTENCE_MODE: incidents
-    secrets:
-      - postgres_password
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks: [rubrica_internal]
-
   web:
     build:
       context: ${RUBRICA_WEB_CONTEXT:-../rubrica-web}
@@ -195,7 +176,6 @@ services:
       core-api: { condition: service_started }
       eventing-api: { condition: service_started }
       notification-api: { condition: service_started }
-      observability-api: { condition: service_started }
     networks: [rubrica_internal]
 
   cloudflared:

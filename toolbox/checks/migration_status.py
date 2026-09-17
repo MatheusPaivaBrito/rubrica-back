@@ -13,7 +13,6 @@ SERVICE_TARGETS = {
     "auth_api": "migrate-auth",
     "eventing_api": "migrate-eventing",
     "notification_api": "migrate-notification",
-    "observability_api": "migrate-observability",
 }
 
 SERVICE_LABELS = {
@@ -21,7 +20,6 @@ SERVICE_LABELS = {
     "auth_api": "Auth",
     "eventing_api": "Eventing",
     "notification_api": "Notification",
-    "observability_api": "Observability",
 }
 
 _REVISION_PATTERN = re.compile(r"^([0-9A-Za-z_]+)(?:\s+\([^)]*\))?$")
@@ -37,13 +35,11 @@ _DATABASE_ENV_KEYS = {
     "AUTH_POSTGRES_DB",
     "EVENTING_POSTGRES_DB",
     "NOTIFICATION_POSTGRES_DB",
-    "OBSERVABILITY_POSTGRES_DB",
     "DATABASE_URL",
     "CORE_DATABASE_URL",
     "AUTH_DATABASE_URL",
     "EVENTING_DATABASE_URL",
     "NOTIFICATION_DATABASE_URL",
-    "OBSERVABILITY_DATABASE_URL",
 }
 
 

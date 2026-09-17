@@ -42,7 +42,6 @@ def environment_metadata() -> dict[str, Any]:
                 "AUTH_WEB_CONCURRENCY",
                 "EVENTING_WEB_CONCURRENCY",
                 "NOTIFICATION_WEB_CONCURRENCY",
-                "OBSERVABILITY_WEB_CONCURRENCY",
                 "WORKERS",
             )
             if (value := os.getenv(key))

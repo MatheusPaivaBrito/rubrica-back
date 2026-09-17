@@ -77,10 +77,6 @@ Owns durable integration events and outbox delivery state in `rubrica_eventing`.
 
 Owns delivery attempts in `rubrica_notification`. The active product channel is e-mail. Local development uses `local_ack`; a real provider key must be supplied in production. Slack and WhatsApp are outside the current scope.
 
-## Observability API
-
-Owns operational incidents, alert events and release markers in `rubrica_observability`. It integrates operational status with Loki, Grafana, Alloy and optional Sentry. Operational telemetry must not receive raw PDFs, signing tokens or complete government identifiers.
-
 ## Worker
 
 The Worker is the execution boundary for future outbox relay and background jobs. It must be idempotent and must not become a second source of truth for signature state.
@@ -111,14 +107,13 @@ make migrate-core
 make migrate-auth
 make migrate-eventing
 make migrate-notification
-make migrate-observability
 ```
 
 `make migrate-all` applies every chain. Production UUID rollout requires a verified backup and maintenance window because PostgreSQL rewrites identifier columns and rebuilds foreign keys.
 
 ## Deployment
 
-Local Compose runs PostgreSQL, Redis, Core, Auth, Eventing, Notification, Observability and the Angular web gateway. Production Compose adds TLS/Nginx concerns. Kubernetes manifests provide the same service boundaries. Public traffic enters through the web gateway; databases are never public application endpoints.
+Local Compose runs PostgreSQL, Redis, Core, Auth, Eventing, Notification and the Angular web gateway. Production Compose adds TLS/Nginx concerns. Kubernetes manifests provide the same service boundaries. Public traffic enters through the web gateway; databases are never public application endpoints.
 
 ## Near-term architecture work
 

@@ -6,9 +6,7 @@ services:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
           POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
           POSTGRES_DB: ${POSTGRES_DB:-rubrica}
-          POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification},${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
-        ports:
-          - "${POSTGRES_HOST_PORT:-7435}:5432"
+          POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
         volumes:
           - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
         healthcheck:
@@ -20,8 +18,6 @@ services:
 
       redis:
         image: redis:7-alpine
-        ports:
-          - "${REDIS_HOST_PORT:-7381}:6379"
         healthcheck:
           test: ["CMD", "redis-cli", "ping"]
           interval: 2s
@@ -55,8 +51,6 @@ services:
           STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
           BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
 
-        ports:
-          - "${CORE_API_PORT:-7100}:8000"
         volumes:
           - ./data/documents:/var/lib/rubrica/documents
         depends_on:
@@ -86,8 +80,6 @@ services:
         build:
           context: ../rubrica-web
           dockerfile: Dockerfile
-        ports:
-          - "${RUBRICA_WEB_PORT:-7070}:80"
         depends_on:
           - core-api
           - auth-api
@@ -118,8 +110,6 @@ services:
           AUTH_MFA_CHALLENGE_TTL_SECONDS: ${AUTH_MFA_CHALLENGE_TTL_SECONDS:-300}
           NOTIFICATION_API_URL: http://notification-api:8000
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
-        ports:
-          - "${AUTH_API_PORT:-7101}:8000"
 
         depends_on:
           - postgres
@@ -139,8 +129,6 @@ services:
           EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
           EVENTING_DEFAULT_EVENT_TOPIC: ${EVENTING_DEFAULT_EVENT_TOPIC:-rubrica.events}
           EVENTING_DEAD_LETTER_TOPIC: ${EVENTING_DEAD_LETTER_TOPIC:-rubrica.events.dead_letter}
-        ports:
-          - "${EVENTING_API_PORT:-7102}:8000"
         depends_on:
           postgres:
             condition: service_healthy
@@ -163,28 +151,8 @@ services:
           RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Rubrica <onboarding@resend.dev>}
           NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
           NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
-        ports:
-          - "${NOTIFICATION_API_PORT:-7103}:8000"
         secrets:
           - resend_api_key
-        depends_on:
-          postgres:
-            condition: service_healthy
-
-      observability-api:
-        build:
-          context: .
-          dockerfile: apps/observability_api/dockerfile
-        environment:
-          POSTGRES_USER: ${POSTGRES_USER:-rubrica}
-          POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
-          POSTGRES_HOST: postgres
-          POSTGRES_PORT: "5432"
-          OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
-          OBSERVABILITY_PERSISTENCE_MODE: ${OBSERVABILITY_PERSISTENCE_MODE:-incidents}
-          SENTRY_DSN: ${SENTRY_DSN:-}
-        ports:
-          - "${OBSERVABILITY_API_PORT:-7104}:8000"
         depends_on:
           postgres:
             condition: service_healthy

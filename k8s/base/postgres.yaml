@@ -41,7 +41,7 @@ spec:
             - name: POSTGRES_DB
               value: "rubrica"
             - name: POSTGRES_MULTIPLE_DATABASES
-              value: "rubrica_core,rubrica_auth,rubrica_eventing,rubrica_notification,rubrica_observability"
+              value: "rubrica_core,rubrica_auth,rubrica_eventing,rubrica_notification"
           ports:
             - containerPort: 5432
           volumeMounts:

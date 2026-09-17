@@ -5,14 +5,9 @@ export
 CORE_API_PORT ?= 7100
 CORE_WEB_CONCURRENCY ?= 2
 AUTH_API_PORT ?= 7101
-EVENTING_API_PORT ?= 7102
-NOTIFICATION_API_PORT ?= 7103
-OBSERVABILITY_API_PORT ?= 7104
 AUTH_WEB_CONCURRENCY ?= 2
 GATEWAY_HOST_PORT ?= 7171
 GATEWAY_PORT ?= $(GATEWAY_HOST_PORT)
-POSTGRES_HOST_PORT ?= 7435
-REDIS_HOST_PORT ?= 7381
 KAFKA_HOST_PORT ?= 9092
 LOKI_HOST_PORT ?= 3100
 GRAFANA_HOST_PORT ?= 3000
@@ -30,15 +25,14 @@ CORE_PYTHONPATH = apps/core_api/src:$(SHARED_PYTHONPATH)
 AUTH_PYTHONPATH = apps/auth_api/src:$(SHARED_PYTHONPATH)
 EVENTING_PYTHONPATH = apps/eventing_api/src:$(SHARED_PYTHONPATH)
 NOTIFICATION_PYTHONPATH = apps/notification_api/src:$(SHARED_PYTHONPATH)
-OBSERVABILITY_PYTHONPATH = apps/observability_api/src:$(SHARED_PYTHONPATH)
-TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/observability_api/src:apps/worker/src:packages/shared_kernel/src
+TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/worker/src:packages/shared_kernel/src
 COMPOSE_PROD_FILE ?= docker-compose.prod.yml
 PROD_ENV_FILE ?= .env.production
 BACKUP_ROOT ?= backups
 
-MIGRATION_ENV = env -u DEBUG -u DATABASE_URL -u CORE_DATABASE_URL -u AUTH_DATABASE_URL -u EVENTING_DATABASE_URL -u NOTIFICATION_DATABASE_URL -u OBSERVABILITY_DATABASE_URL -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_HOST_PORT -u POSTGRES_DB -u CORE_POSTGRES_DB -u AUTH_POSTGRES_DB -u EVENTING_POSTGRES_DB -u NOTIFICATION_POSTGRES_DB -u OBSERVABILITY_POSTGRES_DB
+MIGRATION_ENV = env -u DEBUG -u DATABASE_URL -u CORE_DATABASE_URL -u AUTH_DATABASE_URL -u EVENTING_DATABASE_URL -u NOTIFICATION_DATABASE_URL -u POSTGRES_HOST -u POSTGRES_PORT -u POSTGRES_HOST_PORT -u POSTGRES_DB -u CORE_POSTGRES_DB -u AUTH_POSTGRES_DB -u EVENTING_POSTGRES_DB -u NOTIFICATION_POSTGRES_DB
 
-.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint docs-build compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth production-config production-up production-migrate production-seed backup backup-production verify-backup
+.PHONY: help dev-all prod-all dev-core prod-core ensure-core dev-auth prod-auth ensure-auth doctor test lint docs-build compose-up compose-down bootstrap smoke smoke-all smoke-core-generator migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth production-config production-up production-migrate production-seed backup backup-production verify-backup
 
 help:
 	@echo "Rubrica"
@@ -73,11 +67,10 @@ help:
 
 	@echo ""
 	@echo "Project host endpoints"
-	@echo "  Postgres   localhost:$(POSTGRES_HOST_PORT)"
-	@echo "  Redis      localhost:$(REDIS_HOST_PORT)"
+	@echo "  Gateway    http://localhost:$(GATEWAY_HOST_PORT)"
 	@echo ""
 	@echo "Database"
-	@echo "  Postgres host endpoint: localhost:$(POSTGRES_HOST_PORT)"
+	@echo "  Postgres and Redis are available only inside the Compose network"
 	@echo "  make ensure-postgres     Start this project's isolated Postgres"
 	@echo "  make migrate             Run Core and Auth database migrations"
 	@echo "  make migrate-all         Alias for make migrate"
@@ -137,7 +130,7 @@ doctor:
 
 ensure-postgres:
 	docker compose up -d --wait --wait-timeout 90 postgres
-	@echo "[ok] Project Postgres: localhost:$(POSTGRES_HOST_PORT)"
+	@echo "[ok] Project Postgres is running on the internal Compose network"
 
 migrate-core: ensure-postgres
 	PYTHONPATH=$(CORE_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/core_api/alembic.ini upgrade head
@@ -155,14 +148,11 @@ migrate-eventing: ensure-postgres
 migrate-notification: ensure-postgres
 	PYTHONPATH=$(NOTIFICATION_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/notification_api/alembic.ini upgrade head
 
-migrate-observability: ensure-postgres
-	PYTHONPATH=$(OBSERVABILITY_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/observability_api/alembic.ini upgrade head
-
 revision-auth:
 	@test -n "$(msg)" || (echo "Usage: make revision-auth msg=create_users"; exit 2)
 	PYTHONPATH=$(AUTH_PYTHONPATH) $(MIGRATION_ENV) poetry run alembic -c apps/auth_api/alembic.ini revision --autogenerate -m "$(msg)"
 
-migrate: migrate-core migrate-auth migrate-eventing migrate-notification migrate-observability
+migrate: migrate-core migrate-auth migrate-eventing migrate-notification
 	@echo "[ok] Selected database migrations are current"
 
 migrate-all: migrate
@@ -194,7 +184,6 @@ production-migrate:
 	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T core-api alembic -c apps/core_api/alembic.ini upgrade head
 	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T eventing-api alembic -c apps/eventing_api/alembic.ini upgrade head
 	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T notification-api alembic -c apps/notification_api/alembic.ini upgrade head
-	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T observability-api alembic -c apps/observability_api/alembic.ini upgrade head
 
 production-seed:
 	docker compose --env-file $(PROD_ENV_FILE) -f $(COMPOSE_PROD_FILE) exec -T auth-api python toolbox/seeds/auth_admin.py
