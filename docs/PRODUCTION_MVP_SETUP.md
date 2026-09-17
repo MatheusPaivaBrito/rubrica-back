@@ -77,6 +77,7 @@ No painel Cloudflare Zero Trust:
 
     sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
     sudoedit /etc/rubrica/secrets/cloudflare_tunnel_token
+    sudo chown root:root /etc/rubrica/secrets/cloudflare_tunnel_token
     sudo chmod 600 /etc/rubrica/secrets/cloudflare_tunnel_token
 
 O arquivo contém somente o token do túnel, sem o comando `docker run`.

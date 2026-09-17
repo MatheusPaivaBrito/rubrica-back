@@ -183,6 +183,12 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
+    # Compose bind-mounts file-backed secrets with their host ownership. Run as
+    # root so the container can read the required root:root 0600 token without
+    # weakening its permissions on the server.
+    user: "0:0"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
     command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
     secrets: [cloudflare_tunnel_token]
     depends_on:
