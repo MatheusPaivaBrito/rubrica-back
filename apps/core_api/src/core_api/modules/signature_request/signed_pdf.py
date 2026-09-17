@@ -63,13 +63,15 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.setLineWidth(1.5)
     canvas.roundRect(left, bottom, box_width, box_height, 4, fill=1, stroke=1)
     canvas.setFillColor(HexColor("#0D5B4B"))
-    flag_width = 25.0 if stamp.get("show_flag") and stamp.get("country_code") else 0.0
+    identity_country = str(item.get("identity_document_country") or "").upper()
+    country_code = identity_country or str(stamp.get("country_code") or "").upper()
+    flag_width = 25.0 if country_code else 0.0
     if flag_width:
         _draw_country_flag(
             canvas,
             left + box_width - flag_width - 6,
             bottom + 49,
-            str(stamp["country_code"]),
+            country_code,
         )
     locale = str(stamp.get("locale", "en"))
     japanese = locale == "ja-JP"
@@ -88,7 +90,9 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.drawString(left + 7, bottom + 43, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
     identity_type = str(item.get("identity_document_type") or "").replace("BR_", "").replace("PT_", "")
     identity_masked = str(item.get("identity_document_masked") or "")
-    identity_text = f"{identity_type}: {identity_masked}" if identity_type and identity_masked else ""
+    identity_prefix = _alpha3_country_code(identity_country)
+    identity_value = f"{identity_type}: {identity_masked}" if identity_type and identity_masked else ""
+    identity_text = " · ".join(value for value in (identity_prefix, identity_value) if value)
     canvas.setFont(regular_font, 7)
     if identity_text:
         canvas.drawString(left + 7, bottom + 30, _fit_text(identity_text, regular_font, 7, box_width - 14))
@@ -110,6 +114,15 @@ def _fit_text(value: str, font_name: str, font_size: float, max_width: float) ->
     while fitted and pdfmetrics.stringWidth(fitted + suffix, font_name, font_size) > max_width:
         fitted = fitted[:-1]
     return fitted.rstrip() + suffix
+
+
+def _alpha3_country_code(country_code: str) -> str:
+    return {
+        "BR": "BRA",
+        "JP": "JPN",
+        "PT": "PRT",
+        "US": "USA",
+    }.get(country_code.upper(), country_code.upper())
 
 
 def _draw_country_flag(canvas: Canvas, left: float, bottom: float, country_code: str) -> None:

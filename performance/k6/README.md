@@ -16,7 +16,7 @@
         `.artifacts/benchmarks/` beside the native Atlas benchmark reports.
 
         The runner uses a locally installed `k6` binary when available and
-        otherwise uses `grafana/k6:2.0.0` through `docker-compose.benchmark.yml`.
+        otherwise uses `grafana/k6:2.0.0` through the `benchmark` profile in `compose/local.yml`.
 
         Safety:
 

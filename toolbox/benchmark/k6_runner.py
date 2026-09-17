@@ -213,8 +213,8 @@ def _require_docker_compose() -> None:
     )
     if result.returncode != 0:
         raise SystemExit("Docker Compose is unavailable and local k6 is not installed")
-    if not Path("docker-compose.benchmark.yml").exists():
-        raise SystemExit("docker-compose.benchmark.yml is missing")
+    if not Path("compose/local.yml").exists():
+        raise SystemExit("compose/local.yml is missing")
 
 
 def _command(runtime: str, *, script_path: Path, env: dict[str, str]) -> list[str]:
@@ -225,7 +225,7 @@ def _command(runtime: str, *, script_path: Path, env: dict[str, str]) -> list[st
         "docker",
         "compose",
         "-f",
-        "docker-compose.benchmark.yml",
+        "compose/local.yml",
         "--profile",
         "benchmark",
         "run",

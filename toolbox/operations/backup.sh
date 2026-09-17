@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-compose_file="${COMPOSE_FILE:-docker-compose.yml}"
+compose_file="${COMPOSE_FILE:-compose/local.yml}"
 env_file="${ENV_FILE:-.env}"
 project_name="${COMPOSE_PROJECT_NAME:-rubrica}"
 backup_root="${1:-backups}"

@@ -1,3 +1,5 @@
+name: rubrica
+
 services:
 
       postgres:
@@ -8,7 +10,7 @@ services:
           POSTGRES_DB: ${POSTGRES_DB:-rubrica}
           POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
         volumes:
-          - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+          - ../toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
         healthcheck:
           test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rubrica} -d ${POSTGRES_DB:-rubrica}"]
           interval: 2s
@@ -27,7 +29,7 @@ services:
 
       core-api:
         build:
-          context: .
+          context: ..
           dockerfile: apps/core_api/dockerfile
         command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
         environment:
@@ -46,13 +48,18 @@ services:
           PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:7171}
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
           BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
+          STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
+          STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
           STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
           STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
           STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
           BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
 
         volumes:
-          - ./data/documents:/var/lib/rubrica/documents
+          - ../data/documents:/var/lib/rubrica/documents
+        secrets:
+          - stripe_secret_key
+          - stripe_webhook_secret
         depends_on:
           - postgres
 
@@ -78,7 +85,7 @@ services:
 
       web:
         build:
-          context: ../rubrica-web
+          context: ../../rubrica-web
           dockerfile: Dockerfile
         depends_on:
           - core-api
@@ -87,7 +94,7 @@ services:
 
       auth-api:
         build:
-          context: .
+          context: ..
           dockerfile: apps/auth_api/dockerfile
         command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
         environment:
@@ -97,6 +104,8 @@ services:
           POSTGRES_HOST: postgres
           POSTGRES_PORT: "5432"
           AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
+          AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:-admin@example.local}
+          AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-change-me-before-seeding}
           REDIS_HOST: redis
           REDIS_PORT: "6379"
           AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:7171}
@@ -119,7 +128,7 @@ services:
 
       eventing-api:
         build:
-          context: .
+          context: ..
           dockerfile: apps/eventing_api/dockerfile
         environment:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
@@ -135,7 +144,7 @@ services:
 
       notification-api:
         build:
-          context: .
+          context: ..
           dockerfile: apps/notification_api/dockerfile
         environment:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
@@ -156,6 +165,34 @@ services:
         depends_on:
           postgres:
             condition: service_healthy
+
+      gateway:
+        image: nginx:stable-alpine
+        profiles: ["gateway"]
+        ports:
+          - "${GATEWAY_HOST_PORT:-7171}:8080"
+        volumes:
+          - ../infra/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+          - ../infra/gateway/proxy_params:/etc/nginx/proxy_params:ro
+        depends_on:
+          - web
+          - auth-api
+          - core-api
+        healthcheck:
+          test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+          interval: 10s
+          timeout: 3s
+          retries: 5
+
+      k6:
+        image: grafana/k6:2.0.0
+        profiles: ["benchmark"]
+        working_dir: /scripts
+        volumes:
+          - ../performance/k6:/scripts:ro
+          - ../.artifacts/benchmarks:/artifacts
+        extra_hosts:
+          - "host.docker.internal:host-gateway"
 
 secrets:
   resend_api_key:

@@ -111,7 +111,7 @@ def _project_environment(project_root: Path) -> dict[str, str]:
     env = os.environ.copy()
     for key in _DATABASE_ENV_KEYS:
         env.pop(key, None)
-    for filename in (".env", ".env.local.example", ".env.example"):
+    for filename in (".env", ".env.example"):
         values = _read_env(project_root / filename)
         if values:
             env.update(values)

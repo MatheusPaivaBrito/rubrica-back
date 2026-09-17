@@ -68,7 +68,7 @@ daemon with Compose available. The scaffold does not install host tools
 unless the optional bootstrap capability was explicitly selected.
 
 ```bash
-cp .env.local.example .env
+cp .env.example .env
 poetry install
 make doctor
 make migrate-all
@@ -99,7 +99,7 @@ make lint
 
 ## Production with Cloudflare Tunnel
 
-Production uses `docker-compose.prod.yml`, the frontend `Dockerfile.prod` and a
+Production uses `compose/production.yml`, the frontend `Dockerfile.prod` and a
 dedicated Cloudflare Tunnel. Cloudflare terminates HTTPS; Nginx is reachable only
 inside the Compose network and does not occupy host ports 80/443.
 
@@ -123,9 +123,9 @@ and database unexposed; the tunnel makes outbound connections to Cloudflare.
 For subsequent deployments, keep the existing named volumes and run:
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build
-docker compose --env-file .env.production -f docker-compose.prod.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
-docker compose --env-file .env.production -f docker-compose.prod.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
+docker compose --env-file .env.production -f compose/production.yml up -d --build
+docker compose --env-file .env.production -f compose/production.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
+docker compose --env-file .env.production -f compose/production.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
 ```
 
 ### Production backup and restore verification

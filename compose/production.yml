@@ -1,3 +1,5 @@
+name: rubrica-prod
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -10,7 +12,7 @@ services:
     secrets: [postgres_password]
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
+      - ../toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-rubrica}"]
       interval: 5s
@@ -33,7 +35,7 @@ services:
 
   auth-api:
     build:
-      context: .
+      context: ..
       dockerfile: apps/auth_api/dockerfile
     restart: unless-stopped
     command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
@@ -76,7 +78,7 @@ services:
 
   core-api:
     build:
-      context: .
+      context: ..
       dockerfile: apps/core_api/dockerfile
     restart: unless-stopped
     command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
@@ -120,7 +122,7 @@ services:
 
   eventing-api:
     build:
-      context: .
+      context: ..
       dockerfile: apps/eventing_api/dockerfile
     restart: unless-stopped
     environment:
@@ -139,7 +141,7 @@ services:
 
   notification-api:
     build:
-      context: .
+      context: ..
       dockerfile: apps/notification_api/dockerfile
     restart: unless-stopped
     environment:
@@ -166,7 +168,7 @@ services:
 
   web:
     build:
-      context: ${RUBRICA_WEB_CONTEXT:-../rubrica-web}
+      context: ${RUBRICA_WEB_CONTEXT:-../../rubrica-web}
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:

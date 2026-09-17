@@ -10,7 +10,7 @@ This Nginx gateway exposes only product routes:
 Start it with:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gateway.yml                       --profile gateway up -d --build gateway
+docker compose --env-file .env -f compose/local.yml --profile gateway up -d --build gateway
 ```
 
 Projects extended after generation can use this command directly even

@@ -215,12 +215,12 @@ O comando deve terminar sem erro e sem imprimir valores secretos.
     make production-up
     make production-migrate
     make production-seed
-    docker compose --env-file .env.production -f docker-compose.prod.yml ps
+    docker compose --env-file .env.production -f compose/production.yml ps
 
 Todos os serviços devem estar Up. Depois verifique:
 
     curl -I https://app.seudominio.com/
-    docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=100 auth-api notification-api core-api web
+    docker compose --env-file .env.production -f compose/production.yml logs --tail=100 auth-api notification-api core-api web
 
 Não publique enquanto houver traceback, erro de conexão, falha de migration,
 erro Resend ou erro de assinatura Stripe.
@@ -294,7 +294,7 @@ Somente depois de todo o teste passar:
 6. Substitua os STRIPE_PRICE disponíveis no .env.production.
 7. Reinicie Core:
 
-    docker compose --env-file .env.production -f docker-compose.prod.yml up -d --force-recreate core-api
+    docker compose --env-file .env.production -f compose/production.yml up -d --force-recreate core-api
 
 8. Faça uma compra real de pequeno valor e confirme pagamento, webhook,
    ativação e acesso ilimitado.

@@ -23,8 +23,8 @@ sudo chmod 600 /etc/rubrica/secrets/stripe_secret_key
 Suba o listener e consulte o segredo de assinatura emitido por ele:
 
 ```bash
-docker compose up -d stripe-cli
-docker compose logs -f stripe-cli
+make stripe-up
+make stripe-logs
 ```
 
 Copie somente o valor `whsec_...` exibido em `Ready! Your webhook signing
@@ -33,10 +33,10 @@ secret is ...`, grave-o e reinicie o Core:
 ```bash
 sudoedit /etc/rubrica/secrets/stripe_webhook_secret
 sudo chmod 600 /etc/rubrica/secrets/stripe_webhook_secret
-docker compose restart core-api
+docker compose --env-file .env -f compose/local.yml restart core-api
 ```
 
-Depois disso, `docker compose up -d --build` inicia o listener junto aos demais
+Depois disso, `make stripe-up` inicia o listener opcional junto aos demais
 servicos. O segredo do listener de teste permanece associado a conta e chave
 utilizadas. Se trocar a conta ou a chave de teste, confira novamente os logs e
 atualize `stripe_webhook_secret`.
