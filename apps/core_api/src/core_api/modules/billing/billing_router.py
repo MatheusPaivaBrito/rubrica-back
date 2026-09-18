@@ -5,6 +5,7 @@ from core_api.infrastructure.auth_context import AuthContext, require_permission
 from core_api.modules.billing.billing_schema import (
     BillingAccountRead,
     BillingCheckoutRead,
+    BillingCheckoutCreate,
     BillingPortalRead,
     BillingPaymentRead,
     BillingWebhookRead,
@@ -36,9 +37,10 @@ async def initialize_account(tenant_id: UUID, context: AuthContext = Depends(req
 @router.post("/tenants/{tenant_id}/checkout", response_model=BillingCheckoutRead)
 async def create_checkout(
     tenant_id: UUID,
+    payload: BillingCheckoutCreate,
     context: AuthContext = Depends(require_permission("documents:write")),
 ) -> BillingCheckoutRead:
-    return billing_service.create_checkout(tenant_id, context.subject)
+    return billing_service.create_checkout(tenant_id, context.subject, payload.product_code)
 
 
 @router.post("/tenants/{tenant_id}/portal", response_model=BillingPortalRead)

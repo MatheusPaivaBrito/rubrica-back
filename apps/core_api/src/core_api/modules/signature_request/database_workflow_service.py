@@ -190,15 +190,19 @@ class DatabaseSignatureWorkflowService:
                 (signer.email, signer.name, f"signature-invite:{request.id}:{signer.id}:{request.signing_token_nonce}")
                 for signer in signers
             ]
-            document_title = document.title
-        for recipient, signer_name, idempotency_key in invitations:
-            send_signature_invitation(
-                recipient=recipient,
-                signer_name=signer_name,
-                document_title=document_title,
-                signing_url=signing_url,
-                idempotency_key=idempotency_key,
+            send_email = billing_service.email_invitations_enabled(
+                db, document.tenant_id
             )
+            document_title = document.title
+        if send_email:
+            for recipient, signer_name, idempotency_key in invitations:
+                send_signature_invitation(
+                    recipient=recipient,
+                    signer_name=signer_name,
+                    document_title=document_title,
+                    signing_url=signing_url,
+                    idempotency_key=idempotency_key,
+                )
         return SigningLinkRead(signing_url=signing_url)
 
     def get_signing_link(self, request_id: str, actor_id: str) -> SigningLinkRead:

@@ -38,6 +38,7 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> No
     session = StripeBillingProvider().create_checkout_session(
         customer_id="cus_test",
         price_id="price_jpy",
+        product_code="rubrica_intermediate",
         tenant_id="019c-tenant",
         success_url="https://rubrica.test/plan?checkout=success",
         cancel_url="https://rubrica.test/plan?checkout=cancelled",
@@ -45,7 +46,16 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> No
 
     assert session.url == "https://checkout.stripe.test/session"
     assert captured["client_reference_id"] == "019c-tenant"
-    assert captured["metadata"] == {"tenant_id": "019c-tenant"}
+    assert captured["metadata"] == {
+        "tenant_id": "019c-tenant",
+        "product_code": "rubrica_intermediate",
+    }
+    assert captured["subscription_data"] == {
+        "metadata": {
+            "tenant_id": "019c-tenant",
+            "product_code": "rubrica_intermediate",
+        }
+    }
     assert captured["line_items"] == [{"price": "price_jpy", "quantity": 1}]
 
 

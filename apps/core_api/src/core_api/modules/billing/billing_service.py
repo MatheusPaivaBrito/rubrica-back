@@ -85,14 +85,16 @@ class BillingService:
             )
         account.signatures_used += 1
 
-    def create_checkout(self, tenant_id: UUID, subject: str) -> BillingCheckoutRead:
+    def create_checkout(
+        self, tenant_id: UUID, subject: str, product_code: str
+    ) -> BillingCheckoutRead:
         provider = self._get_provider()
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"})
             tenant = database.get(TenantEntity, tenant_id)
             if tenant is None or tenant.deleted_at is not None:
                 raise WorkflowError("Tenant not found", 404)
-            price_id = self._price_for_currency(tenant.currency)
+            price_id = self._price_for_currency(tenant.currency, product_code)
             account = self._account_entity(database, tenant_id)
             try:
                 if not account.provider_customer_id:
@@ -106,6 +108,7 @@ class BillingService:
                 checkout = provider.create_checkout_session(
                     customer_id=account.provider_customer_id,
                     price_id=price_id,
+                    product_code=product_code,
                     tenant_id=str(tenant.id),
                     success_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?checkout=success",
                     cancel_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?checkout=cancelled",
@@ -364,7 +367,9 @@ class BillingService:
             account.provider_subscription_id = (
                 str(subscription) if subscription else None
             )
-            account.current_product_code = "rubrica_mvp"
+            account.current_product_code = str(
+                resource.get("metadata", {}).get("product_code", "rubrica_base")
+            )
             if account.status != "active":
                 account.status = "pending"
             return True
@@ -523,7 +528,16 @@ class BillingService:
             return None
 
     @staticmethod
-    def _price_for_currency(currency: str) -> str:
+    def _price_for_currency(currency: str, product_code: str = "rubrica_base") -> str:
+        if product_code == "rubrica_intermediate":
+            price_id = (
+                settings.STRIPE_PRICE_INTERMEDIATE_BRL if currency == "BRL" else None
+            )
+            if not price_id:
+                raise WorkflowError(
+                    f"Stripe intermediate price is not configured for {currency}", 503
+                )
+            return price_id
         price_id = {
             "BRL": settings.STRIPE_PRICE_BRL,
             "USD": settings.STRIPE_PRICE_USD,
@@ -532,6 +546,20 @@ class BillingService:
         if not price_id:
             raise WorkflowError(f"Stripe price is not configured for {currency}", 503)
         return price_id
+
+    @staticmethod
+    def email_invitations_enabled(database, tenant_id: UUID) -> bool:
+        account = database.scalar(
+            select(BillingAccountEntity).where(
+                BillingAccountEntity.tenant_id == tenant_id,
+                BillingAccountEntity.deleted_at.is_(None),
+            )
+        )
+        return bool(
+            account
+            and account.current_product_code == "rubrica_intermediate"
+            and BillingService._has_unlimited_signatures(account)
+        )
 
     @staticmethod
     def _account_entity(database, tenant_id: UUID) -> BillingAccountEntity:

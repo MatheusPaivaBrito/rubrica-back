@@ -34,6 +34,7 @@ class StripeBillingProvider:
         *,
         customer_id: str,
         price_id: str,
+        product_code: str,
         tenant_id: str,
         success_url: str,
         cancel_url: str,
@@ -46,9 +47,9 @@ class StripeBillingProvider:
             cancel_url=cancel_url,
             client_reference_id=tenant_id,
             subscription_data={
-                "metadata": {"tenant_id": tenant_id, "product_code": "rubrica_mvp"}
+                "metadata": {"tenant_id": tenant_id, "product_code": product_code}
             },
-            metadata={"tenant_id": tenant_id},
+            metadata={"tenant_id": tenant_id, "product_code": product_code},
         )
         if not checkout.url:
             raise BillingProviderError("Stripe did not return a checkout URL")

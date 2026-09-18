@@ -34,6 +34,7 @@ class BillingProvider(Protocol):
         *,
         customer_id: str,
         price_id: str,
+        product_code: str,
         tenant_id: str,
         success_url: str,
         cancel_url: str,

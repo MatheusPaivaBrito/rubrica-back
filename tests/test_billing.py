@@ -74,7 +74,6 @@ def test_free_account_consumes_each_completed_signer_signature() -> None:
     )
 
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
-
     assert account.signatures_used == 5
 
 
@@ -102,9 +101,29 @@ def test_active_subscription_is_unlimited_but_keeps_lifetime_usage() -> None:
     )
 
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
-
     assert account.signatures_used == 32
 
+
+def test_only_active_intermediate_plan_enables_signature_invitation_email() -> None:
+    intermediate = SimpleNamespace(
+        status="active",
+        current_product_code="rubrica_intermediate",
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+    base = SimpleNamespace(
+        status="active",
+        current_product_code="rubrica_base",
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+
+    assert BillingService.email_invitations_enabled(
+        BillingDatabaseStub(intermediate), uuid4()
+    )
+    assert not BillingService.email_invitations_enabled(
+        BillingDatabaseStub(base), uuid4()
+    )
 
 def test_older_subscription_event_is_ignored(monkeypatch) -> None:
     tenant_id = uuid4()

@@ -8,6 +8,7 @@ def test_fake_billing_provider_keeps_checkout_local() -> None:
     checkout = provider.create_checkout_session(
         customer_id=customer.id,
         price_id="price_fake",
+        product_code="rubrica_base",
         tenant_id="tenant_fake",
         success_url="http://localhost:8080/billing?checkout=success",
         cancel_url="http://localhost:8080/billing?checkout=cancelled",

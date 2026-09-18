@@ -1,6 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -25,6 +27,10 @@ class BillingAccountRead(BaseModel):
 
 class BillingCheckoutRead(BaseModel):
     checkout_url: str
+
+
+class BillingCheckoutCreate(BaseModel):
+    product_code: Literal["rubrica_base", "rubrica_intermediate"]
 
 
 class BillingPortalRead(BaseModel):
