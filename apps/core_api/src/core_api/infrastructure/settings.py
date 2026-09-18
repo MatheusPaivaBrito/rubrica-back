@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     NOTIFICATION_API_URL: str = "http://localhost:8103"
     NOTIFICATION_INTERNAL_SERVICE_KEY: str = ""
     NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: str | None = None
+    CONTACT_INBOX_EMAIL: str = "contact@rubricasignature.com"
+    CONTACT_TURNSTILE_SITE_KEY: str = ""
+    CONTACT_TURNSTILE_SECRET_KEY: str = ""
+    CONTACT_TURNSTILE_SECRET_KEY_FILE: str | None = None
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
@@ -49,6 +53,7 @@ class Settings(BaseSettings):
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
                 "CORE_INTERNAL_SERVICE_KEY": "CORE_INTERNAL_SERVICE_KEY_FILE",
                 "NOTIFICATION_INTERNAL_SERVICE_KEY": "NOTIFICATION_INTERNAL_SERVICE_KEY_FILE",
+                "CONTACT_TURNSTILE_SECRET_KEY": "CONTACT_TURNSTILE_SECRET_KEY_FILE",
                 "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",
                 "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",

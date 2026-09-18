@@ -9,6 +9,7 @@ from fastapi import Depends, HTTPException, Request as FastAPIRequest, Security,
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from core_api.infrastructure.settings import settings
+from shared_kernel.security.csrf import require_same_origin
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,8 @@ async def authenticated_context(
     request: FastAPIRequest,
     credentials: HTTPAuthorizationCredentials | None = Security(bearer_auth),
 ) -> AuthContext:
+    if credentials is None and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        require_same_origin(request, settings.PUBLIC_WEB_URL, settings.ENVIRONMENT)
     return _resolve_context(_token(request, credentials))
 
 

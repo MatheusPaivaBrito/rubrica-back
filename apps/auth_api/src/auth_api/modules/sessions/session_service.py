@@ -23,6 +23,23 @@ from auth_api.modules.users.passwords import verify_password
 from auth_api.modules.users.user_entity import UserEntity
 
 
+_ROTATE_REFRESH_SCRIPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+local raw = redis.call('GET', KEYS[2])
+if not raw then return 0 end
+local current = cjson.decode(raw)
+if current.refresh_key ~= KEYS[1] then return 0 end
+redis.call('DEL', current.access_key, KEYS[1])
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+redis.call('SET', KEYS[3], ARGV[1], 'EX', ARGV[4])
+redis.call('SET', KEYS[4], ARGV[1], 'EX', ARGV[3])
+redis.call('SET', KEYS[5], ARGV[1], 'EX', ARGV[3])
+redis.call('SADD', KEYS[6], ARGV[1])
+redis.call('EXPIRE', KEYS[6], ARGV[3])
+return 1
+"""
+
+
 class SessionService:
     def __init__(self) -> None:
         self._redis = Redis.from_url(
@@ -33,16 +50,24 @@ class SessionService:
         )
 
     def login(self, payload: LoginRequest) -> LoginResponse | MfaChallengeResponse | None:
+        normalized_email = payload.email.strip().lower()
+        rate_key = self._token_key("login-attempts", normalized_email)
+        attempts = self._redis.incr(rate_key)
+        if attempts == 1:
+            self._redis.expire(rate_key, 300)
+        if attempts > 10:
+            return None
         with SessionLocal() as database:
             user = database.scalar(
                 select(UserEntity)
-                .where(UserEntity.email == payload.email.strip().lower())
+                .where(UserEntity.email == normalized_email)
                 .limit(1)
             )
             if user is None or not user.is_active or not user.email_verified:
                 return None
             if not verify_password(payload.password, user.password_hash):
                 return None
+            self._redis.delete(rate_key)
             if user.mfa_enabled:
                 return self._create_mfa_challenge(user)
             return self._create_session(user)
@@ -78,14 +103,44 @@ class SessionService:
 
     def refresh(self, refresh_token: str) -> LoginResponse | None:
         state = self._state_for_token("refresh", refresh_token)
-        if state is None or not self._user_is_active(state["user_id"]):
+        if state is None:
+            used_session = self._redis.get(self._token_key("used-refresh", refresh_token))
+            if used_session:
+                reused_state = self._load_state(used_session)
+                if reused_state is not None:
+                    self._revoke_state(reused_state)
             return None
-        self._redis.delete(state["access_key"], state["refresh_key"])
-        return self._create_session_from_state(state)
+        if not self._user_is_active(state):
+            self._revoke_state(state)
+            return None
+        access_token = self._new_token("access")
+        next_refresh_token = self._new_token("refresh")
+        next_state = {
+            **state,
+            "access_key": self._token_key("access", access_token),
+            "refresh_key": self._token_key("refresh", next_refresh_token),
+        }
+        rotated = self._redis.eval(
+            _ROTATE_REFRESH_SCRIPT,
+            6,
+            str(state["refresh_key"]),
+            self._session_key(str(state["session_id"])),
+            next_state["access_key"],
+            next_state["refresh_key"],
+            self._token_key("used-refresh", refresh_token),
+            self._user_sessions_key(self._user_identifier(state["user_id"])),
+            str(state["session_id"]),
+            json.dumps(next_state),
+            settings.AUTH_SESSION_TTL_SECONDS,
+            settings.AUTH_ACCESS_TTL_SECONDS,
+        )
+        if rotated != 1:
+            return None
+        return LoginResponse(access_token=access_token, refresh_token=next_refresh_token, session_id=str(state["session_id"]))
 
     def current_session(self, access_token: str) -> SessionRead | None:
         state = self._state_for_token("access", access_token)
-        if state is None or not self._user_is_active(state["user_id"]):
+        if state is None or not self._user_is_active(state):
             return None
         return SessionRead(session_id=state["session_id"], subject=state["subject"])
 
@@ -168,6 +223,7 @@ class SessionService:
             session_id=token_urlsafe(18),
             user_id=user.id,
             subject=user.email,
+            token_version=user.token_version,
         )
 
     def _create_mfa_challenge(self, user: UserEntity) -> MfaChallengeResponse:
@@ -182,21 +238,14 @@ class SessionService:
             expires_in=settings.AUTH_MFA_CHALLENGE_TTL_SECONDS,
         )
 
-    def _create_session_from_state(self, state: dict[str, object]) -> LoginResponse:
-        self._redis.delete(self._session_key(str(state["session_id"])))
-        return self._store_session(
-            session_id=str(state["session_id"]),
-            user_id=self._user_identifier(state["user_id"]),
-            subject=str(state["subject"]),
-        )
-
-    def _store_session(self, *, session_id: str, user_id: UUID, subject: str) -> LoginResponse:
+    def _store_session(self, *, session_id: str, user_id: UUID, subject: str, token_version: int) -> LoginResponse:
         access_token = self._new_token("access")
         refresh_token = self._new_token("refresh")
         state = {
             "session_id": session_id,
             "user_id": str(user_id),
             "subject": subject,
+            "token_version": token_version,
             "access_key": self._token_key("access", access_token),
             "refresh_key": self._token_key("refresh", refresh_token),
         }
@@ -213,8 +262,10 @@ class SessionService:
         )
 
     def _state_for_token(self, kind: str, token: str) -> dict[str, object] | None:
-        session_id = self._redis.get(self._token_key(kind, token))
-        return self._load_state(session_id) if session_id else None
+        token_key = self._token_key(kind, token)
+        session_id = self._redis.get(token_key)
+        state = self._load_state(session_id) if session_id else None
+        return state if state is not None and state.get(f"{kind}_key") == token_key else None
 
     def _load_state(self, session_id: str | None) -> dict[str, object] | None:
         if not session_id:
@@ -265,10 +316,10 @@ class SessionService:
         return f"{settings.AUTH_REDIS_KEY_PREFIX}:{kind}:{digest}"
 
     @staticmethod
-    def _user_is_active(user_id: object) -> bool:
+    def _user_is_active(state: dict[str, object]) -> bool:
         with SessionLocal() as database:
-            user = database.get(UserEntity, SessionService._user_identifier(user_id))
-            return user is not None and user.is_active
+            user = database.get(UserEntity, SessionService._user_identifier(state["user_id"]))
+            return user is not None and user.is_active and user.token_version == state.get("token_version")
 
 
 session_service = SessionService()

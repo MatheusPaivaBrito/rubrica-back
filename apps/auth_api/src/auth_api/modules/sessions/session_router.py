@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
 from fastapi.security import HTTPAuthorizationCredentials
+from fastapi.responses import JSONResponse
 
 from auth_api.infrastructure.security import access_token, bearer_auth
 from auth_api.modules.sessions.session_schema import (
     LoginRequest,
     LoginResponse,
+    BrowserLoginResponse,
     LogoutResponse,
     RefreshRequest,
     SessionRead,
@@ -13,6 +15,7 @@ from auth_api.modules.sessions.session_schema import (
 )
 from auth_api.modules.sessions.session_service import session_service
 from auth_api.infrastructure.settings import settings
+from shared_kernel.security.csrf import require_same_origin
 
 
 router = APIRouter(tags=["auth"])
@@ -22,13 +25,15 @@ async def require_authenticated_session(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Security(bearer_auth),
 ) -> SessionRead:
+    if credentials is None and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        require_same_origin(request, settings.AUTH_PUBLIC_WEB_URL, settings.ENVIRONMENT)
     session = session_service.current_session(access_token(request, credentials))
     if session is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     return session
 
 
-@router.post("/auth/login", response_model=LoginResponse | MfaChallengeResponse)
+@router.post("/auth/login", response_model=BrowserLoginResponse | MfaChallengeResponse)
 async def login(
     payload: LoginRequest,
     response: Response,
@@ -41,7 +46,7 @@ async def login(
     return authenticated
 
 
-@router.post("/auth/mfa/challenge", response_model=LoginResponse)
+@router.post("/auth/mfa/challenge", response_model=BrowserLoginResponse)
 async def complete_mfa_challenge(
     payload: MfaChallengeRequest,
     response: Response,
@@ -59,13 +64,16 @@ async def complete_mfa_challenge(
     return authenticated
 
 
-@router.post("/auth/refresh", response_model=LoginResponse)
-async def refresh(payload: RefreshRequest, request: Request, response: Response) -> LoginResponse:
+@router.post("/auth/refresh", response_model=BrowserLoginResponse)
+async def refresh(payload: RefreshRequest, request: Request, response: Response) -> LoginResponse | JSONResponse:
+    if payload.refresh_token is None:
+        require_same_origin(request, settings.AUTH_PUBLIC_WEB_URL, settings.ENVIRONMENT)
     token = payload.refresh_token or request.cookies.get("refresh_token", "")
     authenticated = session_service.refresh(token)
     if authenticated is None:
-        _clear_auth_cookies(response)
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token is invalid")
+        rejected = JSONResponse(status_code=401, content={"detail": "Refresh token is invalid"})
+        _clear_auth_cookies(rejected)
+        return rejected
     _set_auth_cookies(response, authenticated)
     return authenticated
 

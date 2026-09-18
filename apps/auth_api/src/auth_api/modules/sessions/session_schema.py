@@ -15,6 +15,12 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class BrowserLoginResponse(BaseModel):
+    access_token: str
+    session_id: str
+    token_type: str = "bearer"
+
+
 class MfaChallengeResponse(BaseModel):
     mfa_required: bool = True
     mfa_ticket: str
