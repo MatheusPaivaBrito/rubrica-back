@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from uuid import UUID
 
 from core_api.infrastructure.auth_context import AuthContext, authenticated_context, require_permission
+from core_api.infrastructure.content_disposition import pdf_content_disposition
 from core_api.modules.signature_request.workflow_schema import (
     AuditEventRead,
     SignCommand,
@@ -93,7 +94,7 @@ async def signature_evidence(request_id: UUID, context: AuthContext = Depends(ad
 @router.get("/signature-requests/{request_id}/signed-document", tags=["signature requests - query"])
 async def signed_document(request_id: UUID, context: AuthContext = Depends(administrator_context)) -> Response:
     filename, digest, content = workflow_service.signed_document(request_id, context.subject)
-    return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"', "X-Signed-Document-SHA256": digest})
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(filename), "X-Signed-Document-SHA256": digest})
 
 
 @router.post("/signature-requests/{request_id}/signers/{signer_id}/revoke", response_model=SignerRead, tags=["signature requests - command"])
@@ -135,19 +136,19 @@ async def signing_context(token: str, context: AuthContext = Depends(authenticat
 @router.get("/signing/links/{token}/document", tags=["signing - query"])
 async def signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
     metadata, content = workflow_service.signing_document(token, context.subject, administrator=_is_administrator(context))
-    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'inline; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename), "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/signing/links/{token}/download", tags=["signing - query"])
 async def download_signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
     metadata, content = workflow_service.signing_document(token, context.subject, administrator=_is_administrator(context))
-    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'attachment; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename, attachment=True), "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/signing/links/{token}/signed-document", tags=["signing - query"])
 async def signing_signed_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
     filename, digest, content = workflow_service.signing_signed_document(token, context.subject, administrator=_is_administrator(context))
-    return Response(content, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{filename}"', "X-Signed-Document-SHA256": digest})
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(filename), "X-Signed-Document-SHA256": digest})
 
 
 @router.post("/signing/links/{token}/view", response_model=SignerRead, tags=["signing - command"])

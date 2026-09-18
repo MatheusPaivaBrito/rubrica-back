@@ -3,6 +3,7 @@ from uuid import UUID
 
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead
 from core_api.infrastructure.auth_context import AuthContext, require_permission
+from core_api.infrastructure.content_disposition import pdf_content_disposition
 from core_api.modules.signature_request.database_workflow_service import database_workflow_service as workflow_service
 
 
@@ -27,13 +28,13 @@ async def delete_document(document_id: UUID, context: AuthContext = Depends(requ
 @router.get("/{document_id}/download", tags=["documents - query"])
 async def download_document(document_id: UUID, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
     metadata, content = workflow_service.get_content(document_id, version, context.subject)
-    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'attachment; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename, attachment=True), "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/{document_id}/preview", tags=["documents - query"])
 async def preview_document(document_id: UUID, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
     metadata, content = workflow_service.get_content(document_id, version, context.subject)
-    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": f'inline; filename="{metadata.original_filename}"', "X-Document-SHA256": metadata.sha256})
+    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename), "X-Document-SHA256": metadata.sha256})
 
 
 @router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED, tags=["documents - command"])
