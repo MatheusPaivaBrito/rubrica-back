@@ -22,7 +22,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
@@ -221,6 +221,23 @@ class DatabaseSignatureWorkflowService:
             request = self._request(db, request_id)
             self._require_request_access(db, request, actor_id)
             return [self._signer_read(item) for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id).order_by(SignerEntity.id)).all()]
+
+    def list_signer_contacts(self, tenant_id: UUID, actor_id: str, query: str = "") -> list[SignerContactRead]:
+        search = query.strip().lower()
+        with SessionLocal() as db:
+            tenant_service.require_role(db, tenant_id, actor_id, {"admin", "member"})
+            statement = select(SignerEntity).join(SignatureRequestEntity, SignatureRequestEntity.id == SignerEntity.signature_request_id).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).where(DocumentEntity.tenant_id == tenant_id, SignerEntity.deleted_at.is_(None)).order_by(SignerEntity.created_at.desc())
+            contacts: list[SignerContactRead] = []
+            seen: set[str] = set()
+            for signer in db.scalars(statement).all():
+                email = signer.email.strip().lower()
+                if email in seen or (search and search not in signer.name.lower() and search not in email):
+                    continue
+                seen.add(email)
+                contacts.append(SignerContactRead(name=signer.name, email=email))
+                if len(contacts) == 50:
+                    break
+            return contacts
 
     def revoke_signer_link(self, request_id: str, signer_id: str, actor_id: str) -> SignerRead:
         with SessionLocal.begin() as db:

@@ -62,7 +62,7 @@ async def request_password_recovery(
     payload: PasswordRecoveryRequest,
 ) -> AccountActionAccepted:
     try:
-        account_service.request_password_recovery(payload.email)
+        account_service.request_password_recovery(payload.email, payload.return_url)
     except AccountEmailDeliveryError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return AccountActionAccepted()

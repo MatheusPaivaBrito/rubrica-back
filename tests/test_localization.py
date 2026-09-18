@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from auth_api.modules.sessions.session_schema import UiContextResponse
+from auth_api.modules.accounts.account_schema import PasswordRecoveryRequest, PublicRegistration
 from auth_api.modules.users.user_schema import UserCreate, UserPreferencesUpdate
 from core_api.modules.tenant.tenant_schema import TenantCreate, TenantPreferencesUpdate
 from shared_kernel.localization import (
@@ -88,3 +89,12 @@ def test_low_level_international_validators() -> None:
     assert normalize_country_code("br") == "BR"
     assert normalize_currency("brl") == "BRL"
     assert normalize_timezone("America/Sao_Paulo") == "America/Sao_Paulo"
+
+
+def test_account_return_url_accepts_only_internal_signing_links() -> None:
+    signing_path = "/signing/a64f12c17580f6a4931bff328302359d816547f4a230f7608aaf7dfa4e1e10d5a"
+    assert PublicRegistration(name="Signer", email="signer@example.com", return_url=signing_path).return_url == signing_path
+    assert PasswordRecoveryRequest(email="signer@example.com", return_url=signing_path).return_url == signing_path
+
+    with pytest.raises(ValidationError):
+        PublicRegistration(name="Signer", email="signer@example.com", return_url="https://example.com/steal")

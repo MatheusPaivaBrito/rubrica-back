@@ -34,6 +34,7 @@ class PublicRegistration(BaseModel):
         min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
     )
     preferred_locale: SupportedLocale = "en"
+    return_url: str | None = Field(default=None, max_length=512, pattern=r"^/signing/[A-Za-z0-9_-]+$")
     identity_document_type: IdentityDocumentType | None = None
     identity_document_country: str | None = None
     identity_document_value: str | None = Field(
@@ -87,7 +88,7 @@ class EmailVerificationRequest(BaseModel):
 
 
 class PasswordRecoveryRequest(EmailVerificationRequest):
-    pass
+    return_url: str | None = Field(default=None, max_length=512, pattern=r"^/signing/[A-Za-z0-9_-]+$")
 
 
 class PasswordReset(BaseModel):

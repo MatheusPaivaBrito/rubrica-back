@@ -70,6 +70,11 @@ class SignerRead(BaseModel):
     identity_document_masked: str | None = None
 
 
+class SignerContactRead(BaseModel):
+    name: str
+    email: str
+
+
 class SigningLinkRead(BaseModel):
     signing_url: str
 

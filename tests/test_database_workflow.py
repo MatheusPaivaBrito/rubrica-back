@@ -129,6 +129,12 @@ def test_database_workflow_round_trip(tmp_path: Path) -> None:
         with SessionLocal.begin() as db:
             owner_tenant_id = db.scalar(select(DocumentEntity.tenant_id).where(DocumentEntity.id == document.id))
             db.add(TenantMemberEntity(tenant_id=owner_tenant_id, auth_user_id="admin@example.local", role="admin"))
+        contacts = service.list_signer_contacts(owner_tenant_id, "admin@example.local")
+        assert [(contact.name, contact.email) for contact in contacts] == [("Second User", "second@example.com"), ("Database User", "database@example.com")]
+        assert [contact.email for contact in service.list_signer_contacts(owner_tenant_id, "admin@example.local", "database")] == ["database@example.com"]
+        with pytest.raises(WorkflowError) as denied:
+            service.list_signer_contacts(owner_tenant_id, "outside-admin@example.com")
+        assert denied.value.status_code == 403
         administrator_view = service.signing_context(historical_token, "admin@example.local", administrator=True)
         assert administrator_view.viewer_mode == "administrator"
         assert administrator_view.request.status == RequestStatus.COMPLETED

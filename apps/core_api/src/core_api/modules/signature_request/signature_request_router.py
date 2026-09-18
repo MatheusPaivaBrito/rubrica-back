@@ -10,6 +10,7 @@ from core_api.modules.signature_request.workflow_schema import (
     SignatureRequestRead,
     SignatureEvidenceRead,
     SignerCreate,
+    SignerContactRead,
     SigningLinkRead,
     SignerRead,
     SigningRead,
@@ -20,6 +21,11 @@ from core_api.modules.signature_request.identity_client import identity_summary
 
 
 router = APIRouter()
+
+
+@router.get("/tenants/{tenant_id}/signer-contacts", response_model=list[SignerContactRead], tags=["signature requests - query"])
+async def list_signer_contacts(tenant_id: UUID, q: str = "", context: AuthContext = Depends(require_permission("signature_requests:read"))) -> list[SignerContactRead]:
+    return workflow_service.list_signer_contacts(tenant_id, context.subject, q)
 
 
 async def administrator_context(context: AuthContext = Depends(authenticated_context)) -> AuthContext:

@@ -1,6 +1,7 @@
 from datetime import timedelta
 from hashlib import sha256
 from secrets import token_urlsafe
+from urllib.parse import urlencode
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
@@ -67,7 +68,7 @@ class AccountService:
                 settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS,
             )
             provision_account_tenant(payload)
-            self._send_verification(user.email, token)
+            self._send_verification(user.email, token, payload.return_url)
 
     def request_email_verification(self, email: str) -> None:
         with SessionLocal.begin() as database:
@@ -93,7 +94,7 @@ class AccountService:
             user.is_active = True
             user.token_version += 1
 
-    def request_password_recovery(self, email: str) -> None:
+    def request_password_recovery(self, email: str, return_url: str | None = None) -> None:
         with SessionLocal.begin() as database:
             user = self._user_by_email(database, email)
             if user is None or not user.is_active:
@@ -104,7 +105,8 @@ class AccountService:
                 "reset_password",
                 settings.AUTH_PASSWORD_RESET_TTL_SECONDS,
             )
-        url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/reset-password?token={token}"
+        query = urlencode({"token": token, **({"returnUrl": return_url} if return_url else {})})
+        url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/reset-password?{query}"
         request_account_email(
             recipient=user.email,
             subject="Reset your Rubrica password",
@@ -122,8 +124,9 @@ class AccountService:
             user.password_hash = hash_password(new_password)
             user.token_version += 1
 
-    def _send_verification(self, email: str, token: str) -> None:
-        url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/verify-email?token={token}"
+    def _send_verification(self, email: str, token: str, return_url: str | None = None) -> None:
+        query = urlencode({"token": token, **({"returnUrl": return_url} if return_url else {})})
+        url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/verify-email?{query}"
         request_account_email(
             recipient=email,
             subject="Activate your Rubrica account",
