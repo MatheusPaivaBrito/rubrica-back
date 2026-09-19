@@ -47,6 +47,8 @@ services:
           CONTACT_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
           CONTACT_TURNSTILE_SECRET_KEY: ${CONTACT_TURNSTILE_SECRET_KEY:-}
           DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
+          DOCUMENT_MAX_SIZE_BYTES: ${DOCUMENT_MAX_SIZE_BYTES:-52428800}
+          DOCUMENT_MAX_PAGES: ${DOCUMENT_MAX_PAGES:-1000}
           SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:7171/signing}
           PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:7171}
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}

@@ -22,14 +22,16 @@ class LocalDocumentStorage(DocumentStorage):
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.root.chmod(0o700)
 
     def put(self, stream: BinaryIO, *, filename: str) -> tuple[str, int]:
         del filename
         key = uuid4().hex
         destination = self.root / key
         size = 0
-        with destination.open("xb") as output:
+        destination.touch(mode=0o600, exist_ok=False)
+        with destination.open("wb") as output:
             while chunk := stream.read(1024 * 1024):
                 size += len(chunk)
                 output.write(chunk)

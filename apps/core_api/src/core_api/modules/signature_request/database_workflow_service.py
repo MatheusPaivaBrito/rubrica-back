@@ -17,6 +17,7 @@ from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
+from core_api.modules.document.pdf_validation import validate_pdf_upload
 from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.notification_client import send_signature_invitation
@@ -124,6 +125,7 @@ class DatabaseSignatureWorkflowService:
             content = stream.read()
         if sha256(content).hexdigest() != metadata.sha256:
             raise WorkflowError("Stored document integrity check failed", 409)
+        validate_pdf_upload(content, filename=metadata.original_filename, content_type="application/pdf")
         return metadata, content
 
     def create_request(self, payload: SignatureRequestCreate) -> SignatureRequestRead:
@@ -322,6 +324,7 @@ class DatabaseSignatureWorkflowService:
             content = stream.read()
         if sha256(content).hexdigest() != metadata.sha256:
             raise WorkflowError("Stored document integrity check failed", 409)
+        validate_pdf_upload(content, filename=metadata.original_filename, content_type="application/pdf")
         return metadata, content
 
     def view(self, token: str, auth_user_id: str) -> SignerRead:
@@ -354,6 +357,7 @@ class DatabaseSignatureWorkflowService:
                     original = stream.read()
                 if sha256(original).hexdigest() != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
+                validate_pdf_upload(original, filename=version.original_filename, content_type="application/pdf")
                 now = DateTimeService.utc_now()
                 evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity)
                 evidence_hash = evidence_sha256(evidence)

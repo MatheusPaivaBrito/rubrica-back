@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     CONTACT_TURNSTILE_SECRET_KEY: str = ""
     CONTACT_TURNSTILE_SECRET_KEY_FILE: str | None = None
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
+    DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
+    DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
     EVIDENCE_SECRET_FILE: str | None = None

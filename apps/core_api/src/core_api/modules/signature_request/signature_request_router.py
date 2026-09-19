@@ -136,13 +136,13 @@ async def signing_context(token: str, context: AuthContext = Depends(authenticat
 @router.get("/signing/links/{token}/document", tags=["signing - query"])
 async def signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
     metadata, content = workflow_service.signing_document(token, context.subject, administrator=_is_administrator(context))
-    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename), "X-Document-SHA256": metadata.sha256})
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename), "X-Content-Type-Options": "nosniff", "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/signing/links/{token}/download", tags=["signing - query"])
 async def download_signing_document(token: str, context: AuthContext = Depends(authenticated_context)) -> Response:
     metadata, content = workflow_service.signing_document(token, context.subject, administrator=_is_administrator(context))
-    return Response(content, media_type=metadata.content_type, headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename, attachment=True), "X-Document-SHA256": metadata.sha256})
+    return Response(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename, attachment=True), "X-Content-Type-Options": "nosniff", "X-Document-SHA256": metadata.sha256})
 
 
 @router.get("/signing/links/{token}/signed-document", tags=["signing - query"])
