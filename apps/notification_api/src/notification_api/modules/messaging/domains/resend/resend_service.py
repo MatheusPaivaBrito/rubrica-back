@@ -7,14 +7,26 @@ import orjson
 
 from notification_api.infrastructure.settings import settings
 from notification_api.modules.messaging.contracts.provider import ProviderDelivery
+from notification_api.modules.messaging.domains.resend.resend_schema import (
+    InlineEmailImage,
+)
 
 
 class ResendEmailProvider:
     name = "resend"
 
-    def __init__(self, *, subject: str, idempotency_key: str) -> None:
+    def __init__(
+        self,
+        *,
+        subject: str,
+        idempotency_key: str,
+        html: str | None = None,
+        inline_images: list[InlineEmailImage] | None = None,
+    ) -> None:
         self._subject = subject
         self._idempotency_key = idempotency_key
+        self._html = html
+        self._inline_images = inline_images or []
 
     def deliver(
         self,
@@ -28,16 +40,22 @@ class ResendEmailProvider:
         if media is not None:
             raise RuntimeError("Resend attachments are not supported in this flow")
 
+        email_payload: dict[str, object] = {
+            "from": settings.RESEND_FROM_EMAIL,
+            "to": [recipient],
+            "subject": self._subject,
+            "text": content,
+        }
+        if self._html:
+            email_payload["html"] = self._html
+        if self._inline_images:
+            email_payload["attachments"] = [
+                image.model_dump() for image in self._inline_images
+            ]
+
         request = Request(
             "https://api.resend.com/emails",
-            data=orjson.dumps(
-                {
-                    "from": settings.RESEND_FROM_EMAIL,
-                    "to": [recipient],
-                    "subject": self._subject,
-                    "text": content,
-                }
-            ),
+            data=orjson.dumps(email_payload),
             headers={
                 "Authorization": f"Bearer {settings.RESEND_API_KEY}",
                 "Content-Type": "application/json",

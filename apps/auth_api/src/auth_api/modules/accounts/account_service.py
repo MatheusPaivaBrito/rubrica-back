@@ -15,6 +15,10 @@ from auth_api.modules.accounts.notification_client import request_account_email
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import AccountTokenEntity, UserEntity
 from auth_api.modules.users.user_identifier_service import add_identifier
+from shared_kernel.email_templates import (
+    account_activation_email,
+    password_recovery_email,
+)
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -68,7 +72,13 @@ class AccountService:
                 settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS,
             )
             provision_account_tenant(payload)
-            self._send_verification(user.email, token, payload.return_url)
+            self._send_verification(
+                user.email,
+                token,
+                payload.return_url,
+                name=user.name,
+                locale=user.preferred_locale,
+            )
 
     def request_email_verification(self, email: str) -> None:
         with SessionLocal.begin() as database:
@@ -81,7 +91,12 @@ class AccountService:
                 "verify_email",
                 settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS,
             )
-        self._send_verification(user.email, token)
+        self._send_verification(
+            user.email,
+            token,
+            name=user.name,
+            locale=user.preferred_locale,
+        )
 
     def verify_email(self, raw_token: str, new_password: str) -> None:
         with SessionLocal.begin() as database:
@@ -109,10 +124,13 @@ class AccountService:
         url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/reset-password?{query}"
         request_account_email(
             recipient=user.email,
-            subject="Reset your Rubrica password",
-            body=f"Use this link to reset your password: {url}",
+            email=password_recovery_email(
+                name=user.name,
+                action_url=url,
+                locale=user.preferred_locale,
+                public_url=settings.AUTH_PUBLIC_WEB_URL,
+            ),
             idempotency_key=f"password-reset:{self._digest(token)}",
-            metadata={"template": "password_recovery", "recovery_url": url},
         )
 
     def reset_password(self, raw_token: str, new_password: str) -> None:
@@ -124,15 +142,26 @@ class AccountService:
             user.password_hash = hash_password(new_password)
             user.token_version += 1
 
-    def _send_verification(self, email: str, token: str, return_url: str | None = None) -> None:
+    def _send_verification(
+        self,
+        email: str,
+        token: str,
+        return_url: str | None = None,
+        *,
+        name: str | None = None,
+        locale: str = "en",
+    ) -> None:
         query = urlencode({"token": token, **({"returnUrl": return_url} if return_url else {})})
         url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/verify-email?{query}"
         request_account_email(
             recipient=email,
-            subject="Activate your Rubrica account",
-            body=f"Use this link to confirm your email and create your password: {url}",
+            email=account_activation_email(
+                name=name,
+                action_url=url,
+                locale=locale,
+                public_url=settings.AUTH_PUBLIC_WEB_URL,
+            ),
             idempotency_key=f"email-verification:{self._digest(token)}",
-            metadata={"template": "email_verification", "verification_url": url},
         )
 
     @staticmethod

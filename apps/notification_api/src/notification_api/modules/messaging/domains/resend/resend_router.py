@@ -31,6 +31,8 @@ def send_resend_email(
     delivery = ResendEmailProvider(
         subject=payload.subject,
         idempotency_key=payload.idempotency_key,
+        html=payload.html,
+        inline_images=payload.inline_images,
     ).deliver(recipient=payload.recipient, content=payload.content, media=None)
     return DeliveryAccepted(
         delivery_id=delivery.provider_message_id,

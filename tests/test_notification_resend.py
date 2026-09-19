@@ -1,5 +1,6 @@
 from urllib.error import HTTPError
 
+import orjson
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,6 +16,10 @@ from notification_api.modules.messaging.contracts.provider import ProviderDelive
 from notification_api.modules.messaging.domains.resend.resend_service import (
     ResendEmailProvider,
 )
+from notification_api.modules.messaging.domains.resend.resend_schema import (
+    InlineEmailImage,
+)
+from shared_kernel.email_templates import branded_message_email
 
 
 def test_resend_internal_endpoint_requires_service_authentication() -> None:
@@ -79,12 +84,15 @@ def test_auth_client_uses_internal_resend_contract(monkeypatch) -> None:
     )
     monkeypatch.setattr("auth_api.modules.accounts.notification_client.httpx.post", fake_post)
 
-    request_account_email(
-        recipient="person@example.com",
+    email = branded_message_email(
         subject="Reset",
         body="Use the link",
+        public_url="https://rubricasignature.com",
+    )
+    request_account_email(
+        recipient="person@example.com",
+        email=email,
         idempotency_key="reset-123",
-        metadata={"template": "password_recovery"},
     )
 
     assert str(captured["url"]).endswith("/internal/providers/resend/emails")
@@ -92,12 +100,10 @@ def test_auth_client_uses_internal_resend_contract(monkeypatch) -> None:
         "X-Rubrica-Service": "auth_api",
         "X-Rubrica-Service-Key": "shared-key",
     }
-    assert captured["json"] == {
-        "recipient": "person@example.com",
-        "subject": "Reset",
-        "content": "Use the link",
-        "idempotency_key": "reset-123",
-    }
+    assert captured["json"] == email.as_payload(
+        recipient="person@example.com",
+        idempotency_key="reset-123",
+    )
 
 
 def test_auth_client_surfaces_notification_failure(monkeypatch) -> None:
@@ -109,11 +115,71 @@ def test_auth_client_surfaces_notification_failure(monkeypatch) -> None:
     with pytest.raises(AccountEmailDeliveryError):
         request_account_email(
             recipient="person@example.com",
-            subject="Reset",
-            body="Use the link",
+            email=branded_message_email(
+                subject="Reset",
+                body="Use the link",
+                public_url="https://rubricasignature.com",
+            ),
             idempotency_key="reset-123",
-            metadata={"template": "password_recovery"},
         )
+
+
+def test_resend_sends_html_and_inline_images(monkeypatch) -> None:
+    monkeypatch.setattr(notification_settings, "RESEND_API_KEY", "test-api-key")
+    captured: dict[str, object] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        @staticmethod
+        def read() -> bytes:
+            return b'{"id":"email_123"}'
+
+    def deliver(request, timeout):
+        captured["payload"] = orjson.loads(request.data)
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(
+        "notification_api.modules.messaging.domains.resend.resend_service.urlopen",
+        deliver,
+    )
+    provider = ResendEmailProvider(
+        subject="Signature requested",
+        idempotency_key="signature-123",
+        html='<img src="cid:signing-qr">',
+        inline_images=[
+            InlineEmailImage(
+                content="aW1hZ2U=",
+                filename="qr.png",
+                content_id="signing-qr",
+                content_type="image/png",
+            )
+        ],
+    )
+
+    result = provider.deliver(
+        recipient="signer@example.com",
+        content="Open the signing link",
+        media=None,
+    )
+
+    payload = captured["payload"]
+    assert result.provider_message_id == "email_123"
+    assert payload["text"] == "Open the signing link"
+    assert payload["html"] == '<img src="cid:signing-qr">'
+    assert payload["attachments"] == [
+        {
+            "content": "aW1hZ2U=",
+            "filename": "qr.png",
+            "content_id": "signing-qr",
+            "content_type": "image/png",
+        }
+    ]
 
 
 def test_auth_client_provisions_tenant_with_internal_contract(monkeypatch) -> None:

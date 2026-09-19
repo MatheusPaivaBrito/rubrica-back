@@ -1,6 +1,7 @@
 import httpx
 
 from core_api.infrastructure.settings import settings
+from shared_kernel.email_templates import branded_message_email
 
 
 class BillingEmailDeliveryError(RuntimeError):
@@ -14,15 +15,19 @@ def request_billing_email(
     body: str,
     idempotency_key: str,
 ) -> None:
+    email = branded_message_email(
+        subject=subject,
+        body=body,
+        public_url=settings.PUBLIC_WEB_URL,
+        eyebrow="RUBRICA NOTIFICATION",
+    )
     try:
         response = httpx.post(
             f"{settings.NOTIFICATION_API_URL.rstrip('/')}/internal/providers/resend/emails",
-            json={
-                "recipient": recipient,
-                "subject": subject,
-                "content": body,
-                "idempotency_key": idempotency_key,
-            },
+            json=email.as_payload(
+                recipient=recipient,
+                idempotency_key=idempotency_key,
+            ),
             headers={
                 "X-Rubrica-Service": "core_api",
                 "X-Rubrica-Service-Key": settings.NOTIFICATION_INTERNAL_SERVICE_KEY,

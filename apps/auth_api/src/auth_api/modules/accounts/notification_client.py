@@ -3,6 +3,7 @@ import logging
 import httpx
 
 from auth_api.infrastructure.settings import settings
+from shared_kernel.email_templates import RenderedEmail
 
 
 logger = logging.getLogger(__name__)
@@ -15,20 +16,16 @@ class AccountEmailDeliveryError(RuntimeError):
 def request_account_email(
     *,
     recipient: str,
-    subject: str,
-    body: str,
+    email: RenderedEmail,
     idempotency_key: str,
-    metadata: dict[str, object],
 ) -> None:
     try:
         response = httpx.post(
             f"{settings.NOTIFICATION_API_URL.rstrip('/')}/internal/providers/resend/emails",
-            json={
-                "recipient": recipient,
-                "subject": subject,
-                "content": body,
-                "idempotency_key": idempotency_key,
-            },
+            json=email.as_payload(
+                recipient=recipient,
+                idempotency_key=idempotency_key,
+            ),
             headers={
                 "X-Rubrica-Service": "auth_api",
                 "X-Rubrica-Service-Key": settings.NOTIFICATION_INTERNAL_SERVICE_KEY,
