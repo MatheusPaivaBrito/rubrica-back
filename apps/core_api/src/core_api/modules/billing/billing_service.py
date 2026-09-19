@@ -166,6 +166,12 @@ class BillingService:
                 portal = provider.create_portal_session(
                     customer_id=account.provider_customer_id,
                     return_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan",
+                    subscription_id=(
+                        account.provider_subscription_id
+                        if account.status == "active"
+                        and not account.cancel_at_period_end
+                        else None
+                    ),
                 )
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 502) from exc

@@ -156,7 +156,11 @@ pagamento. O vencimento é controlado pelo período informado pelo Stripe.
    - invoice.payment_failed
 10. Em Billing > Revenue recovery > Retries, configure tentativas por 10 dias e
     escolha cancelar a assinatura se a recuperação falhar.
-11. Copie o signing secret iniciado por whsec_ para:
+11. Em Settings > Billing > Customer portal, habilite a atualização de
+    assinaturas, permita a troca de preço e adicione os preços Base e
+    Intermediário das quatro moedas. Mantenha o ciclo de cobrança inalterado;
+    o Rubrica preserva o uso do período durante upgrade e downgrade.
+12. Copie o signing secret iniciado por whsec_ para:
 
     sudoedit /etc/rubrica/secrets/stripe_webhook_secret
     sudo chmod 600 /etc/rubrica/secrets/stripe_webhook_secret
@@ -276,9 +280,11 @@ erro Resend ou erro de assinatura Stripe.
 4. Use o cartão de teste 4242 4242 4242 4242, data futura e qualquer CVC.
 5. Confirme o retorno para /plan?checkout=success.
 6. No painel Stripe, confirme entrega HTTP 2xx dos eventos.
-7. No Rubrica, confirme status ativo e assinaturas ilimitadas.
-8. Cancele a assinatura no Stripe.
-9. Confirme que customer.subscription.updated ou deleted atualizou o Rubrica.
+7. No Rubrica, confirme o status ativo e a franquia de 25 ou 30 arquivos.
+8. Use o botão de upgrade ou troca de plano e confirme que o portal apresenta
+   Base e Intermediário na moeda da conta.
+9. Cancele a assinatura no Stripe.
+10. Confirme que customer.subscription.updated ou deleted atualizou o Rubrica.
 
 ### Conta vitalícia por convite da equipe
 

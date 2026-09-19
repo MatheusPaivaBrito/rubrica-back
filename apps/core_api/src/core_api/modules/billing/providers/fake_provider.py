@@ -34,6 +34,7 @@ class FakeBillingProvider:
         *,
         customer_id: str,
         return_url: str,
+        subscription_id: str | None = None,
     ) -> ProviderSession:
         return ProviderSession(url=return_url)
 

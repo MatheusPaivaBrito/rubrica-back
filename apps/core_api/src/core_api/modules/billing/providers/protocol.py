@@ -45,6 +45,7 @@ class BillingProvider(Protocol):
         *,
         customer_id: str,
         return_url: str,
+        subscription_id: str | None = None,
     ) -> ProviderSession: ...
 
     def construct_webhook_event(

@@ -61,11 +61,19 @@ class StripeBillingProvider:
         *,
         customer_id: str,
         return_url: str,
+        subscription_id: str | None = None,
     ) -> ProviderSession:
-        portal = stripe.billing_portal.Session.create(
-            customer=customer_id,
-            return_url=return_url,
-        )
+        parameters: dict[str, object] = {
+            "customer": customer_id,
+            "return_url": return_url,
+        }
+        if subscription_id:
+            parameters["flow_data"] = {
+                "type": "subscription_update",
+                "subscription_update": {"subscription": subscription_id},
+                "after_completion": {"type": "portal_homepage"},
+            }
+        portal = stripe.billing_portal.Session.create(**parameters)
         if not portal.url:
             raise BillingProviderError("Stripe did not return a portal URL")
         return ProviderSession(url=str(portal.url))
