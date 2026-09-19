@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from core_api.modules.billing.billing_service import BillingService
+from core_api.modules.billing.providers.stripe_provider import StripeBillingProvider
 from core_api.infrastructure.settings import settings
 from core_api.modules.signature_request.workflow_service import WorkflowError
 
@@ -128,6 +129,20 @@ def test_active_subscription_is_unlimited_but_keeps_lifetime_usage() -> None:
     assert account.signatures_used == 32
 
 
+def test_complimentary_lifetime_account_is_unlimited_without_stripe() -> None:
+    account = SimpleNamespace(
+        status="not_configured",
+        complimentary_lifetime=True,
+        signatures_used=50,
+        free_signatures_limit=5,
+        deleted_at=None,
+    )
+
+    BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
+
+    assert account.signatures_used == 51
+
+
 def test_only_active_intermediate_plan_enables_signature_invitation_email() -> None:
     intermediate = SimpleNamespace(
         status="active",
@@ -149,6 +164,20 @@ def test_only_active_intermediate_plan_enables_signature_invitation_email() -> N
         BillingDatabaseStub(base), uuid4()
     )
 
+
+def test_complimentary_lifetime_account_enables_signature_invitation_email() -> None:
+    account = SimpleNamespace(
+        status="not_configured",
+        current_product_code=None,
+        complimentary_lifetime=True,
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+
+    assert BillingService.email_invitations_enabled(
+        BillingDatabaseStub(account), uuid4()
+    )
+
 def test_older_subscription_event_is_ignored(monkeypatch) -> None:
     tenant_id = uuid4()
     current = datetime(2026, 9, 10, tzinfo=UTC)
@@ -167,6 +196,30 @@ def test_past_due_account_keeps_access_during_grace_period() -> None:
 
 def test_default_payment_grace_period_is_ten_days() -> None:
     assert settings.BILLING_GRACE_PERIOD_DAYS == 10
+
+
+def test_runtime_stripe_webhook_secret_overrides_static_secret(
+    monkeypatch, tmp_path
+) -> None:
+    runtime_secret = tmp_path / "stripe_webhook_secret"
+    runtime_secret.write_text("whsec_runtime\n", encoding="utf-8")
+    monkeypatch.setattr(settings, "STRIPE_RUNTIME_WEBHOOK_SECRET_FILE", str(runtime_secret))
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_static")
+
+    assert StripeBillingProvider._webhook_secret() == "whsec_runtime"
+
+
+def test_missing_runtime_stripe_webhook_secret_uses_static_secret(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr(
+        settings,
+        "STRIPE_RUNTIME_WEBHOOK_SECRET_FILE",
+        str(tmp_path / "missing"),
+    )
+    monkeypatch.setattr(settings, "STRIPE_WEBHOOK_SECRET", "whsec_static")
+
+    assert StripeBillingProvider._webhook_secret() == "whsec_static"
 
 
 def test_failed_invoice_starts_grace_period_and_records_payment(monkeypatch) -> None:

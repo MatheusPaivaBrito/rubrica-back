@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY_FILE: str | None = None
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_WEBHOOK_SECRET_FILE: str | None = None
+    STRIPE_RUNTIME_WEBHOOK_SECRET_FILE: str | None = None
     STRIPE_PRICE_BRL: str | None = None
     STRIPE_PRICE_USD: str | None = None
     STRIPE_PRICE_EUR: str | None = None

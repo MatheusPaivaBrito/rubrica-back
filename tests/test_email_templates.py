@@ -30,7 +30,9 @@ def test_account_activation_template_is_localized_and_branded(
     )
 
     assert email.subject == expected_subject
-    assert "https://rubricasignature.com/icons/rubrica-mark.png" in email.html
+    assert "/icons/rubrica-mark.png" not in email.html
+    assert ">R</td>" in email.html
+    assert ">Rubrica</td>" in email.html
     assert "token=secret" in email.html
     assert "token=secret" in email.text
     assert email.inline_images == ()

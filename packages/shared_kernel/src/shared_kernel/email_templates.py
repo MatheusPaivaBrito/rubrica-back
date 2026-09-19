@@ -214,7 +214,6 @@ def _branded_email(
 ) -> RenderedEmail:
     clean_subject = " ".join(subject.split())[:160]
     root_url = public_url.rstrip("/")
-    logo_url = f"{root_url}/icons/rubrica-mark.png"
     safe_paragraphs = "".join(
         f'<p style="margin:0 0 18px;color:#62494d;font-size:16px;line-height:1.65">'
         f"{escape(paragraph).replace(chr(10), '<br>')}</p>"
@@ -254,7 +253,6 @@ def _branded_email(
         else ""
     )
     safe_root = escape(root_url, quote=True)
-    safe_logo = escape(logo_url, quote=True)
     html = f"""<!doctype html>
 <html><body style="margin:0;padding:0;background:#f6f1ef;font-family:Arial,sans-serif">
 <div style="display:none;max-height:0;overflow:hidden;color:transparent">{escape(clean_subject)}</div>
@@ -262,8 +260,11 @@ def _branded_email(
 <tr><td align="center" style="padding:32px 14px">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#ffffff;border:1px solid #ead8d5;border-radius:22px;overflow:hidden">
 <tr><td style="padding:24px 34px;background:#3b151d">
-<a href="{safe_root}" style="display:inline-block;color:#ffffff;text-decoration:none;font-size:22px;font-weight:800">
-<img src="{safe_logo}" width="38" height="38" alt="" style="display:inline-block;vertical-align:middle;margin-right:10px;border:0">Rubrica</a>
+<a href="{safe_root}" style="display:inline-block;color:#ffffff;text-decoration:none">
+<table role="presentation" cellspacing="0" cellpadding="0"><tr>
+<td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;border:1px solid #ef9aa6;border-radius:20px;background:#bd1f38;color:#ffffff;font-family:Georgia,serif;font-size:22px;font-style:italic;font-weight:700;line-height:40px">R</td>
+<td style="padding-left:11px;color:#ffffff;font-family:Arial,sans-serif;font-size:22px;font-weight:800;line-height:40px">Rubrica</td>
+</tr></table></a>
 </td></tr>
 <tr><td style="padding:38px 34px 34px">
 <div style="margin-bottom:12px;color:#a82035;font-size:12px;font-weight:900;letter-spacing:2px">{escape(eyebrow)}</div>

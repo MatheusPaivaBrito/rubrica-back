@@ -26,6 +26,21 @@ IdentityDocumentType = Literal[
 ]
 
 
+def validate_new_password(value: str) -> str:
+    requirements = (
+        any("A" <= character <= "Z" for character in value),
+        any("a" <= character <= "z" for character in value),
+        any("0" <= character <= "9" for character in value),
+        any(not character.isalnum() and not character.isspace() for character in value),
+    )
+    if not all(requirements):
+        raise ValueError(
+            "password must contain an uppercase letter, a lowercase letter, "
+            "a number, and a special character"
+        )
+    return value
+
+
 class PublicRegistration(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -82,6 +97,8 @@ class EmailVerification(BaseModel):
     token: str = Field(min_length=32, max_length=255)
     new_password: str = Field(min_length=8, max_length=128)
 
+    _validate_new_password = field_validator("new_password")(validate_new_password)
+
 
 class EmailVerificationRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
@@ -94,3 +111,5 @@ class PasswordRecoveryRequest(EmailVerificationRequest):
 class PasswordReset(BaseModel):
     token: str = Field(min_length=32, max_length=255)
     new_password: str = Field(min_length=8, max_length=128)
+
+    _validate_new_password = field_validator("new_password")(validate_new_password)

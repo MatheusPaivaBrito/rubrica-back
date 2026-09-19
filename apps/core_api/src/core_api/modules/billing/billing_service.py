@@ -94,8 +94,13 @@ class BillingService:
             tenant = database.get(TenantEntity, tenant_id)
             if tenant is None or tenant.deleted_at is not None:
                 raise WorkflowError("Tenant not found", 404)
-            price_id = self._price_for_currency(tenant.currency, product_code)
             account = self._account_entity(database, tenant_id)
+            if account.complimentary_lifetime:
+                raise WorkflowError(
+                    "This account already has complimentary lifetime access",
+                    409,
+                )
+            price_id = self._price_for_currency(tenant.currency, product_code)
             try:
                 if not account.provider_customer_id:
                     customer = provider.create_customer(
@@ -494,6 +499,8 @@ class BillingService:
 
     @staticmethod
     def _has_unlimited_signatures(account: BillingAccountEntity) -> bool:
+        if getattr(account, "complimentary_lifetime", False):
+            return True
         if account.status == "active":
             return True
         grace = getattr(account, "grace_period_ends_at", None)
@@ -561,8 +568,13 @@ class BillingService:
         )
         return bool(
             account
-            and account.current_product_code == "rubrica_intermediate"
-            and BillingService._has_unlimited_signatures(account)
+            and (
+                getattr(account, "complimentary_lifetime", False)
+                or (
+                    account.current_product_code == "rubrica_intermediate"
+                    and BillingService._has_unlimited_signatures(account)
+                )
+            )
         )
 
     @staticmethod
@@ -604,6 +616,7 @@ class BillingService:
                     else max(account.free_signatures_limit - account.signatures_used, 0)
                 ),
                 unlimited_signatures=unlimited,
+                complimentary_lifetime=account.complimentary_lifetime,
                 created_at=account.created_at,
             )
 

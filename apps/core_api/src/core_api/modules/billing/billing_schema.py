@@ -22,6 +22,7 @@ class BillingAccountRead(BaseModel):
     signatures_used: int
     signatures_remaining: int | None
     unlimited_signatures: bool
+    complimentary_lifetime: bool
     created_at: datetime
 
 

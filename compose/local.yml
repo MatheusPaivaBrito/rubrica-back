@@ -55,6 +55,7 @@ services:
           BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
           STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
           STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
+          STRIPE_RUNTIME_WEBHOOK_SECRET_FILE: /run/rubrica/stripe/stripe_webhook_secret
           STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
           STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
           STRIPE_PRICE_EUR: ${STRIPE_PRICE_EUR:-}
@@ -67,6 +68,7 @@ services:
 
         volumes:
           - ../data/documents:/var/lib/rubrica/documents
+          - stripe_webhook_runtime:/run/rubrica/stripe:ro
         secrets:
           - stripe_secret_key
           - stripe_webhook_secret
@@ -81,13 +83,26 @@ services:
         command:
           - |
             api_key="$$(tr -d '\r\n' < /run/secrets/stripe_secret_key)"
-            exec /bin/stripe listen \
+            /bin/stripe listen \
               --api-key "$$api_key" \
               --device-name rubrica-local-compose \
               --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed \
-              --forward-to http://core-api:8000/billing/webhooks/stripe
+              --forward-to http://core-api:8000/billing/webhooks/stripe 2>&1 | \
+            while IFS= read -r line; do
+              webhook_secret="$$(printf '%s\n' "$$line" | sed -n 's/.*\(whsec_[[:alnum:]]*\).*/\1/p')"
+              if [ -n "$$webhook_secret" ]; then
+                umask 077
+                printf '%s' "$$webhook_secret" > /runtime/stripe_webhook_secret.tmp
+                mv /runtime/stripe_webhook_secret.tmp /runtime/stripe_webhook_secret
+                echo "Ready! Stripe webhook signing secret synchronized with Core."
+              else
+                printf '%s\n' "$$line"
+              fi
+            done
         secrets:
           - stripe_secret_key
+        volumes:
+          - stripe_webhook_runtime:/runtime
         depends_on:
           - core-api
         restart: unless-stopped
@@ -211,3 +226,6 @@ secrets:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_secret_key
   stripe_webhook_secret:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_webhook_secret
+
+volumes:
+  stripe_webhook_runtime:

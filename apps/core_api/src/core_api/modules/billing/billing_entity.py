@@ -1,7 +1,16 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, Uuid
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    UniqueConstraint,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -32,6 +41,24 @@ class BillingAccountEntity(BaseEntity):
         nullable=False,
         default=0,
         server_default="0",
+    )
+    complimentary_lifetime: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
+    complimentary_granted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    complimentary_granted_by: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+    complimentary_grant_reason: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
     )
 
 

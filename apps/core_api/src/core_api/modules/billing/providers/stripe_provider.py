@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any, Mapping
 
 import stripe
@@ -75,13 +76,30 @@ class StripeBillingProvider:
         payload: bytes,
         signature: str,
     ) -> Mapping[str, Any]:
-        if not settings.STRIPE_WEBHOOK_SECRET:
+        webhook_secret = self._webhook_secret()
+        if not webhook_secret:
             raise BillingProviderError("Stripe webhook is not configured")
         try:
             return stripe.Webhook.construct_event(
                 payload,
                 signature,
-                settings.STRIPE_WEBHOOK_SECRET,
+                webhook_secret,
             )
         except (ValueError, stripe.SignatureVerificationError) as exc:
             raise InvalidWebhookSignatureError from exc
+
+    @staticmethod
+    def _webhook_secret() -> str | None:
+        runtime_path = settings.STRIPE_RUNTIME_WEBHOOK_SECRET_FILE
+        if runtime_path:
+            try:
+                runtime_secret = Path(runtime_path).read_text(encoding="utf-8").strip()
+            except FileNotFoundError:
+                runtime_secret = ""
+            except OSError as exc:
+                raise BillingProviderError(
+                    "Stripe runtime webhook secret could not be read"
+                ) from exc
+            if runtime_secret:
+                return runtime_secret
+        return settings.STRIPE_WEBHOOK_SECRET
