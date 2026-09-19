@@ -114,7 +114,10 @@ def test_stripe_portal_opens_subscription_update_flow(monkeypatch) -> None:
     assert captured["flow_data"] == {
         "type": "subscription_update",
         "subscription_update": {"subscription": "sub_test"},
-        "after_completion": {"type": "portal_homepage"},
+        "after_completion": {
+            "type": "redirect",
+            "redirect": {"return_url": "https://rubrica.test/plan"},
+        },
     }
 
 

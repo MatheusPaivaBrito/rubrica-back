@@ -81,7 +81,10 @@ class StripeBillingProvider:
             parameters["flow_data"] = {
                 "type": "subscription_update",
                 "subscription_update": {"subscription": subscription_id},
-                "after_completion": {"type": "portal_homepage"},
+                "after_completion": {
+                    "type": "redirect",
+                    "redirect": {"return_url": return_url},
+                },
             }
         try:
             portal = stripe.billing_portal.Session.create(**parameters)
