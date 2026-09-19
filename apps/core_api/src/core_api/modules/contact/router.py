@@ -16,7 +16,7 @@ router = APIRouter(prefix="/contact", tags=["contact"])
 class ContactMessage(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=3, max_length=254)
-    topic: str = Field(pattern="^(comercial|suporte|privacidade)$")
+    topic: str = Field(pattern="^(sales|support|privacy)$")
     message: str = Field(min_length=10, max_length=3000)
     turnstile_token: str = Field(min_length=1, max_length=2048)
     website: str = Field(default="", max_length=255)
@@ -67,11 +67,11 @@ def submit_contact(message: ContactMessage) -> dict[str, str]:
     if settings.ENVIRONMENT == "production" and verification.get("hostname") not in {expected_host, f"www.{expected_host}"}:
         raise HTTPException(status_code=400, detail="Verification failed")
 
-    body = f"Nome: {message.name}\nE-mail: {message.email}\nAssunto: {message.topic}\n\n{message.message}"
+    body = f"Name: {message.name}\nEmail: {message.email}\nTopic: {message.topic}\n\n{message.message}"
     try:
         request_billing_email(
             recipient=settings.CONTACT_INBOX_EMAIL,
-            subject=f"[Rubrica contato] {message.topic}",
+            subject=f"[Rubrica contact] {message.topic}",
             body=body,
             idempotency_key=f"contact-{uuid4().hex}",
         )
