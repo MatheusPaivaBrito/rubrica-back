@@ -169,7 +169,6 @@ class BillingService:
                     subscription_id=(
                         account.provider_subscription_id
                         if account.status == "active"
-                        and not account.cancel_at_period_end
                         else None
                     ),
                 )

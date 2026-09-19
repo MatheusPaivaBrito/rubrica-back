@@ -99,6 +99,10 @@ def test_stripe_portal_opens_subscription_update_flow(monkeypatch) -> None:
         "core_api.modules.billing.providers.stripe_provider.stripe.billing_portal.Session.create",
         create_portal,
     )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
+        lambda _subscription_id: {"cancel_at_period_end": False},
+    )
 
     session = StripeBillingProvider().create_portal_session(
         customer_id="cus_test",
@@ -112,3 +116,69 @@ def test_stripe_portal_opens_subscription_update_flow(monkeypatch) -> None:
         "subscription_update": {"subscription": "sub_test"},
         "after_completion": {"type": "portal_homepage"},
     }
+
+
+def test_stripe_plan_change_reactivates_scheduled_subscription(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    updates: list[tuple[str, bool]] = []
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
+        lambda _subscription_id: {"cancel_at_period_end": True},
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.modify",
+        lambda subscription_id, **kwargs: updates.append(
+            (subscription_id, kwargs["cancel_at_period_end"])
+        ),
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.billing_portal.Session.create",
+        lambda **_kwargs: SimpleNamespace(url="https://billing.stripe.test/update"),
+    )
+
+    session = StripeBillingProvider().create_portal_session(
+        customer_id="cus_test",
+        return_url="https://rubrica.test/plan",
+        subscription_id="sub_test",
+    )
+
+    assert session.url == "https://billing.stripe.test/update"
+    assert updates == [("sub_test", False)]
+
+
+def test_stripe_plan_change_restores_cancellation_if_portal_fails(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    updates: list[bool] = []
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
+        lambda _subscription_id: {"cancel_at_period_end": True},
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.modify",
+        lambda _subscription_id, **kwargs: updates.append(
+            kwargs["cancel_at_period_end"]
+        ),
+    )
+
+    def reject_portal(**_kwargs):
+        raise RuntimeError("portal unavailable")
+
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.billing_portal.Session.create",
+        reject_portal,
+    )
+
+    with pytest.raises(BillingProviderError, match="could not be opened"):
+        StripeBillingProvider().create_portal_session(
+            customer_id="cus_test",
+            return_url="https://rubrica.test/plan",
+            subscription_id="sub_test",
+        )
+
+    assert updates == [False, True]

@@ -67,13 +67,33 @@ class StripeBillingProvider:
             "customer": customer_id,
             "return_url": return_url,
         }
+        cancellation_was_scheduled = False
         if subscription_id:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            cancellation_was_scheduled = bool(
+                subscription.get("cancel_at_period_end", False)
+            )
+            if cancellation_was_scheduled:
+                stripe.Subscription.modify(
+                    subscription_id,
+                    cancel_at_period_end=False,
+                )
             parameters["flow_data"] = {
                 "type": "subscription_update",
                 "subscription_update": {"subscription": subscription_id},
                 "after_completion": {"type": "portal_homepage"},
             }
-        portal = stripe.billing_portal.Session.create(**parameters)
+        try:
+            portal = stripe.billing_portal.Session.create(**parameters)
+        except Exception as exc:
+            if subscription_id and cancellation_was_scheduled:
+                stripe.Subscription.modify(
+                    subscription_id,
+                    cancel_at_period_end=True,
+                )
+            raise BillingProviderError(
+                "Stripe billing portal could not be opened"
+            ) from exc
         if not portal.url:
             raise BillingProviderError("Stripe did not return a portal URL")
         return ProviderSession(url=str(portal.url))
