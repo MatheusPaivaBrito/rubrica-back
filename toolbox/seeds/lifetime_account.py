@@ -13,7 +13,7 @@ from sqlalchemy import select
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.modules.billing.billing_entity import BillingAccountEntity, BillingEventEntity
-from core_api.modules.tenant.tenant_entity import TenantEntity
+from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -97,25 +97,54 @@ def change_lifetime_access(
     return True
 
 
+def tenant_id_for_owner(owner_email: str) -> UUID:
+    normalized_email = _bounded(owner_email, "owner email", 255).lower()
+    with SessionLocal() as database:
+        tenant_ids = database.scalars(
+            select(TenantEntity.id)
+            .join(
+                TenantMemberEntity,
+                TenantMemberEntity.tenant_id == TenantEntity.id,
+            )
+            .where(
+                TenantMemberEntity.auth_user_id == normalized_email,
+                TenantMemberEntity.role == "admin",
+                TenantMemberEntity.deleted_at.is_(None),
+                TenantEntity.deleted_at.is_(None),
+            )
+            .order_by(TenantEntity.created_at)
+        ).all()
+    if not tenant_ids:
+        raise ValueError(f"No active tenant was found for owner {normalized_email}")
+    if len(tenant_ids) > 1:
+        raise ValueError(
+            f"Owner {normalized_email} has multiple tenants; use --tenant-id"
+        )
+    return tenant_ids[0]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Manage complimentary lifetime access for a Rubrica tenant."
     )
     parser.add_argument("action", choices=("grant", "revoke"))
-    parser.add_argument("--tenant-id", type=UUID, required=True)
+    tenant = parser.add_mutually_exclusive_group(required=True)
+    tenant.add_argument("--tenant-id", type=UUID)
+    tenant.add_argument("--owner-email")
     parser.add_argument("--actor", required=True, help="Staff identity recorded in the audit event")
     parser.add_argument("--reason", required=True, help="Business reason recorded in the audit event")
     args = parser.parse_args()
 
+    tenant_id = args.tenant_id or tenant_id_for_owner(args.owner_email)
     changed = change_lifetime_access(
-        args.tenant_id,
+        tenant_id,
         enabled=args.action == "grant",
         actor=args.actor,
         reason=args.reason,
     )
     state = "enabled" if args.action == "grant" else "disabled"
     result = "updated" if changed else "already in the requested state"
-    print(f"[ok] Complimentary lifetime access {state} for {args.tenant_id}: {result}")
+    print(f"[ok] Complimentary lifetime access {state} for {tenant_id}: {result}")
 
 
 if __name__ == "__main__":

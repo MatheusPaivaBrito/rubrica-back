@@ -271,6 +271,46 @@ erro Resend ou erro de assinatura Stripe.
 8. Cancele a assinatura no Stripe.
 9. Confirme que customer.subscription.updated ou deleted atualizou o Rubrica.
 
+### Conta vitalícia por convite da equipe
+
+A conta vitalícia deve ser criada somente por alguém com acesso administrativo
+ao servidor. O comando pede o documento de forma interativa, sem exibi-lo nem
+gravá-lo no histórico do terminal. O Rubrica envia o e-mail de ativação e o
+próprio titular define a senha:
+
+    sudo make production-invite-lifetime \
+      name='Nome completo' \
+      email=pessoa@example.com \
+      document_type=BR_CPF \
+      document_country=BR \
+      locale=pt-BR \
+      actor=staff@rubricasignature.com \
+      reason='Parceria estratégica'
+
+Depois de informar o número do documento no prompt protegido, o comando:
+
+1. cria a conta desativada com senha aleatória irrecuperável;
+2. criptografa o documento e armazena somente a exibição mascarada;
+3. cria o tenant da pessoa;
+4. envia o link de ativação para ela escolher a própria senha;
+5. concede acesso vitalício e registra responsável, motivo e horário na
+   auditoria de billing.
+
+Para uma conta que já existe, localize o UUID do tenant e conceda somente o
+benefício:
+
+    sudo make production-grant-lifetime \
+      tenant_id=UUID \
+      actor=staff@rubricasignature.com \
+      reason='Parceria estratégica'
+
+Uma concessão pode ser revogada, sem remover a conta nem seu histórico:
+
+    sudo make production-revoke-lifetime \
+      tenant_id=UUID \
+      actor=staff@rubricasignature.com \
+      reason='Encerramento da concessão'
+
 ## 10. Backup e restauração
 
 Depois do primeiro deploy válido:

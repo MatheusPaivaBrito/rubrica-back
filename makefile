@@ -20,7 +20,7 @@ LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_F
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE)
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-grant-lifetime production-revoke-lifetime backup backup-production verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-production verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -51,8 +51,9 @@ help:
 	@echo "  make production-config  Validate the production Compose and secrets"
 	@echo "  make production-up      Build and start the production stack"
 	@echo "  make production-migrate Apply every production migration"
-	@echo "  make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
-	@echo "  make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
+	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
+	@echo "  sudo make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
+	@echo "  sudo make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make backup-production  Back up all databases and signed documents"
 	@echo "  make verify-backup path=backups/TIMESTAMP"
 
@@ -69,6 +70,7 @@ help:
 	@echo "  make revision-core msg=create_domain"
 	@echo "  make migrate-auth           Run Auth Alembic migrations"
 	@echo "  make seed-auth              Create the local signature administrator"
+	@echo "  make invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  make grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revision-auth msg=create_users"
@@ -152,6 +154,11 @@ migrate-all: migrate
 seed-auth: migrate-auth
 	$(LOCAL_COMPOSE) exec -T auth-api python toolbox/seeds/auth_admin.py
 
+invite-lifetime: migrate
+	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
+	$(LOCAL_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
+	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(email)" --actor "$(actor)" --reason "$(reason)"
+
 grant-lifetime: migrate-core
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make grant-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
 	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --tenant-id "$(tenant_id)" --actor "$(actor)" --reason "$(reason)"
@@ -191,6 +198,11 @@ production-migrate:
 
 production-seed:
 	$(PRODUCTION_COMPOSE) exec -T auth-api python toolbox/seeds/auth_admin.py
+
+production-invite-lifetime: production-migrate
+	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: sudo make production-invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
+	$(PRODUCTION_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
+	$(PRODUCTION_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(email)" --actor "$(actor)" --reason "$(reason)"
 
 production-grant-lifetime: production-migrate
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
