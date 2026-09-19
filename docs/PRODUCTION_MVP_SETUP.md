@@ -4,6 +4,15 @@ Este documento é o roteiro operacional para colocar o Rubrica no ar. Não grave
 tokens neste arquivo, no .env ou no Git. Os valores secretos ficam somente em
 `/etc/rubrica/secrets` no servidor, com permissão 0600.
 
+O layout esperado dos checkouts no servidor é:
+
+    ~/projects/rubrica/
+    ├── rubrica-back/
+    └── rubrica-front/
+
+`rubrica-web` continua sendo o nome interno do projeto Angular e da pasta de
+build em `dist`. Ele não é o nome do checkout do frontend no servidor.
+
 ## 1. Contas e links necessários
 
 ### Domínio e Cloudflare
@@ -63,7 +72,7 @@ No arquivo .env.production, RUBRICA_DOMAIN deve conter somente o hostname, sem
 https e sem barra:
 
     RUBRICA_DOMAIN=app.seudominio.com
-    RUBRICA_WEB_CONTEXT=../rubrica-web
+    RUBRICA_WEB_CONTEXT=../../rubrica-front
 
 ## 3. Criar o Cloudflare Tunnel
 

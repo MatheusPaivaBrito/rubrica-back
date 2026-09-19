@@ -179,7 +179,7 @@ services:
 
   web:
     build:
-      context: ${RUBRICA_WEB_CONTEXT:-../../rubrica-web}
+      context: ${RUBRICA_WEB_CONTEXT:-../../rubrica-front}
       dockerfile: Dockerfile.prod
     restart: unless-stopped
     environment:
