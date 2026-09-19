@@ -109,19 +109,24 @@ O domínio depois do @ precisa ser exatamente o domínio verificado no Resend.
 
 ## 5. Configurar a Stripe em modo de teste
 
-O Rubrica possui um único plano mensal pago com assinaturas ilimitadas, cinco
-assinaturas gratuitas antes da cobrança e tolerância padrão de 10 dias após
-falha de pagamento. O vencimento é controlado pelo período informado pelo Stripe.
+O Rubrica possui os planos mensais Base e Intermediário, cinco assinaturas
+gratuitas antes da cobrança e tolerância padrão de 10 dias após falha de
+pagamento. O vencimento é controlado pelo período informado pelo Stripe.
 
 1. Ative o modo de teste ou crie uma Sandbox.
-2. Crie um produto chamado Rubrica - Assinaturas ilimitadas.
-3. Crie o preço recorrente mensal em BRL. USD e JPY podem ser adicionados depois.
-4. Copie o ID iniciado por price_.
-5. Preencha no .env.production; deixe moedas ainda não disponíveis vazias:
+2. Crie os produtos `Rubrica Base` e `Rubrica Intermediate`.
+3. Em cada produto, crie preços recorrentes mensais separados em BRL, USD, EUR e JPY. JPY não usa casas decimais.
+4. Copie cada ID iniciado por `price_`.
+5. Preencha no `.env.production`. Uma moeda sem ID retorna indisponibilidade no checkout em vez de cobrar em outra moeda:
 
-    STRIPE_PRICE_BRL=price_COLE_O_ID_BRL
-    STRIPE_PRICE_USD=
-    STRIPE_PRICE_JPY=
+    STRIPE_PRICE_BRL=price_BASE_BRL
+    STRIPE_PRICE_USD=price_BASE_USD
+    STRIPE_PRICE_EUR=price_BASE_EUR
+    STRIPE_PRICE_JPY=price_BASE_JPY
+    STRIPE_PRICE_INTERMEDIATE_BRL=price_INTERMEDIATE_BRL
+    STRIPE_PRICE_INTERMEDIATE_USD=price_INTERMEDIATE_USD
+    STRIPE_PRICE_INTERMEDIATE_EUR=price_INTERMEDIATE_EUR
+    STRIPE_PRICE_INTERMEDIATE_JPY=price_INTERMEDIATE_JPY
 
 6. Em Developers > API Keys, copie a secret key de teste iniciada por sk_test_.
 7. Salve-a somente neste arquivo:

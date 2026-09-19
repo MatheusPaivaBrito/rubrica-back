@@ -35,6 +35,30 @@ def test_checkout_requires_a_configured_currency_price(monkeypatch) -> None:
         BillingService._price_for_currency("JPY")
 
 
+@pytest.mark.parametrize(
+    ("product_code", "currency", "setting_name"),
+    [
+        ("rubrica_base", "BRL", "STRIPE_PRICE_BRL"),
+        ("rubrica_base", "USD", "STRIPE_PRICE_USD"),
+        ("rubrica_base", "EUR", "STRIPE_PRICE_EUR"),
+        ("rubrica_base", "JPY", "STRIPE_PRICE_JPY"),
+        ("rubrica_intermediate", "BRL", "STRIPE_PRICE_INTERMEDIATE_BRL"),
+        ("rubrica_intermediate", "USD", "STRIPE_PRICE_INTERMEDIATE_USD"),
+        ("rubrica_intermediate", "EUR", "STRIPE_PRICE_INTERMEDIATE_EUR"),
+        ("rubrica_intermediate", "JPY", "STRIPE_PRICE_INTERMEDIATE_JPY"),
+    ],
+)
+def test_checkout_selects_price_for_every_plan_and_currency(
+    monkeypatch, product_code: str, currency: str, setting_name: str
+) -> None:
+    expected = f"price_{product_code}_{currency.lower()}"
+    monkeypatch.setattr(
+        f"core_api.modules.billing.billing_service.settings.{setting_name}", expected
+    )
+
+    assert BillingService._price_for_currency(currency, product_code) == expected
+
+
 class BillingDatabaseStub:
     def __init__(self, account) -> None:
         self.account = account

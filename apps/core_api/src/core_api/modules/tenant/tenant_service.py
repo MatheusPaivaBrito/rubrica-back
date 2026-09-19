@@ -16,6 +16,25 @@ from core_api.modules.tenant.tenant_schema import (
     TenantRead,
 )
 
+EURO_COUNTRY_CODES = frozenset(
+    {
+        "AD", "AT", "BE", "CY", "DE", "EE", "ES", "FI", "FR", "GR", "HR",
+        "IE", "IT", "LT", "LU", "LV", "MC", "ME", "MT", "NL", "PT", "SI",
+        "SK", "SM", "VA", "XK",
+    }
+)
+
+
+def billing_currency_for_country(country_code: str | None) -> str:
+    code = (country_code or "").upper()
+    if code == "BR":
+        return "BRL"
+    if code == "JP":
+        return "JPY"
+    if code in EURO_COUNTRY_CODES:
+        return "EUR"
+    return "USD"
+
 
 class TenantService:
     def provision_owner(self, payload: TenantProvision) -> TenantRead:
@@ -41,10 +60,7 @@ class TenantService:
                 default_locale=payload.default_locale,
                 country_code=payload.country_code,
                 timezone="UTC",
-                currency={"BR": "BRL", "JP": "JPY"}.get(
-                    payload.country_code,
-                    "USD",
-                ),
+                currency=billing_currency_for_country(payload.country_code),
             )
             db.add(tenant)
             db.flush()

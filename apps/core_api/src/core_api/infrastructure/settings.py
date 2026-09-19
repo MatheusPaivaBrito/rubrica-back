@@ -42,9 +42,13 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_WEBHOOK_SECRET_FILE: str | None = None
     STRIPE_PRICE_BRL: str | None = None
-    STRIPE_PRICE_INTERMEDIATE_BRL: str | None = None
     STRIPE_PRICE_USD: str | None = None
+    STRIPE_PRICE_EUR: str | None = None
     STRIPE_PRICE_JPY: str | None = None
+    STRIPE_PRICE_INTERMEDIATE_BRL: str | None = None
+    STRIPE_PRICE_INTERMEDIATE_USD: str | None = None
+    STRIPE_PRICE_INTERMEDIATE_EUR: str | None = None
+    STRIPE_PRICE_INTERMEDIATE_JPY: str | None = None
     BILLING_GRACE_PERIOD_DAYS: int = Field(default=10, ge=0, le=30)
 
     @model_validator(mode="after")

@@ -529,22 +529,26 @@ class BillingService:
 
     @staticmethod
     def _price_for_currency(currency: str, product_code: str = "rubrica_base") -> str:
-        if product_code == "rubrica_intermediate":
-            price_id = (
-                settings.STRIPE_PRICE_INTERMEDIATE_BRL if currency == "BRL" else None
-            )
-            if not price_id:
-                raise WorkflowError(
-                    f"Stripe intermediate price is not configured for {currency}", 503
-                )
-            return price_id
-        price_id = {
-            "BRL": settings.STRIPE_PRICE_BRL,
-            "USD": settings.STRIPE_PRICE_USD,
-            "JPY": settings.STRIPE_PRICE_JPY,
-        }.get(currency)
+        prices = {
+            "rubrica_base": {
+                "BRL": settings.STRIPE_PRICE_BRL,
+                "USD": settings.STRIPE_PRICE_USD,
+                "EUR": settings.STRIPE_PRICE_EUR,
+                "JPY": settings.STRIPE_PRICE_JPY,
+            },
+            "rubrica_intermediate": {
+                "BRL": settings.STRIPE_PRICE_INTERMEDIATE_BRL,
+                "USD": settings.STRIPE_PRICE_INTERMEDIATE_USD,
+                "EUR": settings.STRIPE_PRICE_INTERMEDIATE_EUR,
+                "JPY": settings.STRIPE_PRICE_INTERMEDIATE_JPY,
+            },
+        }
+        price_id = prices.get(product_code, {}).get(currency.upper())
         if not price_id:
-            raise WorkflowError(f"Stripe price is not configured for {currency}", 503)
+            raise WorkflowError(
+                f"Stripe price is not configured for {product_code} in {currency}",
+                503,
+            )
         return price_id
 
     @staticmethod
