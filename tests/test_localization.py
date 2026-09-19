@@ -98,3 +98,16 @@ def test_account_return_url_accepts_only_internal_signing_links() -> None:
 
     with pytest.raises(ValidationError):
         PublicRegistration(name="Signer", email="signer@example.com", return_url="https://example.com/steal")
+
+
+def test_public_registration_normalizes_identity_issuer_country() -> None:
+    registration = PublicRegistration(
+        name="Aiko",
+        email="aiko@example.jp",
+        preferred_locale="ja-JP",
+        identity_document_type="PASSPORT",
+        identity_document_country="jp",
+        identity_document_value="TR1234567",
+    )
+
+    assert registration.identity_document_country == "JP"

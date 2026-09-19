@@ -65,7 +65,7 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.setFillColor(HexColor("#0D5B4B"))
     identity_country = str(item.get("identity_document_country") or "").upper()
     country_code = identity_country or str(stamp.get("country_code") or "").upper()
-    flag_width = 25.0 if country_code else 0.0
+    flag_width = 25.0 if country_code and stamp.get("show_flag", True) else 0.0
     if flag_width:
         _draw_country_flag(
             canvas,
@@ -121,6 +121,7 @@ def _alpha3_country_code(country_code: str) -> str:
         "BR": "BRA",
         "JP": "JPN",
         "PT": "PRT",
+        "ES": "ESP",
         "US": "USA",
     }.get(country_code.upper(), country_code.upper())
 
@@ -146,6 +147,38 @@ def _draw_country_flag(canvas: Canvas, left: float, bottom: float, country_code:
         canvas.rect(left, bottom, 24, 14, fill=1, stroke=1)
         canvas.setFillColor(HexColor("#BC002D"))
         canvas.circle(left + 12, bottom + 7, 4.2, fill=1, stroke=0)
+    elif country_code == "US":
+        canvas.setFillColor(white)
+        canvas.setStrokeColor(HexColor("#D9DEE7"))
+        canvas.rect(left, bottom, 24, 14, fill=1, stroke=1)
+        canvas.setFillColor(HexColor("#B22234"))
+        for stripe in range(0, 7, 2):
+            canvas.rect(left, bottom + stripe * 2, 24, 2, fill=1, stroke=0)
+        canvas.setFillColor(HexColor("#3C3B6E"))
+        canvas.rect(left, bottom + 8, 10, 6, fill=1, stroke=0)
+        canvas.setFillColor(white)
+        for row in range(2):
+            for column in range(3):
+                canvas.circle(left + 2 + column * 3, bottom + 9.5 + row * 2.5, 0.35, fill=1, stroke=0)
+    elif country_code == "ES":
+        canvas.setFillColor(HexColor("#AA151B"))
+        canvas.rect(left, bottom, 24, 14, fill=1, stroke=0)
+        canvas.setFillColor(HexColor("#F1BF00"))
+        canvas.rect(left, bottom + 3.5, 24, 7, fill=1, stroke=0)
+        canvas.setFillColor(HexColor("#AA151B"))
+        canvas.rect(left + 7, bottom + 5, 1.5, 3.5, fill=1, stroke=0)
+    elif country_code == "PT":
+        canvas.setFillColor(HexColor("#046A38"))
+        canvas.rect(left, bottom, 9.5, 14, fill=1, stroke=0)
+        canvas.setFillColor(HexColor("#DA291C"))
+        canvas.rect(left + 9.5, bottom, 14.5, 14, fill=1, stroke=0)
+        canvas.setStrokeColor(HexColor("#FFCC00"))
+        canvas.setLineWidth(1.2)
+        canvas.circle(left + 9.5, bottom + 7, 3, fill=0, stroke=1)
+        canvas.setFillColor(white)
+        canvas.rect(left + 8.2, bottom + 5.2, 2.6, 3.6, fill=1, stroke=0)
+        canvas.setStrokeColor(HexColor("#DA291C"))
+        canvas.rect(left + 8.2, bottom + 5.2, 2.6, 3.6, fill=0, stroke=1)
     else:
         canvas.setFillColor(HexColor("#EFF3F8"))
         canvas.setStrokeColor(HexColor("#8A96A8"))

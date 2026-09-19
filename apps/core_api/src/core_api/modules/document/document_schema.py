@@ -14,7 +14,7 @@ class DocumentStatus(StrEnum):
 class DocumentCreate(BaseModel):
     organization_id: str = Field(min_length=1, max_length=120)
     title: str = Field(min_length=1, max_length=240)
-    original_filename: str = Field(min_length=1, max_length=255)
+    original_filename: str = Field(min_length=1, max_length=120)
     content_type: str = Field(default="application/octet-stream", min_length=1, max_length=160)
     created_by: str = Field(min_length=1, max_length=255)
 

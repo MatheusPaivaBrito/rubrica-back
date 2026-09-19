@@ -111,6 +111,7 @@ class SigningRead(BaseModel):
     signer: SignerRead
     document_title: str
     original_filename: str
+    account_country: str | None = None
     stamp: StampPosition | None = None
     viewer_mode: str = Field(default="signer", pattern=r"^(signer|administrator)$")
 

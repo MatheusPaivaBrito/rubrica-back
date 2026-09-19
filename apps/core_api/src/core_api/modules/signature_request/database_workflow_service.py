@@ -304,9 +304,10 @@ class DatabaseSignatureWorkflowService:
             else:
                 signer, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             document = self._document(db, str(request.document_id))
+            tenant = db.get(TenantEntity, document.tenant_id)
             signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.signer_id == signer.id))
             stamp = None if administrative_view else signature.evidence_json.get("stamp") if signature is not None else None
-            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, stamp=stamp, viewer_mode="administrator" if administrative_view else "signer")
+            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, account_country=tenant.country_code if tenant else None, stamp=stamp, viewer_mode="administrator" if administrative_view else "signer")
 
     def signing_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
@@ -352,6 +353,8 @@ class DatabaseSignatureWorkflowService:
                 document = db.get(DocumentEntity, request.document_id)
                 if document is None or document.deleted_at is not None:
                     raise WorkflowError("Document not found", 404)
+                tenant = db.get(TenantEntity, document.tenant_id)
+                tenant_country = tenant.country_code if tenant is not None else None
                 billing_service.consume_signature(db, document.tenant_id)
                 with self.storage.get(version.storage_key) as stream:
                     original = stream.read()
@@ -359,7 +362,7 @@ class DatabaseSignatureWorkflowService:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
                 validate_pdf_upload(original, filename=version.original_filename, content_type="application/pdf")
                 now = DateTimeService.utc_now()
-                evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity)
+                evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity, tenant_country)
                 evidence_hash = evidence_sha256(evidence)
                 existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
                 stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
@@ -467,12 +470,17 @@ class DatabaseSignatureWorkflowService:
         return request
 
     @staticmethod
-    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str, identity: IdentitySummary | None = None) -> dict[str, object]:
+    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str, identity: IdentitySummary | None = None, tenant_country: str | None = None) -> dict[str, object]:
         subject_hash = hmac_new(settings.EVIDENCE_SECRET.encode(), auth_user_id.lower().encode(), "sha256").hexdigest()
         identity_binding = hmac_new(settings.EVIDENCE_SECRET.encode(), f"{auth_user_id.lower()}|{request.id}|{signer.id}|{request.document_id}|{request.document_version}".encode(), "sha256").hexdigest()
         normalized_agent = user_agent[:1000] or "unknown"
         lowered = normalized_agent.lower()
         device_type = "mobile" if any(value in lowered for value in ("mobile", "android", "iphone")) else "tablet" if "ipad" in lowered else "desktop"
+        evidence_country = (identity.issuing_country if identity else None) or tenant_country
+        stamp_payload = stamp.model_dump()
+        stamp_payload["country_code"] = evidence_country
+        stamp_payload["show_flag"] = bool(evidence_country)
+        stamp_payload["template"] = evidence_country if evidence_country in {"BR", "JP"} else "INTL"
         return {
             "schema": "rubrica-signature-evidence-v1",
             "consent": True,
@@ -490,7 +498,7 @@ class DatabaseSignatureWorkflowService:
             "identity_document_masked": identity.masked_display if identity else None,
             "signer_email": signer.email,
             "signed_at": signed_at.isoformat(),
-            "stamp": stamp.model_dump(),
+            "stamp": stamp_payload,
             "network": {"ip_address": ip_address[:64], "user_agent": normalized_agent, "device_type": device_type},
             "client": (client or ClientEvidence()).model_dump(),
             "geolocation": (geolocation or GeolocationEvidence(status="unavailable")).model_dump(),

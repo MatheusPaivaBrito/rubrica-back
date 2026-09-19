@@ -2,6 +2,7 @@ import asyncio
 from io import BytesIO
 
 import pytest
+from pydantic import ValidationError
 from pypdf import PdfWriter
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects import postgresql
@@ -9,6 +10,7 @@ from starlette.requests import Request
 
 from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_entity import DocumentEntity
+from core_api.modules.document.document_schema import DocumentCreate
 from core_api.modules.document.document_router import _read_document_body
 from core_api.modules.document.pdf_validation import validate_pdf_upload
 from core_api.modules.document.storage import LocalDocumentStorage
@@ -30,6 +32,17 @@ def pdf_bytes(*, javascript: bool = False, encrypted: bool = False) -> bytes:
 
 def test_accepts_a_passive_pdf() -> None:
     validate_pdf_upload(pdf_bytes(), filename="contract.pdf", content_type="application/pdf")
+
+
+def test_rejects_document_filenames_longer_than_120_characters() -> None:
+    with pytest.raises(ValidationError):
+        DocumentCreate(
+            organization_id="acme",
+            title="Agreement",
+            original_filename=f"{'a' * 117}.pdf",
+            content_type="application/pdf",
+            created_by="operator",
+        )
 
 
 @pytest.mark.parametrize(

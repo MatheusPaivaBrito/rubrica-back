@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from core_api.infrastructure.settings import settings
 from core_api.modules.billing.notification_client import BillingEmailDeliveryError, request_billing_email
@@ -16,7 +16,9 @@ router = APIRouter(prefix="/contact", tags=["contact"])
 class ContactMessage(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     email: str = Field(min_length=3, max_length=254)
-    topic: str = Field(pattern="^(sales|support|privacy)$")
+    topic: str = Field(pattern="^(sales|support|privacy|enterprise)$")
+    company: str = Field(default="", max_length=160)
+    team_size: str = Field(default="", pattern=r"^(|1-20|21-100|101\+)$")
     message: str = Field(min_length=10, max_length=3000)
     turnstile_token: str = Field(min_length=1, max_length=2048)
     website: str = Field(default="", max_length=255)
@@ -29,6 +31,14 @@ class ContactMessage(BaseModel):
             raise ValueError("invalid text")
         return value
 
+    @field_validator("company")
+    @classmethod
+    def clean_company(cls, value: str) -> str:
+        value = value.strip()
+        if "\x00" in value:
+            raise ValueError("invalid company")
+        return value
+
     @field_validator("email")
     @classmethod
     def valid_email(cls, value: str) -> str:
@@ -36,6 +46,12 @@ class ContactMessage(BaseModel):
         if not re.fullmatch(r"[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", value):
             raise ValueError("invalid email")
         return value
+
+    @model_validator(mode="after")
+    def validate_enterprise_context(self) -> "ContactMessage":
+        if self.topic == "enterprise" and (len(self.company) < 2 or not self.team_size):
+            raise ValueError("enterprise contact requires company and company size")
+        return self
 
 
 @router.get("/config")
@@ -67,7 +83,8 @@ def submit_contact(message: ContactMessage) -> dict[str, str]:
     if settings.ENVIRONMENT == "production" and verification.get("hostname") not in {expected_host, f"www.{expected_host}"}:
         raise HTTPException(status_code=400, detail="Verification failed")
 
-    body = f"Name: {message.name}\nEmail: {message.email}\nTopic: {message.topic}\n\n{message.message}"
+    company = f"\nCompany: {message.company}\nCompany size: {message.team_size}" if message.company else ""
+    body = f"Name: {message.name}\nEmail: {message.email}\nTopic: {message.topic}{company}\n\n{message.message}"
     try:
         request_billing_email(
             recipient=settings.CONTACT_INBOX_EMAIL,

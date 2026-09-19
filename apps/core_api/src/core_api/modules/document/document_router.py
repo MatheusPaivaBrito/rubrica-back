@@ -45,7 +45,7 @@ async def upload_document(
     request: Request,
     organization_id: str = Query(min_length=1),
     title: str = Query(min_length=1),
-    filename: str = Query(min_length=1),
+    filename: str = Query(min_length=1, max_length=120),
     context: AuthContext = Depends(require_permission("documents:write")),
 ) -> DocumentRead:
     content = await _read_document_body(request)
@@ -59,7 +59,7 @@ async def upload_document(
 async def create_version(
     document_id: UUID,
     request: Request,
-    filename: str = Query(min_length=1),
+    filename: str = Query(min_length=1, max_length=120),
     context: AuthContext = Depends(require_permission("documents:write")),
 ) -> DocumentRead:
     content = await _read_document_body(request)
