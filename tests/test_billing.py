@@ -60,6 +60,28 @@ def test_checkout_selects_price_for_every_plan_and_currency(
     assert BillingService._price_for_currency(currency, product_code) == expected
 
 
+@pytest.mark.parametrize(
+    "status",
+    ["active", "pending", "past_due", "unpaid", "paused"],
+)
+def test_existing_subscription_must_be_changed_through_portal(status: str) -> None:
+    account = SimpleNamespace(
+        status=status,
+        provider_subscription_id="sub_existing",
+    )
+
+    assert BillingService._subscription_requires_portal(account)
+
+
+def test_cancelled_subscription_can_start_a_new_checkout() -> None:
+    account = SimpleNamespace(
+        status="cancelled",
+        provider_subscription_id="sub_cancelled",
+    )
+
+    assert not BillingService._subscription_requires_portal(account)
+
+
 class BillingDatabaseStub:
     def __init__(self, account) -> None:
         self.account = account
@@ -77,7 +99,9 @@ def test_completed_checkout_does_not_unlock_unlimited_signatures(monkeypatch) ->
         current_product_code=None,
         current_period_ends_at=None,
     )
-    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args: account)
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
 
     BillingService._apply_event(
         object(),
@@ -117,16 +141,17 @@ def test_free_account_rejects_the_sixth_signer_signature() -> None:
     assert account.signatures_used == 5
 
 
-def test_active_subscription_is_unlimited_but_keeps_lifetime_usage() -> None:
+def test_active_subscription_does_not_consume_free_signature_allowance() -> None:
     account = SimpleNamespace(
         status="active",
         signatures_used=31,
         free_signatures_limit=5,
         deleted_at=None,
+        grace_period_ends_at=None,
     )
 
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
-    assert account.signatures_used == 32
+    assert account.signatures_used == 31
 
 
 def test_complimentary_lifetime_account_is_unlimited_without_stripe() -> None:
@@ -140,7 +165,166 @@ def test_complimentary_lifetime_account_is_unlimited_without_stripe() -> None:
 
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
 
-    assert account.signatures_used == 51
+    assert account.signatures_used == 50
+
+
+def test_base_plan_limits_new_files_to_25_per_period() -> None:
+    account = SimpleNamespace(
+        status="active",
+        current_product_code="rubrica_base",
+        files_uploaded_in_period=24,
+        complimentary_lifetime=False,
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+
+    service = BillingService()
+    service.consume_document(BillingDatabaseStub(account), uuid4())
+    assert account.files_uploaded_in_period == 25
+
+    with pytest.raises(WorkflowError) as error:
+        service.consume_document(BillingDatabaseStub(account), uuid4())
+
+    assert error.value.status_code == 402
+    assert account.files_uploaded_in_period == 25
+
+
+def test_intermediate_plan_limits_new_files_to_30_per_period() -> None:
+    account = SimpleNamespace(
+        status="active",
+        current_product_code="rubrica_intermediate",
+        files_uploaded_in_period=29,
+        complimentary_lifetime=False,
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+
+    BillingService().consume_document(BillingDatabaseStub(account), uuid4())
+
+    assert account.files_uploaded_in_period == 30
+
+
+def test_switching_plan_does_not_reset_usage_in_the_same_period() -> None:
+    period_start = datetime(2026, 9, 1, tzinfo=UTC)
+    account = SimpleNamespace(
+        usage_period_starts_at=period_start,
+        files_uploaded_in_period=10,
+        current_period_ends_at=None,
+    )
+
+    BillingService._sync_usage_period(
+        account,
+        period_start,
+        datetime(2026, 10, 1, tzinfo=UTC),
+        reset_usage=False,
+    )
+
+    assert account.files_uploaded_in_period == 10
+
+
+def test_upgrade_only_expands_the_same_period_allowance() -> None:
+    account = SimpleNamespace(
+        status="active",
+        current_product_code="rubrica_intermediate",
+        files_uploaded_in_period=25,
+        complimentary_lifetime=False,
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+
+    BillingService().consume_document(BillingDatabaseStub(account), uuid4())
+
+    assert account.files_uploaded_in_period == 26
+
+
+def test_downgrade_does_not_erase_usage_or_documents() -> None:
+    account = SimpleNamespace(
+        status="active",
+        current_product_code="rubrica_base",
+        files_uploaded_in_period=27,
+        complimentary_lifetime=False,
+        deleted_at=None,
+        grace_period_ends_at=None,
+    )
+
+    with pytest.raises(WorkflowError) as error:
+        BillingService().consume_document(BillingDatabaseStub(account), uuid4())
+
+    assert error.value.status_code == 402
+    assert account.files_uploaded_in_period == 27
+
+
+def test_new_billing_period_resets_file_usage_once() -> None:
+    account = SimpleNamespace(
+        usage_period_starts_at=datetime(2026, 9, 1, tzinfo=UTC),
+        files_uploaded_in_period=25,
+        current_period_ends_at=None,
+    )
+
+    BillingService._sync_usage_period(
+        account,
+        datetime(2026, 10, 1, tzinfo=UTC),
+        datetime(2026, 11, 1, tzinfo=UTC),
+        reset_usage=True,
+    )
+
+    assert account.files_uploaded_in_period == 0
+    assert account.usage_period_starts_at == datetime(2026, 10, 1, tzinfo=UTC)
+
+
+def test_plan_change_with_new_stripe_anchor_does_not_reset_usage() -> None:
+    original_start = datetime(2026, 9, 1, tzinfo=UTC)
+    account = SimpleNamespace(
+        usage_period_starts_at=original_start,
+        files_uploaded_in_period=18,
+        current_period_ends_at=None,
+    )
+
+    BillingService._sync_usage_period(
+        account,
+        datetime(2026, 9, 15, tzinfo=UTC),
+        datetime(2026, 10, 15, tzinfo=UTC),
+        reset_usage=False,
+    )
+
+    assert account.files_uploaded_in_period == 18
+    assert account.usage_period_starts_at == original_start
+
+
+def test_subscription_price_takes_precedence_over_old_plan_metadata(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.settings.STRIPE_PRICE_INTERMEDIATE_BRL",
+        "price_intermediate",
+    )
+
+    product_code = BillingService._product_code(
+        {
+            "metadata": {"product_code": "rubrica_base"},
+            "items": {"data": [{"price": {"id": "price_intermediate"}}]},
+        }
+    )
+
+    assert product_code == "rubrica_intermediate"
+
+
+def test_subscription_period_supports_stripe_item_level_periods() -> None:
+    start, end = BillingService._subscription_period(
+        {
+            "items": {
+                "data": [
+                    {
+                        "current_period_start": 1_799_000_000,
+                        "current_period_end": 1_801_000_000,
+                    }
+                ]
+            }
+        }
+    )
+
+    assert start == datetime.fromtimestamp(1_799_000_000, tz=UTC)
+    assert end == datetime.fromtimestamp(1_801_000_000, tz=UTC)
 
 
 def test_only_active_intermediate_plan_enables_signature_invitation_email() -> None:
@@ -182,7 +366,9 @@ def test_older_subscription_event_is_ignored(monkeypatch) -> None:
     tenant_id = uuid4()
     current = datetime(2026, 9, 10, tzinfo=UTC)
     account = SimpleNamespace(status="active", provider=None, provider_customer_id=None, provider_subscription_id="sub_test", current_product_code="rubrica_mvp", current_period_ends_at=None, grace_period_ends_at=None, last_provider_event_created_at=current)
-    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args: account)
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
     applied = BillingService._apply_event(object(), "customer.subscription.updated", {"id": "sub_test", "status": "canceled", "metadata": {}}, tenant_id, current - timedelta(minutes=1))
     assert applied is False
     assert account.status == "active"
@@ -191,7 +377,7 @@ def test_older_subscription_event_is_ignored(monkeypatch) -> None:
 def test_past_due_account_keeps_access_during_grace_period() -> None:
     account = SimpleNamespace(status="past_due", signatures_used=5, free_signatures_limit=5, deleted_at=None, grace_period_ends_at=datetime.now(UTC) + timedelta(days=1))
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
-    assert account.signatures_used == 6
+    assert account.signatures_used == 5
 
 
 def test_default_payment_grace_period_is_ten_days() -> None:
@@ -231,7 +417,9 @@ def test_failed_invoice_starts_grace_period_and_records_payment(monkeypatch) -> 
         current_period_ends_at=None,
     )
     recorded: dict[str, object] = {}
-    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args: account)
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
     monkeypatch.setattr(
         BillingService,
         "_record_payment",
@@ -275,7 +463,9 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
         grace_period_ends_at=datetime.now(UTC) + timedelta(days=1),
         current_period_ends_at=None,
     )
-    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args: account)
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
     monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: None)
 
     BillingService._apply_event(

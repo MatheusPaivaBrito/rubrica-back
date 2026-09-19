@@ -42,6 +42,16 @@ class BillingAccountEntity(BaseEntity):
         default=0,
         server_default="0",
     )
+    files_uploaded_in_period: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+    )
+    usage_period_starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     complimentary_lifetime: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

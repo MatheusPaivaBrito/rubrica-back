@@ -22,6 +22,12 @@ class BillingAccountRead(BaseModel):
     signatures_used: int
     signatures_remaining: int | None
     unlimited_signatures: bool
+    files_uploaded_in_period: int
+    files_limit: int | None
+    files_remaining: int | None
+    unlimited_files: bool
+    email_invitations_enabled: bool
+    usage_period_starts_at: datetime | None
     complimentary_lifetime: bool
     created_at: datetime
 

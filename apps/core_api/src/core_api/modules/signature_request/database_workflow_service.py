@@ -50,6 +50,7 @@ class DatabaseSignatureWorkflowService:
                     db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
                 else:
                     tenant_service.require_role(db, tenant.id, payload.created_by, {"admin", "member"})
+                billing_service.consume_document(db, tenant.id)
                 item = DocumentEntity(**payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
                 db.add(item)
                 db.flush()

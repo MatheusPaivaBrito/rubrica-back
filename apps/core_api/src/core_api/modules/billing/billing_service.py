@@ -33,6 +33,11 @@ from shared_kernel.time.datetime_service import DateTimeService
 
 
 class BillingService:
+    PLAN_FILE_LIMITS = {
+        "rubrica_base": 25,
+        "rubrica_intermediate": 30,
+    }
+
     def __init__(self, provider: BillingProvider | None = None) -> None:
         self._provider = provider
 
@@ -75,15 +80,38 @@ class BillingService:
             database.flush()
         elif account.deleted_at is not None:
             account.deleted_at = None
-        if (
-            not self._has_unlimited_signatures(account)
-            and account.signatures_used >= account.free_signatures_limit
-        ):
+        if self._has_unlimited_signatures(account):
+            return
+        if account.signatures_used >= account.free_signatures_limit:
             raise WorkflowError(
                 "Free signature allowance exhausted. An active subscription is required",
                 402,
             )
         account.signatures_used += 1
+
+    def consume_document(self, database, tenant_id: UUID) -> None:
+        account = database.scalar(
+            select(BillingAccountEntity)
+            .where(BillingAccountEntity.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if account is None:
+            account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")
+            database.add(account)
+            database.flush()
+        elif account.deleted_at is not None:
+            account.deleted_at = None
+        if getattr(account, "complimentary_lifetime", False):
+            return
+        limit = self._active_plan_file_limit(account)
+        if limit is None:
+            return
+        if account.files_uploaded_in_period >= limit:
+            raise WorkflowError(
+                "Monthly file allowance exhausted. Wait for the next billing period or change plan",
+                402,
+            )
+        account.files_uploaded_in_period += 1
 
     def create_checkout(
         self, tenant_id: UUID, subject: str, product_code: str
@@ -98,6 +126,11 @@ class BillingService:
             if account.complimentary_lifetime:
                 raise WorkflowError(
                     "This account already has complimentary lifetime access",
+                    409,
+                )
+            if self._subscription_requires_portal(account):
+                raise WorkflowError(
+                    "Use the billing portal to change the existing subscription",
                     409,
                 )
             price_id = self._price_for_currency(tenant.currency, product_code)
@@ -320,32 +353,32 @@ class BillingService:
             return None
         messages = {
             "en": {
-                "checkout": ("Rubrica payment received", "We received the checkout for {tenant}. Unlimited signatures will be enabled after Stripe confirms the subscription."),
-                "active": ("Rubrica subscription active", "The subscription for {tenant} is active. Unlimited signatures are enabled."),
+                "checkout": ("Rubrica payment received", "We received the checkout for {tenant}. The monthly file allowance will be enabled after Stripe confirms the subscription."),
+                "active": ("Rubrica subscription active", "The subscription for {tenant} is active. Its monthly file allowance is available."),
                 "cancelled": ("Rubrica subscription cancelled", "The subscription for {tenant} was cancelled."),
                 "paid": ("Rubrica payment confirmed", "Stripe confirmed the payment for {tenant}."),
                 "failed": ("Rubrica payment failed", "Stripe could not confirm the payment for {tenant}. Please review your payment method in the billing portal."),
                 "paused": ("Rubrica subscription paused", "The subscription for {tenant} was paused. Review its status in the billing portal."),
             },
             "pt-BR": {
-                "checkout": ("Pagamento recebido pelo Rubrica", "Recebemos o checkout de {tenant}. As assinaturas ilimitadas serão liberadas após a confirmação da assinatura pelo Stripe."),
-                "active": ("Assinatura Rubrica ativa", "A assinatura de {tenant} está ativa. As assinaturas ilimitadas foram liberadas."),
+                "checkout": ("Pagamento recebido pelo Rubrica", "Recebemos o checkout de {tenant}. A franquia mensal de arquivos será liberada após a confirmação do Stripe."),
+                "active": ("Assinatura Rubrica ativa", "A assinatura de {tenant} está ativa. A franquia mensal de arquivos está disponível."),
                 "cancelled": ("Assinatura Rubrica cancelada", "A assinatura de {tenant} foi cancelada."),
                 "paid": ("Pagamento Rubrica confirmado", "O Stripe confirmou o pagamento de {tenant}."),
                 "failed": ("Falha no pagamento Rubrica", "O Stripe não confirmou o pagamento de {tenant}. Revise a forma de pagamento no portal de cobrança."),
                 "paused": ("Assinatura Rubrica pausada", "A assinatura de {tenant} foi pausada. Revise a situação no portal de cobrança."),
             },
             "ja-JP": {
-                "checkout": ("Rubrica お支払い受付", "{tenant} のチェックアウトを受け付けました。Stripe がサブスクリプションを確認した後、署名回数が無制限になります。"),
-                "active": ("Rubrica サブスクリプション有効", "{tenant} のサブスクリプションが有効になりました。署名回数は無制限です。"),
+                "checkout": ("Rubrica お支払い受付", "{tenant} のチェックアウトを受け付けました。Stripe の確認後、月間ファイル枠が有効になります。"),
+                "active": ("Rubrica サブスクリプション有効", "{tenant} のサブスクリプションが有効になり、月間ファイル枠を利用できます。"),
                 "cancelled": ("Rubrica サブスクリプション解約", "{tenant} のサブスクリプションは解約されました。"),
                 "paid": ("Rubrica お支払い確認", "Stripe が {tenant} のお支払いを確認しました。"),
                 "failed": ("Rubrica お支払い失敗", "{tenant} のお支払いを確認できませんでした。請求ポータルでお支払い方法をご確認ください。"),
                 "paused": ("Rubrica サブスクリプション一時停止", "{tenant} のサブスクリプションは一時停止されています。請求ポータルで状態をご確認ください。"),
             },
             "es": {
-                "checkout": ("Pago recibido por Rubrica", "Recibimos el pago de {tenant}. El plan se habilitará cuando Stripe confirme la suscripción."),
-                "active": ("Suscripción Rubrica activa", "La suscripción de {tenant} está activa."),
+                "checkout": ("Pago recibido por Rubrica", "Recibimos el pago de {tenant}. La cuota mensual de archivos se habilitará cuando Stripe confirme la suscripción."),
+                "active": ("Suscripción Rubrica activa", "La suscripción de {tenant} está activa y su cuota mensual de archivos está disponible."),
                 "cancelled": ("Suscripción Rubrica cancelada", "La suscripción de {tenant} fue cancelada."),
                 "paid": ("Pago Rubrica confirmado", "Stripe confirmó el pago de {tenant}."),
                 "failed": ("Error en el pago de Rubrica", "Stripe no pudo confirmar el pago de {tenant}. Revisa el método de pago en el portal de facturación."),
@@ -362,7 +395,7 @@ class BillingService:
     ) -> bool:
         if tenant_id is None:
             return True
-        account = BillingService._account_entity(database, tenant_id)
+        account = BillingService._account_entity(database, tenant_id, lock=True)
         account.provider = "stripe"
         customer = resource.get("customer")
         if customer:
@@ -372,9 +405,7 @@ class BillingService:
             account.provider_subscription_id = (
                 str(subscription) if subscription else None
             )
-            account.current_product_code = str(
-                resource.get("metadata", {}).get("product_code", "rubrica_base")
-            )
+            account.current_product_code = BillingService._product_code(resource)
             if account.status != "active":
                 account.status = "pending"
             return True
@@ -389,6 +420,17 @@ class BillingService:
             if event_type == "invoice.payment_succeeded":
                 account.status = "active"
                 account.grace_period_ends_at = None
+                period_start, period_end = BillingService._invoice_service_period(
+                    resource
+                )
+                BillingService._sync_usage_period(
+                    account,
+                    period_start,
+                    period_end,
+                    reset_usage=(
+                        resource.get("billing_reason") == "subscription_cycle"
+                    ),
+                )
             elif account.status != "past_due" or account.grace_period_ends_at is None:
                 account.status = "past_due"
                 account.grace_period_ends_at = DateTimeService.utc_now() + timedelta(
@@ -403,9 +445,7 @@ class BillingService:
             ):
                 return False
             account.provider_subscription_id = str(resource.get("id"))
-            account.current_product_code = str(
-                resource.get("metadata", {}).get("product_code", "rubrica_mvp")
-            )
+            account.current_product_code = BillingService._product_code(resource)
             account.status = BillingService._subscription_status(
                 str(resource.get("status", ""))
             )
@@ -417,10 +457,16 @@ class BillingService:
                 account.grace_period_ends_at = None
             if event_created_at:
                 account.last_provider_event_created_at = event_created_at
-            period_end = resource.get("current_period_end")
-            account.current_period_ends_at = (
-                datetime.fromtimestamp(int(period_end), tz=UTC) if period_end else None
-            )
+            period_start, period_end = BillingService._subscription_period(resource)
+            if account.status == "active":
+                BillingService._sync_usage_period(
+                    account,
+                    period_start,
+                    period_end,
+                    reset_usage=False,
+                )
+            elif period_end is not None:
+                account.current_period_ends_at = period_end
         return True
 
     @staticmethod
@@ -501,6 +547,10 @@ class BillingService:
     def _has_unlimited_signatures(account: BillingAccountEntity) -> bool:
         if getattr(account, "complimentary_lifetime", False):
             return True
+        return BillingService._paid_access_enabled(account)
+
+    @staticmethod
+    def _paid_access_enabled(account: BillingAccountEntity) -> bool:
         if account.status == "active":
             return True
         grace = getattr(account, "grace_period_ends_at", None)
@@ -509,6 +559,97 @@ class BillingService:
         if grace.tzinfo is None:
             grace = grace.replace(tzinfo=UTC)
         return grace > DateTimeService.utc_now()
+
+    @staticmethod
+    def _active_plan_file_limit(account: BillingAccountEntity) -> int | None:
+        if not BillingService._paid_access_enabled(account):
+            return None
+        return BillingService.PLAN_FILE_LIMITS.get(
+            BillingService._normalize_product_code(account.current_product_code)
+        )
+
+    @staticmethod
+    def _subscription_requires_portal(account: BillingAccountEntity) -> bool:
+        return bool(
+            account.provider_subscription_id
+            and account.status in {"active", "pending", "past_due", "unpaid", "paused"}
+        )
+
+    @staticmethod
+    def _normalize_product_code(product_code: object) -> str:
+        value = str(product_code or "rubrica_base")
+        return "rubrica_base" if value == "rubrica_mvp" else value
+
+    @staticmethod
+    def _product_code(resource) -> str:
+        configured_prices = {
+            price_id: product_code
+            for product_code, price_ids in {
+                "rubrica_base": (
+                    settings.STRIPE_PRICE_BRL,
+                    settings.STRIPE_PRICE_USD,
+                    settings.STRIPE_PRICE_EUR,
+                    settings.STRIPE_PRICE_JPY,
+                ),
+                "rubrica_intermediate": (
+                    settings.STRIPE_PRICE_INTERMEDIATE_BRL,
+                    settings.STRIPE_PRICE_INTERMEDIATE_USD,
+                    settings.STRIPE_PRICE_INTERMEDIATE_EUR,
+                    settings.STRIPE_PRICE_INTERMEDIATE_JPY,
+                ),
+            }.items()
+            for price_id in price_ids
+            if price_id
+        }
+        for item in (resource.get("items") or {}).get("data") or []:
+            price = item.get("price") or item.get("plan") or {}
+            price_id = str(price.get("id") or "")
+            if price_id in configured_prices:
+                return configured_prices[price_id]
+        metadata_code = (resource.get("metadata") or {}).get("product_code")
+        normalized = BillingService._normalize_product_code(metadata_code)
+        return (
+            normalized
+            if normalized in BillingService.PLAN_FILE_LIMITS
+            else "rubrica_base"
+        )
+
+    @staticmethod
+    def _subscription_period(resource) -> tuple[datetime | None, datetime | None]:
+        start = resource.get("current_period_start")
+        end = resource.get("current_period_end")
+        if not start or not end:
+            items = (resource.get("items") or {}).get("data") or []
+            if items:
+                start = start or items[0].get("current_period_start")
+                end = end or items[0].get("current_period_end")
+        return BillingService._timestamp(start), BillingService._timestamp(end)
+
+    @staticmethod
+    def _sync_usage_period(
+        account: BillingAccountEntity,
+        period_start: datetime | None,
+        period_end: datetime | None,
+        *,
+        reset_usage: bool,
+    ) -> None:
+        if period_end is not None:
+            account.current_period_ends_at = period_end
+        if period_start is None:
+            return
+        current_start = getattr(account, "usage_period_starts_at", None)
+        if current_start is not None and current_start.tzinfo is None:
+            current_start = current_start.replace(tzinfo=UTC)
+        if (
+            reset_usage
+            and current_start is not None
+            and period_start > current_start
+        ):
+            account.files_uploaded_in_period = 0
+        if current_start is None or (
+            reset_usage and period_start > current_start
+        ):
+            account.usage_period_starts_at = period_start
 
     @staticmethod
     def _subscription_status(provider_status: str) -> str:
@@ -578,12 +719,18 @@ class BillingService:
         )
 
     @staticmethod
-    def _account_entity(database, tenant_id: UUID) -> BillingAccountEntity:
-        account = database.scalar(
-            select(BillingAccountEntity).where(
-                BillingAccountEntity.tenant_id == tenant_id
-            )
+    def _account_entity(
+        database,
+        tenant_id: UUID,
+        *,
+        lock: bool = False,
+    ) -> BillingAccountEntity:
+        statement = select(BillingAccountEntity).where(
+            BillingAccountEntity.tenant_id == tenant_id
         )
+        if lock:
+            statement = statement.with_for_update()
+        account = database.scalar(statement)
         if account is None:
             account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")
             database.add(account)
@@ -598,6 +745,8 @@ class BillingService:
             tenant_service.require_role(database, tenant_id, subject, roles)
             account = BillingService._account_entity(database, tenant_id)
             unlimited = BillingService._has_unlimited_signatures(account)
+            files_limit = BillingService._active_plan_file_limit(account)
+            unlimited_files = bool(account.complimentary_lifetime)
             return BillingAccountRead(
                 id=account.id,
                 tenant_id=account.tenant_id,
@@ -616,6 +765,25 @@ class BillingService:
                     else max(account.free_signatures_limit - account.signatures_used, 0)
                 ),
                 unlimited_signatures=unlimited,
+                files_uploaded_in_period=account.files_uploaded_in_period,
+                files_limit=files_limit,
+                files_remaining=(
+                    None
+                    if unlimited_files or files_limit is None
+                    else max(files_limit - account.files_uploaded_in_period, 0)
+                ),
+                unlimited_files=unlimited_files,
+                email_invitations_enabled=(
+                    account.complimentary_lifetime
+                    or (
+                        BillingService._normalize_product_code(
+                            account.current_product_code
+                        )
+                        == "rubrica_intermediate"
+                        and BillingService._paid_access_enabled(account)
+                    )
+                ),
+                usage_period_starts_at=account.usage_period_starts_at,
                 complimentary_lifetime=account.complimentary_lifetime,
                 created_at=account.created_at,
             )
