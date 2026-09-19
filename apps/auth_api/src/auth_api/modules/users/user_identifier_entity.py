@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import CheckConstraint, ForeignKey, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from auth_api.infrastructure.database.connection import BaseEntity
@@ -14,6 +14,17 @@ class UserIdentifierEntity(BaseEntity):
             "issuing_country",
             "lookup_hmac",
             name="uq_user_identifier_lookup",
+        ),
+        CheckConstraint(
+            "(verification_status = 'legacy' AND normalized_value_encrypted IS NULL "
+            "AND lookup_hmac IS NULL) OR "
+            "(verification_status <> 'legacy' AND normalized_value_encrypted IS NOT NULL "
+            "AND lookup_hmac IS NOT NULL)",
+            name="ck_user_identifier_protected_or_legacy",
+        ),
+        CheckConstraint(
+            "issuing_country ~ '^[A-Z]{2}$'",
+            name="ck_user_identifier_country_code",
         ),
     )
 

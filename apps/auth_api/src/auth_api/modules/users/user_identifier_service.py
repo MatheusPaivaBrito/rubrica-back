@@ -99,12 +99,19 @@ def masked_identifier(value: str) -> str:
 def add_identifier(
     database, *, user_id, issuing_country: str, identifier_type: str, value: str
 ) -> UserIdentifierEntity:
+    normalized_country = issuing_country.strip().upper()
+    if (
+        len(normalized_country) != 2
+        or not normalized_country.isascii()
+        or not normalized_country.isalpha()
+    ):
+        raise InvalidIdentifierError("Invalid issuing country")
     normalized_type = normalize_identifier_type(identifier_type)
     normalized = validate_identifier(normalized_type, value)
     encrypted, lookup = protect_identifier(normalized)
     item = UserIdentifierEntity(
         user_id=user_id,
-        issuing_country=issuing_country,
+        issuing_country=normalized_country,
         identifier_type=normalized_type,
         normalized_value_encrypted=encrypted,
         lookup_hmac=lookup,

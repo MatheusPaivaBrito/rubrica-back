@@ -64,3 +64,25 @@ def test_production_accepts_distinct_mfa_encryption_key() -> None:
     )
 
     assert configured.ENVIRONMENT == "production"
+
+
+@pytest.mark.parametrize("duplicate", ["encryption_hmac", "encryption_mfa", "hmac_mfa"])
+def test_production_rejects_reused_identity_keys(duplicate: str) -> None:
+    mfa_key = "a-distinct-production-mfa-encryption-secret"
+    encryption_key = "a-distinct-production-identity-encryption-secret"
+    hmac_key = "a-distinct-production-identity-hmac-secret"
+    if duplicate == "encryption_hmac":
+        hmac_key = encryption_key
+    elif duplicate == "encryption_mfa":
+        encryption_key = mfa_key
+    else:
+        hmac_key = mfa_key
+
+    with pytest.raises(ValidationError, match="distinct Auth identity keys"):
+        Settings(
+            _env_file=None,
+            ENVIRONMENT="production",
+            AUTH_MFA_ENCRYPTION_KEY=mfa_key,
+            AUTH_IDENTITY_ENCRYPTION_KEY=encryption_key,
+            AUTH_IDENTITY_HMAC_KEY=hmac_key,
+        )

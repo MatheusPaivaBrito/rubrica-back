@@ -71,8 +71,13 @@ class Settings(BaseSettings):
             or len(self.AUTH_IDENTITY_HMAC_KEY) < 32
             or self.AUTH_IDENTITY_ENCRYPTION_KEY.startswith("rubrica-development-")
             or self.AUTH_IDENTITY_HMAC_KEY.startswith("rubrica-development-")
+            or self.AUTH_IDENTITY_ENCRYPTION_KEY == self.AUTH_IDENTITY_HMAC_KEY
+            or self.AUTH_IDENTITY_ENCRYPTION_KEY == self.AUTH_MFA_ENCRYPTION_KEY
+            or self.AUTH_IDENTITY_HMAC_KEY == self.AUTH_MFA_ENCRYPTION_KEY
         ):
-            raise ValueError("Secure Auth identity keys are required in production")
+            raise ValueError(
+                "Secure and distinct Auth identity keys are required in production"
+            )
         return self
 
     @property

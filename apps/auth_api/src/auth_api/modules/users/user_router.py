@@ -65,25 +65,6 @@ async def identity_summary(
         )
 
 
-def _cpf_digits(value: str) -> str:
-    digits = "".join(character for character in value if character.isdigit())
-    if len(digits) != 11 or digits == digits[0] * 11:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="CPF inválido"
-        )
-    for size in (9, 10):
-        total = sum(
-            int(digit) * weight
-            for digit, weight in zip(digits[:size], range(size + 1, 1, -1), strict=True)
-        )
-        check = (total * 10 % 11) % 10
-        if check != int(digits[size]):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="CPF inválido"
-            )
-    return digits
-
-
 @router.get("/signers", response_model=list[UserRead], tags=["users - query"])
 async def list_signers(
     session: SessionRead = Depends(require_authenticated_session),
@@ -224,7 +205,6 @@ async def create_user(
         item = UserEntity(
             name=payload.name.strip(),
             email=payload.email.lower(),
-            cpf_hash=hash_password(_cpf_digits(payload.cpf)) if payload.cpf else None,
             password_hash=hash_password(payload.password),
             preferred_locale=payload.preferred_locale,
             email_verified=True,

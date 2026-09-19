@@ -3,12 +3,14 @@ from pydantic import ValidationError
 
 from auth_api.modules.accounts.account_schema import PublicRegistration
 from auth_api.modules.users.user_identifier_service import (
+    add_identifier,
     InvalidIdentifierError,
     masked_identifier,
     protect_identifier,
     validate_identifier,
 )
 from auth_api.modules.users.user_schema import UserCreate
+from auth_api.modules.users.user_schema import UserIdentifierRead
 
 
 def test_admin_user_can_be_created_without_government_identifier() -> None:
@@ -46,6 +48,67 @@ def test_identifier_is_encrypted_masked_and_has_stable_lookup_hmac() -> None:
     assert encrypted_a != encrypted_b
     assert lookup_a == lookup_b
     assert masked_identifier(normalized) == "••••3456"
+
+
+def test_persisted_identifier_fields_never_contain_plaintext() -> None:
+    class Database:
+        item = None
+
+        @classmethod
+        def add(cls, item) -> None:
+            cls.item = item
+
+    raw_value = "AB 123456"
+    item = add_identifier(
+        Database(),
+        user_id=None,
+        issuing_country="br",
+        identifier_type="passport",
+        value=raw_value,
+    )
+
+    persisted_values = {
+        item.normalized_value_encrypted,
+        item.lookup_hmac,
+        item.masked_display,
+    }
+    assert raw_value not in persisted_values
+    assert "AB123456" not in persisted_values
+    assert item.issuing_country == "BR"
+    assert item.identifier_type == "PASSPORT"
+    assert item.masked_display == "••••3456"
+    assert item.normalized_value_encrypted.startswith("gAAAAA")
+    assert len(item.lookup_hmac) == 64
+
+
+def test_invalid_issuing_country_is_rejected_before_persistence() -> None:
+    with pytest.raises(InvalidIdentifierError, match="Invalid issuing country"):
+        add_identifier(
+            object(),
+            user_id=None,
+            issuing_country="BŘ",
+            identifier_type="passport",
+            value="AB123456",
+        )
+
+
+def test_identifier_api_schema_exposes_only_masked_value() -> None:
+    class StoredIdentifier:
+        id = "94e00f3f-6084-4403-b58c-59cca9b079e5"
+        issuing_country = "BR"
+        identifier_type = "BR_CPF"
+        masked_display = "•••••••4725"
+        verification_status = "format_valid"
+        normalized_value_encrypted = "ciphertext-must-stay-in-auth"
+        lookup_hmac = "lookup-hmac-must-stay-in-auth"
+
+    response = UserIdentifierRead.model_validate(
+        StoredIdentifier(), from_attributes=True
+    ).model_dump(mode="json")
+
+    assert response["masked_display"] == "•••••••4725"
+    assert "normalized_value_encrypted" not in response
+    assert "lookup_hmac" not in response
 
 
 def test_my_number_is_disabled_until_legal_review() -> None:

@@ -12,17 +12,12 @@ class UserEntity(BaseEntity):
 
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     name: Mapped[str | None] = mapped_column(String(180), index=True)
-    cpf_hash: Mapped[str | None] = mapped_column(String(255))
     preferred_locale: Mapped[str] = mapped_column(
         String(10), default="en", server_default="en", nullable=False, index=True
     )
     email_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
-    identity_document_type: Mapped[str | None] = mapped_column(String(32))
-    identity_document_country: Mapped[str | None] = mapped_column(String(2))
-    identity_document_hash: Mapped[str | None] = mapped_column(String(255))
-    identity_document_last4: Mapped[str | None] = mapped_column(String(4))
     mfa_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
