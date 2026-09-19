@@ -80,7 +80,7 @@ class BillingService:
             database.flush()
         elif account.deleted_at is not None:
             account.deleted_at = None
-        if self._has_unlimited_signatures(account):
+        if self._has_unlimited_signatures(account) or self._paid_access_enabled(account):
             return
         if account.signatures_used >= account.free_signatures_limit:
             raise WorkflowError(
@@ -213,6 +213,8 @@ class BillingService:
             "customer_id": resource.get("customer"),
             "subscription_id": resource.get("subscription"),
             "status": resource.get("status"),
+            "cancel_at_period_end": resource.get("cancel_at_period_end"),
+            "cancel_at": resource.get("cancel_at"),
             "event_created_at": event_created_at.isoformat(),
         }
         if existing_status is None:
@@ -458,6 +460,14 @@ class BillingService:
             if event_created_at:
                 account.last_provider_event_created_at = event_created_at
             period_start, period_end = BillingService._subscription_period(resource)
+            account.cancel_at_period_end = bool(
+                resource.get("cancel_at_period_end", False)
+            )
+            account.cancels_at = (
+                BillingService._timestamp(resource.get("cancel_at")) or period_end
+                if account.cancel_at_period_end
+                else None
+            )
             if account.status == "active":
                 BillingService._sync_usage_period(
                     account,
@@ -545,9 +555,7 @@ class BillingService:
 
     @staticmethod
     def _has_unlimited_signatures(account: BillingAccountEntity) -> bool:
-        if getattr(account, "complimentary_lifetime", False):
-            return True
-        return BillingService._paid_access_enabled(account)
+        return bool(getattr(account, "complimentary_lifetime", False))
 
     @staticmethod
     def _paid_access_enabled(account: BillingAccountEntity) -> bool:
@@ -713,7 +721,7 @@ class BillingService:
                 getattr(account, "complimentary_lifetime", False)
                 or (
                     account.current_product_code == "rubrica_intermediate"
-                    and BillingService._has_unlimited_signatures(account)
+                    and BillingService._paid_access_enabled(account)
                 )
             )
         )
@@ -745,6 +753,7 @@ class BillingService:
             tenant_service.require_role(database, tenant_id, subject, roles)
             account = BillingService._account_entity(database, tenant_id)
             unlimited = BillingService._has_unlimited_signatures(account)
+            paid_access = BillingService._paid_access_enabled(account)
             files_limit = BillingService._active_plan_file_limit(account)
             unlimited_files = bool(account.complimentary_lifetime)
             return BillingAccountRead(
@@ -756,12 +765,14 @@ class BillingService:
                 provider_subscription_id=account.provider_subscription_id,
                 current_product_code=account.current_product_code,
                 current_period_ends_at=account.current_period_ends_at,
+                cancel_at_period_end=account.cancel_at_period_end,
+                cancels_at=account.cancels_at,
                 grace_period_ends_at=account.grace_period_ends_at,
                 free_signatures_limit=account.free_signatures_limit,
                 signatures_used=account.signatures_used,
                 signatures_remaining=(
                     None
-                    if unlimited
+                    if unlimited or paid_access
                     else max(account.free_signatures_limit - account.signatures_used, 0)
                 ),
                 unlimited_signatures=unlimited,

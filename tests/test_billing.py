@@ -152,6 +152,7 @@ def test_active_subscription_does_not_consume_free_signature_allowance() -> None
 
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
     assert account.signatures_used == 31
+    assert not BillingService._has_unlimited_signatures(account)
 
 
 def test_complimentary_lifetime_account_is_unlimited_without_stripe() -> None:
@@ -166,6 +167,90 @@ def test_complimentary_lifetime_account_is_unlimited_without_stripe() -> None:
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
 
     assert account.signatures_used == 50
+    assert BillingService._has_unlimited_signatures(account)
+
+
+def test_scheduled_cancellation_keeps_access_until_period_end(monkeypatch) -> None:
+    account = SimpleNamespace(
+        status="active",
+        provider=None,
+        provider_customer_id=None,
+        provider_subscription_id="sub_test",
+        current_product_code="rubrica_base",
+        current_period_ends_at=None,
+        grace_period_ends_at=None,
+        last_provider_event_created_at=None,
+        usage_period_starts_at=None,
+        files_uploaded_in_period=7,
+    )
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
+
+    period_end = 1_800_000_000
+    BillingService._apply_event(
+        object(),
+        "customer.subscription.updated",
+        {
+            "id": "sub_test",
+            "status": "active",
+            "cancel_at_period_end": True,
+            "items": {
+                "data": [
+                    {
+                        "current_period_start": 1_799_000_000,
+                        "current_period_end": period_end,
+                    }
+                ]
+            },
+        },
+        uuid4(),
+    )
+
+    assert account.status == "active"
+    assert account.cancel_at_period_end is True
+    assert account.cancels_at == datetime.fromtimestamp(period_end, tz=UTC)
+    assert account.files_uploaded_in_period == 7
+
+
+def test_subscription_deleted_ends_paid_access(monkeypatch) -> None:
+    account = SimpleNamespace(
+        status="active",
+        provider=None,
+        provider_customer_id=None,
+        provider_subscription_id="sub_test",
+        current_product_code="rubrica_base",
+        current_period_ends_at=None,
+        grace_period_ends_at=None,
+        last_provider_event_created_at=None,
+        usage_period_starts_at=None,
+        files_uploaded_in_period=7,
+    )
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
+
+    BillingService._apply_event(
+        object(),
+        "customer.subscription.deleted",
+        {
+            "id": "sub_test",
+            "status": "canceled",
+            "cancel_at_period_end": True,
+            "items": {
+                "data": [
+                    {
+                        "current_period_start": 1_799_000_000,
+                        "current_period_end": 1_800_000_000,
+                    }
+                ]
+            },
+        },
+        uuid4(),
+    )
+
+    assert account.status == "cancelled"
+    assert not BillingService._paid_access_enabled(account)
 
 
 def test_base_plan_limits_new_files_to_25_per_period() -> None:

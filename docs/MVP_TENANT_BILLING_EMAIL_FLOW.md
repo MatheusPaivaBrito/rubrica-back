@@ -8,12 +8,13 @@
 - Documentos, solicitações, membros e billing pertencem ao tenant.
 - Cada tenant recebe cinco assinaturas concluídas gratuitamente. A franquia não é multiplicada pela quantidade de usuários.
 - A sexta assinatura exige uma assinatura Stripe ativa.
-- O Checkout concluído deixa a conta como `pending`; somente webhook `customer.subscription.*` com status `active` ou `trialing` libera uso ilimitado.
+- O Checkout concluído deixa a conta como `pending`; somente webhook `customer.subscription.*` com status `active` ou `trialing` libera a franquia mensal do plano.
 - O período contratado é mensal, mas o vencimento oficial sempre vem do `current_period_end` do Stripe; o Rubrica não soma 30 dias manualmente.
 - Pagamentos e falhas são registrados no ledger `billing_payments`, com valores em unidade monetária mínima, moeda, período e data de pagamento.
 - Uma falha inicia tolerância padrão de 10 dias. Durante a tolerância o tenant continua usando o serviço; depois dela, novas assinaturas são bloqueadas enquanto o pagamento não for regularizado.
 - Um pagamento confirmado restaura o estado `active` e encerra a tolerância.
-- Quando o Stripe informar `unpaid` ou `canceled`, o acesso ilimitado é bloqueado imediatamente; não é aberta uma segunda tolerância local.
+- Quando o Stripe informar `unpaid` ou `canceled`, o acesso ao plano pago é bloqueado imediatamente; não é aberta uma segunda tolerância local.
+- Um cancelamento com `cancel_at_period_end=true` mantém o plano ativo até `cancel_at` ou `current_period_end`. A conta vitalícia concedida pela staff é o único tipo com uso ilimitado e também pode enviar convites por e-mail.
 
 ## Provisionamento
 

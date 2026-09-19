@@ -17,6 +17,8 @@ class BillingAccountRead(BaseModel):
     provider_subscription_id: str | None
     current_product_code: str | None
     current_period_ends_at: datetime | None
+    cancel_at_period_end: bool
+    cancels_at: datetime | None
     grace_period_ends_at: datetime | None
     free_signatures_limit: int
     signatures_used: int
