@@ -31,11 +31,16 @@ def test_account_activation_template_is_localized_and_branded(
 
     assert email.subject == expected_subject
     assert "/icons/rubrica-mark.png" not in email.html
-    assert ">R</td>" in email.html
+    assert 'src="cid:rubrica-brand-mark"' in email.html
     assert ">Rubrica</td>" in email.html
     assert "token=secret" in email.html
     assert "token=secret" in email.text
-    assert email.inline_images == ()
+    assert len(email.inline_images) == 1
+    brand_image = email.inline_images[0]
+    assert brand_image.content_id == "rubrica-brand-mark"
+    assert brand_image.filename == "rubrica-mark.png"
+    assert brand_image.content_type == "image/png"
+    assert b64decode(brand_image.content).startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_password_recovery_template_escapes_user_content() -> None:
@@ -63,8 +68,9 @@ def test_signature_invitation_contains_local_inline_qr_and_fallback_link() -> No
     assert "Contract &lt;Q4&gt; &amp; &quot;Terms&quot;" in email.html
     assert signing_url in email.text
     assert 'src="cid:rubrica-signing-qr"' in email.html
-    assert len(email.inline_images) == 1
-    qr_image = email.inline_images[0]
+    assert len(email.inline_images) == 2
+    brand_image, qr_image = email.inline_images
+    assert brand_image.content_id == "rubrica-brand-mark"
     assert qr_image.content_id == "rubrica-signing-qr"
     assert qr_image.content_type == "image/png"
     assert b64decode(qr_image.content).startswith(b"\x89PNG\r\n\x1a\n")

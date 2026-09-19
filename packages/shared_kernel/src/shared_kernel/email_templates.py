@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from base64 import b64encode
 from dataclasses import dataclass, field
+from functools import lru_cache
 from html import escape
 from io import BytesIO
+from pathlib import Path
 
 import qrcode
 from qrcode.constants import ERROR_CORRECT_M
 
 from shared_kernel.localization import normalize_locale
+
+
+BRAND_MARK_CONTENT_ID = "rubrica-brand-mark"
 
 
 @dataclass(frozen=True)
@@ -198,6 +203,16 @@ def _qr_code(value: str) -> InlineEmailImage:
     )
 
 
+@lru_cache(maxsize=1)
+def _brand_mark() -> InlineEmailImage:
+    content = Path(__file__).with_name("assets").joinpath("rubrica-email-mark.png").read_bytes()
+    return InlineEmailImage(
+        content=b64encode(content).decode("ascii"),
+        filename="rubrica-mark.png",
+        content_id=BRAND_MARK_CONTENT_ID,
+    )
+
+
 def _branded_email(
     *,
     subject: str,
@@ -262,7 +277,9 @@ def _branded_email(
 <tr><td style="padding:24px 34px;background:#3b151d">
 <a href="{safe_root}" style="display:inline-block;color:#ffffff;text-decoration:none">
 <table role="presentation" cellspacing="0" cellpadding="0"><tr>
-<td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px;border:1px solid #ef9aa6;border-radius:20px;background:#bd1f38;color:#ffffff;font-family:Georgia,serif;font-size:22px;font-style:italic;font-weight:700;line-height:40px">R</td>
+<td width="40" height="40" align="center" valign="middle" style="width:40px;height:40px">
+<img src="cid:{BRAND_MARK_CONTENT_ID}" width="40" height="40" alt="Rubrica" style="display:block;width:40px;height:40px;border:0">
+</td>
 <td style="padding-left:11px;color:#ffffff;font-family:Arial,sans-serif;font-size:22px;font-weight:800;line-height:40px">Rubrica</td>
 </tr></table></a>
 </td></tr>
@@ -288,5 +305,5 @@ Rubrica · Secure electronic signatures<br><a href="{safe_root}" style="color:#8
         subject=clean_subject,
         text="\n\n".join(text_parts),
         html=html,
-        inline_images=inline_images,
+        inline_images=(_brand_mark(), *inline_images),
     )
