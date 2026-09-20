@@ -11,6 +11,7 @@ from auth_api.modules.users.user_identifier_entity import UserIdentifierEntity
 
 IdentifierType = Literal[
     "BR_CPF",
+    "BR_CNPJ",
     "PT_NIF",
     "PASSPORT",
     "NATIONAL_ID",
@@ -29,6 +30,7 @@ ALIASES = {
     "tax_id": "TAX_ID",
     "other": "OTHER",
     "br_cpf": "BR_CPF",
+    "br_cnpj": "BR_CNPJ",
     "pt_nif": "PT_NIF",
     "jp_my_number": "JP_MY_NUMBER",
 }
@@ -70,6 +72,27 @@ def validate_identifier(identifier_type: str, value: str) -> str:
             )
             if (total * 10 % 11) % 10 != int(normalized[size]):
                 raise InvalidIdentifierError("Invalid Brazilian CPF")
+    elif normalized_type == "BR_CNPJ":
+        if (
+            len(normalized) != 14
+            or not normalized.isdigit()
+            or normalized == normalized[0] * 14
+        ):
+            raise InvalidIdentifierError("Invalid Brazilian CNPJ")
+        weights = (
+            (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2),
+            (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2),
+        )
+        for index, current_weights in enumerate(weights, start=12):
+            remainder = sum(
+                int(digit) * weight
+                for digit, weight in zip(
+                    normalized[:index], current_weights, strict=True
+                )
+            ) % 11
+            expected = 0 if remainder < 2 else 11 - remainder
+            if expected != int(normalized[index]):
+                raise InvalidIdentifierError("Invalid Brazilian CNPJ")
     elif normalized_type == "PT_NIF":
         if len(normalized) != 9 or not normalized.isdigit():
             raise InvalidIdentifierError("Invalid Portuguese NIF format")

@@ -15,6 +15,7 @@ from auth_api.modules.users.user_identifier_service import (
 
 IdentityDocumentType = Literal[
     "BR_CPF",
+    "BR_CNPJ",
     "PT_NIF",
     "PASSPORT",
     "NATIONAL_ID",

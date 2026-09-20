@@ -126,6 +126,19 @@ def test_partial_identity_document_is_rejected() -> None:
         )
 
 
+def test_public_registration_accepts_brazilian_cnpj() -> None:
+    payload = PublicRegistration(
+        name="Brazilian Company",
+        email="company@example.com",
+        preferred_locale="pt-BR",
+        identity_document_type="BR_CNPJ",
+        identity_document_country="BR",
+        identity_document_value="11.222.333/0001-81",
+    )
+
+    assert payload.identity_document_type == "BR_CNPJ"
+
+
 def test_public_registration_does_not_accept_a_password() -> None:
     with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
         PublicRegistration.model_validate(
