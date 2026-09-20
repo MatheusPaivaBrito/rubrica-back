@@ -108,6 +108,7 @@ def test_stripe_portal_opens_subscription_update_flow(monkeypatch) -> None:
         customer_id="cus_test",
         return_url="https://rubrica.test/plan",
         subscription_id="sub_test",
+        completion_url="https://rubrica.test/plan?billing=updated",
     )
 
     assert session.url == "https://billing.stripe.test/session"
@@ -116,7 +117,9 @@ def test_stripe_portal_opens_subscription_update_flow(monkeypatch) -> None:
         "subscription_update": {"subscription": "sub_test"},
         "after_completion": {
             "type": "redirect",
-            "redirect": {"return_url": "https://rubrica.test/plan"},
+            "redirect": {
+                "return_url": "https://rubrica.test/plan?billing=updated"
+            },
         },
     }
 

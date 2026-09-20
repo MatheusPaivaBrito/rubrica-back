@@ -53,6 +53,48 @@ class BillingService:
     def initialize(self, tenant_id: UUID, subject: str) -> BillingAccountRead:
         return self._account(tenant_id, subject, {"admin"})
 
+    def synchronize_account(
+        self,
+        tenant_id: UUID,
+        subject: str,
+    ) -> BillingAccountRead:
+        provider = self._get_provider()
+        with SessionLocal.begin() as database:
+            tenant_service.require_role(database, tenant_id, subject, {"admin"})
+            account = self._account_entity(database, tenant_id, lock=True)
+            if not account.provider_subscription_id:
+                raise WorkflowError("Stripe subscription is not configured", 409)
+            previous_status = account.status
+            previous_product = self._normalize_product_code(
+                account.current_product_code
+            )
+            try:
+                resource = provider.retrieve_subscription(
+                    account.provider_subscription_id
+                )
+            except BillingProviderError as exc:
+                raise WorkflowError(str(exc), 502) from exc
+            self._apply_event(
+                database,
+                "customer.subscription.updated",
+                resource,
+                tenant_id,
+            )
+            current_product = self._normalize_product_code(
+                account.current_product_code
+            )
+            if current_product != previous_product:
+                self._notify_billing_event(
+                    database,
+                    f"sync:{account.provider_subscription_id}:{current_product}",
+                    "customer.subscription.updated",
+                    tenant_id,
+                    resource,
+                    previous_status,
+                    previous_product,
+                )
+        return self._account(tenant_id, subject, {"admin"})
+
     def payments(self, tenant_id: UUID, subject: str) -> list[BillingPaymentRead]:
         with SessionLocal() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin", "auditor"})
@@ -163,13 +205,18 @@ class BillingService:
             if not account.provider_customer_id:
                 raise WorkflowError("Stripe customer is not configured", 409)
             try:
+                return_url = f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan"
                 portal = provider.create_portal_session(
                     customer_id=account.provider_customer_id,
-                    return_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan",
+                    return_url=return_url,
                     subscription_id=(
                         account.provider_subscription_id
                         if account.status == "active"
                         else None
+                    ),
+                    completion_url=(
+                        f"{return_url}?billing=updated&from_plan="
+                        f"{self._normalize_product_code(account.current_product_code)}"
                     ),
                 )
             except BillingProviderError as exc:
@@ -220,6 +267,7 @@ class BillingService:
             "status": resource.get("status"),
             "cancel_at_period_end": resource.get("cancel_at_period_end"),
             "cancel_at": resource.get("cancel_at"),
+            "price_id": self._subscription_price_id(resource),
             "event_created_at": event_created_at.isoformat(),
         }
         if existing_status is None:
@@ -252,9 +300,17 @@ class BillingService:
                     raise WorkflowError("Persisted billing event was not found", 500)
                 if billing_event.status in {"processed", "ignored_stale"}:
                     return BillingWebhookRead(duplicate=True)
-                previous_status = (
-                    self._account_entity(database, tenant_id).status
+                previous_account = (
+                    self._account_entity(database, tenant_id)
                     if tenant_id is not None
+                    else None
+                )
+                previous_status = previous_account.status if previous_account else None
+                previous_product = (
+                    self._normalize_product_code(
+                        previous_account.current_product_code
+                    )
+                    if previous_account
                     else None
                 )
                 applied = self._apply_event(
@@ -273,6 +329,7 @@ class BillingService:
                         tenant_id,
                         resource,
                         previous_status,
+                        previous_product,
                     )
                 billing_event.status = "processed" if applied else "ignored_stale"
                 billing_event.processed_at = DateTimeService.utc_now()
@@ -301,6 +358,7 @@ class BillingService:
         tenant_id: UUID | None,
         resource,
         previous_status: str | None,
+        previous_product: str | None,
     ) -> None:
         if tenant_id is None:
             return
@@ -308,11 +366,14 @@ class BillingService:
         if tenant is None:
             return
         provider_status = str(resource.get("status", ""))
+        current_product = BillingService._product_code(resource)
         message = BillingService._billing_message(
             tenant.default_locale,
             event_type,
             provider_status,
             previous_status,
+            previous_product,
+            current_product,
         )
         if message is None:
             return
@@ -323,7 +384,7 @@ class BillingService:
                 TenantMemberEntity.deleted_at.is_(None),
             )
         ).all()
-        subject, body = message
+        subject, body, eyebrow = message
         for recipient in recipients:
             recipient_key = sha256(recipient.encode()).hexdigest()[:16]
             request_billing_email(
@@ -331,6 +392,7 @@ class BillingService:
                 subject=subject,
                 body=body.format(tenant=tenant.name),
                 idempotency_key=f"stripe:{event_id}:{recipient_key}",
+                eyebrow=eyebrow,
             )
 
     @staticmethod
@@ -339,7 +401,9 @@ class BillingService:
         event_type: str,
         provider_status: str = "",
         previous_status: str | None = None,
-    ) -> tuple[str, str] | None:
+        previous_product: str | None = None,
+        current_product: str | None = None,
+    ) -> tuple[str, str, str] | None:
         key = {
             "checkout.session.completed": "checkout",
             "invoice.payment_succeeded": "paid",
@@ -347,15 +411,24 @@ class BillingService:
         }.get(event_type)
         if event_type.startswith("customer.subscription."):
             mapped_status = BillingService._subscription_status(provider_status)
-            if event_type != "customer.subscription.created" and mapped_status == previous_status:
+            product_changed = bool(
+                event_type == "customer.subscription.updated"
+                and previous_product
+                and current_product
+                and previous_product != current_product
+            )
+            if product_changed:
+                key = "plan_changed"
+            elif event_type != "customer.subscription.created" and mapped_status == previous_status:
                 return None
-            key = {
-                "active": "active",
-                "past_due": "failed",
-                "unpaid": "failed",
-                "cancelled": "cancelled",
-                "paused": "paused",
-            }.get(mapped_status)
+            else:
+                key = {
+                    "active": "active",
+                    "past_due": "failed",
+                    "unpaid": "failed",
+                    "cancelled": "cancelled",
+                    "paused": "paused",
+                }.get(mapped_status)
         if key is None:
             return None
         messages = {
@@ -366,6 +439,7 @@ class BillingService:
                 "paid": ("Rubrica payment confirmed", "Stripe confirmed the payment for {tenant}."),
                 "failed": ("Rubrica payment failed", "Stripe could not confirm the payment for {tenant}. Please review your payment method in the billing portal."),
                 "paused": ("Rubrica subscription paused", "The subscription for {tenant} was paused. Review its status in the billing portal."),
+                "plan_changed": ("Rubrica plan updated", "The plan for {tenant} was updated from {previous_plan} to {current_plan}. The new allowance is {limit} PDFs per billing period, and current usage was preserved."),
             },
             "pt-BR": {
                 "checkout": ("Pagamento recebido pelo Rubrica", "Recebemos o checkout de {tenant}. A franquia mensal de arquivos será liberada após a confirmação do Stripe."),
@@ -374,6 +448,7 @@ class BillingService:
                 "paid": ("Pagamento Rubrica confirmado", "O Stripe confirmou o pagamento de {tenant}."),
                 "failed": ("Falha no pagamento Rubrica", "O Stripe não confirmou o pagamento de {tenant}. Revise a forma de pagamento no portal de cobrança."),
                 "paused": ("Assinatura Rubrica pausada", "A assinatura de {tenant} foi pausada. Revise a situação no portal de cobrança."),
+                "plan_changed": ("Plano Rubrica atualizado", "O plano de {tenant} foi atualizado de {previous_plan} para {current_plan}. A nova franquia é de {limit} PDFs por período, e o uso atual foi preservado."),
             },
             "ja-JP": {
                 "checkout": ("Rubrica お支払い受付", "{tenant} のチェックアウトを受け付けました。Stripe の確認後、月間ファイル枠が有効になります。"),
@@ -382,6 +457,7 @@ class BillingService:
                 "paid": ("Rubrica お支払い確認", "Stripe が {tenant} のお支払いを確認しました。"),
                 "failed": ("Rubrica お支払い失敗", "{tenant} のお支払いを確認できませんでした。請求ポータルでお支払い方法をご確認ください。"),
                 "paused": ("Rubrica サブスクリプション一時停止", "{tenant} のサブスクリプションは一時停止されています。請求ポータルで状態をご確認ください。"),
+                "plan_changed": ("Rubrica プラン更新", "{tenant} のプランが {previous_plan} から {current_plan} に更新されました。新しい上限は請求期間ごとに PDF {limit} 件で、現在の利用数は引き継がれます。"),
             },
             "es": {
                 "checkout": ("Pago recibido por Rubrica", "Recibimos el pago de {tenant}. La cuota mensual de archivos se habilitará cuando Stripe confirme la suscripción."),
@@ -390,9 +466,35 @@ class BillingService:
                 "paid": ("Pago Rubrica confirmado", "Stripe confirmó el pago de {tenant}."),
                 "failed": ("Error en el pago de Rubrica", "Stripe no pudo confirmar el pago de {tenant}. Revisa el método de pago en el portal de facturación."),
                 "paused": ("Suscripción Rubrica pausada", "La suscripción de {tenant} fue pausada. Revisa su estado en el portal de facturación."),
+                "plan_changed": ("Plan Rubrica actualizado", "El plan de {tenant} se actualizó de {previous_plan} a {current_plan}. El nuevo límite es de {limit} PDF por período y se conservó el uso actual."),
             },
         }
-        return messages.get(locale, messages["en"])[key]
+        subject, body = messages.get(locale, messages["en"])[key]
+        if key != "plan_changed":
+            return subject, body, "RUBRICA NOTIFICATION"
+        plan_names = {
+            "en": {"rubrica_base": "Base", "rubrica_intermediate": "Intermediate"},
+            "pt-BR": {"rubrica_base": "Base", "rubrica_intermediate": "Intermediário"},
+            "es": {"rubrica_base": "Base", "rubrica_intermediate": "Intermedio"},
+            "ja-JP": {"rubrica_base": "ベーシック", "rubrica_intermediate": "スタンダード"},
+        }
+        names = plan_names.get(locale, plan_names["en"])
+        normalized_previous = BillingService._normalize_product_code(previous_product)
+        normalized_current = BillingService._normalize_product_code(current_product)
+        return (
+            subject,
+            body.format(
+                previous_plan=names.get(normalized_previous, normalized_previous),
+                current_plan=names.get(normalized_current, normalized_current),
+                limit=BillingService.PLAN_FILE_LIMITS.get(normalized_current, 0),
+                tenant="{tenant}",
+            ),
+            {
+                "pt-BR": "ATUALIZAÇÃO DE PLANO",
+                "es": "ACTUALIZACIÓN DEL PLAN",
+                "ja-JP": "プラン更新",
+            }.get(locale, "PLAN UPDATE"),
+        )
 
     @staticmethod
     def _apply_event(
@@ -614,11 +716,9 @@ class BillingService:
             for price_id in price_ids
             if price_id
         }
-        for item in (resource.get("items") or {}).get("data") or []:
-            price = item.get("price") or item.get("plan") or {}
-            price_id = str(price.get("id") or "")
-            if price_id in configured_prices:
-                return configured_prices[price_id]
+        price_id = BillingService._subscription_price_id(resource)
+        if price_id in configured_prices:
+            return configured_prices[price_id]
         metadata_code = (resource.get("metadata") or {}).get("product_code")
         normalized = BillingService._normalize_product_code(metadata_code)
         return (
@@ -626,6 +726,15 @@ class BillingService:
             if normalized in BillingService.PLAN_FILE_LIMITS
             else "rubrica_base"
         )
+
+    @staticmethod
+    def _subscription_price_id(resource) -> str | None:
+        for item in (resource.get("items") or {}).get("data") or []:
+            price = item.get("price") or item.get("plan") or {}
+            price_id = str(price.get("id") or "")
+            if price_id:
+                return price_id
+        return None
 
     @staticmethod
     def _subscription_period(resource) -> tuple[datetime | None, datetime | None]:

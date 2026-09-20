@@ -35,8 +35,16 @@ class FakeBillingProvider:
         customer_id: str,
         return_url: str,
         subscription_id: str | None = None,
+        completion_url: str | None = None,
     ) -> ProviderSession:
         return ProviderSession(url=return_url)
+
+    def retrieve_subscription(self, subscription_id: str) -> Mapping[str, Any]:
+        return {
+            "id": subscription_id,
+            "status": "active",
+            "metadata": {"product_code": "rubrica_base"},
+        }
 
     def construct_webhook_event(
         self,

@@ -62,6 +62,7 @@ class StripeBillingProvider:
         customer_id: str,
         return_url: str,
         subscription_id: str | None = None,
+        completion_url: str | None = None,
     ) -> ProviderSession:
         parameters: dict[str, object] = {
             "customer": customer_id,
@@ -83,7 +84,7 @@ class StripeBillingProvider:
                 "subscription_update": {"subscription": subscription_id},
                 "after_completion": {
                     "type": "redirect",
-                    "redirect": {"return_url": return_url},
+                    "redirect": {"return_url": completion_url or return_url},
                 },
             }
         try:
@@ -100,6 +101,14 @@ class StripeBillingProvider:
         if not portal.url:
             raise BillingProviderError("Stripe did not return a portal URL")
         return ProviderSession(url=str(portal.url))
+
+    def retrieve_subscription(self, subscription_id: str) -> Mapping[str, Any]:
+        try:
+            return stripe.Subscription.retrieve(subscription_id)
+        except Exception as exc:
+            raise BillingProviderError(
+                "Stripe subscription could not be synchronized"
+            ) from exc
 
     def construct_webhook_event(
         self,

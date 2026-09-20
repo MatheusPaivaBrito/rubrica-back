@@ -14,12 +14,13 @@ def request_billing_email(
     subject: str,
     body: str,
     idempotency_key: str,
+    eyebrow: str = "RUBRICA NOTIFICATION",
 ) -> None:
     email = branded_message_email(
         subject=subject,
         body=body,
         public_url=settings.PUBLIC_WEB_URL,
-        eyebrow="RUBRICA NOTIFICATION",
+        eyebrow=eyebrow,
     )
     try:
         response = httpx.post(

@@ -599,6 +599,23 @@ def test_unchanged_subscription_status_does_not_send_duplicate_status_email() ->
     )
 
 
+def test_plan_change_has_dedicated_localized_email() -> None:
+    message = BillingService._billing_message(
+        "pt-BR",
+        "customer.subscription.updated",
+        "active",
+        "active",
+        "rubrica_base",
+        "rubrica_intermediate",
+    )
+
+    assert message is not None
+    assert message[0] == "Plano Rubrica atualizado"
+    assert "Base para Intermediário" in message[1]
+    assert "30 PDFs" in message[1]
+    assert message[2] == "ATUALIZAÇÃO DE PLANO"
+
+
 def test_invoice_service_period_prefers_subscription_line_period() -> None:
     start, end = BillingService._invoice_service_period(
         {

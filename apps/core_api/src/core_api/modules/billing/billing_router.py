@@ -34,6 +34,14 @@ async def initialize_account(tenant_id: UUID, context: AuthContext = Depends(req
     return billing_service.initialize(tenant_id, context.subject)
 
 
+@router.post("/tenants/{tenant_id}/account/sync", response_model=BillingAccountRead)
+async def synchronize_account(
+    tenant_id: UUID,
+    context: AuthContext = Depends(require_permission("documents:write")),
+) -> BillingAccountRead:
+    return billing_service.synchronize_account(tenant_id, context.subject)
+
+
 @router.post("/tenants/{tenant_id}/checkout", response_model=BillingCheckoutRead)
 async def create_checkout(
     tenant_id: UUID,
