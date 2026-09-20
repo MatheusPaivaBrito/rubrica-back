@@ -77,15 +77,37 @@ def test_new_version_is_blocked_after_request_is_open(service: SignatureWorkflow
         service.add_version(document.id, filename="nda-v2.pdf", content_type="application/pdf", actor_id="operator", content=b"v2")
 
 
-def test_document_soft_delete_behavior_is_blocked_by_active_request(service: SignatureWorkflowService) -> None:
+def test_document_delete_requires_confirmation_for_active_request(service: SignatureWorkflowService) -> None:
     standalone = service.create_document(DocumentCreate(organization_id="acme", title="Delete me", original_filename="delete.pdf", content_type="application/pdf", created_by="operator"), b"pdf")
     service.delete_document(standalone.id, "operator")
     assert service.list_documents() == []
 
     linked = service.create_document(DocumentCreate(organization_id="acme", title="Linked", original_filename="linked.pdf", content_type="application/pdf", created_by="operator"), b"pdf")
-    service.create_request(SignatureRequestCreate(document_id=linked.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
-    with pytest.raises(WorkflowError, match="active signature request"):
+    request = service.create_request(SignatureRequestCreate(document_id=linked.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
+    with pytest.raises(WorkflowError, match="in progress") as error:
         service.delete_document(linked.id, "operator")
+    assert error.value.code == "document_has_active_requests"
+    assert error.value.context == {"active_request_count": 1}
+
+    service.delete_document(linked.id, "operator", force=True)
+    assert service.list_documents() == []
+    assert service.list_requests() == []
+    assert service.get_request(request.id).status == RequestStatus.CANCELLED
+
+
+def test_document_with_completed_request_can_be_deleted_without_force(service: SignatureWorkflowService) -> None:
+    document = service.create_document(DocumentCreate(organization_id="acme", title="Signed", original_filename="signed.pdf", content_type="application/pdf", created_by="operator"), b"pdf")
+    request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
+    service.add_signer(request.id, SignerCreate(name="Signer", email="signer@example.com"), "operator")
+    service.open_request(request.id, "operator")
+    token = invitation_token(service.create_signing_link(request.id, "operator").signing_url)
+    service.sign(token, "signer@example.com", True, STAMP)
+
+    service.delete_document(document.id, "operator")
+
+    assert service.list_documents() == []
+    assert service.list_requests() == []
+    assert service.get_request(request.id).status == RequestStatus.COMPLETED
 
 
 def test_revoked_link_cannot_be_used(service: SignatureWorkflowService) -> None:

@@ -33,9 +33,18 @@ from shared_kernel.time.datetime_service import DateTimeService
 
 
 class WorkflowError(Exception):
-    def __init__(self, message: str, status_code: int = 400) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int = 400,
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.code = code
+        self.context = context or {}
 
 
 @dataclass(frozen=True)
@@ -110,13 +119,22 @@ class SignatureWorkflowService:
     def get_document(self, document_id: str) -> DocumentRead:
         return self._document(document_id)
 
-    def delete_document(self, document_id: str, actor_id: str) -> None:
+    def delete_document(self, document_id: str, actor_id: str, *, force: bool = False) -> None:
         with self._lock:
             self._document(document_id)
-            if any(item.document_id == document_id and item.status in {RequestStatus.DRAFT, RequestStatus.OPEN, RequestStatus.COMPLETED} for item in self.requests.values()):
-                raise WorkflowError("A document linked to an active signature request cannot be deleted", 409)
+            active = [item for item in self.requests.values() if item.document_id == document_id and item.status in {RequestStatus.DRAFT, RequestStatus.OPEN}]
+            if active and not force:
+                raise WorkflowError(
+                    "Document has signature requests in progress",
+                    409,
+                    code="document_has_active_requests",
+                    context={"active_request_count": len(active)},
+                )
+            for request in active:
+                self.requests[request.id] = request.model_copy(update={"status": RequestStatus.CANCELLED})
+                self._audit(request.id, actor_id, "signature_request.cancelled", "signature_request", request.id, {"reason": "document_deleted"})
             del self.documents[document_id]
-            self._audit(document_id, actor_id, "document.deleted", "document", document_id, {})
+            self._audit(document_id, actor_id, "document.deleted", "document", document_id, {"cancelled_request_count": len(active)})
 
     def get_content(self, document_id: str, version: int | None = None) -> tuple[DocumentVersionRead, bytes]:
         current = self._document(document_id)
@@ -144,7 +162,7 @@ class SignatureWorkflowService:
         return item
 
     def list_requests(self) -> list[SignatureRequestRead]:
-        return [self._counts(item) for item in self.requests.values()]
+        return [self._counts(item) for item in self.requests.values() if item.document_id in self.documents]
 
     def get_request(self, request_id: str) -> SignatureRequestRead:
         return self._counts(self._request(request_id))

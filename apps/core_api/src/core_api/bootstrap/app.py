@@ -15,6 +15,10 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(WorkflowError)
     async def workflow_error_handler(_request: Request, exc: WorkflowError) -> JSONResponse:
-        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+        content: dict[str, object] = {"detail": str(exc)}
+        if exc.code:
+            content["code"] = exc.code
+        content.update(exc.context)
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     return app

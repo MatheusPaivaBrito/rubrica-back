@@ -102,15 +102,23 @@ class DatabaseSignatureWorkflowService:
             tenant_service.require_role(db, item.tenant_id, actor_id)
             return self._document_read(db, item)
 
-    def delete_document(self, document_id: str, actor_id: str) -> None:
+    def delete_document(self, document_id: str, actor_id: str, *, force: bool = False) -> None:
         with SessionLocal.begin() as db:
             item = self._document(db, document_id, lock=True)
             tenant_service.require_role(db, item.tenant_id, actor_id, {"admin"})
-            frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.DRAFT.value, RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
-            if frozen is not None:
-                raise WorkflowError("A document linked to an active signature request cannot be deleted", 409)
+            active_requests = list(db.scalars(select(SignatureRequestEntity).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.DRAFT.value, RequestStatus.OPEN.value])).with_for_update()).all())
+            if active_requests and not force:
+                raise WorkflowError(
+                    "Document has signature requests in progress",
+                    409,
+                    code="document_has_active_requests",
+                    context={"active_request_count": len(active_requests)},
+                )
+            for request in active_requests:
+                request.status = RequestStatus.CANCELLED.value
+                self._audit(db, request.id, actor_id, "signature_request.cancelled", "signature_request", request.id, {"reason": "document_deleted"})
             item.deleted_at = DateTimeService.utc_now()
-            self._audit(db, None, actor_id, "document.deleted", "document", item.id, {})
+            self._audit(db, None, actor_id, "document.deleted", "document", item.id, {"cancelled_request_count": len(active_requests)})
 
     def get_content(self, document_id: str, version: int | None = None, actor_id: str | None = None) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
@@ -144,7 +152,7 @@ class DatabaseSignatureWorkflowService:
 
     def list_requests(self, actor_id: str) -> list[SignatureRequestRead]:
         with SessionLocal() as db:
-            statement = select(SignatureRequestEntity).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(SignatureRequestEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(SignatureRequestEntity.id)
+            statement = select(SignatureRequestEntity).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(SignatureRequestEntity.deleted_at.is_(None), DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(SignatureRequestEntity.id)
             return [self._request_read(db, item) for item in db.scalars(statement).all()]
 
     def get_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:

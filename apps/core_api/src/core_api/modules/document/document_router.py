@@ -23,8 +23,8 @@ async def get_document(document_id: UUID, context: AuthContext = Depends(require
     return workflow_service.get_document(document_id, context.subject)
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["documents - command"])
-async def delete_document(document_id: UUID, context: AuthContext = Depends(require_permission("documents:write"))) -> Response:
-    workflow_service.delete_document(document_id, context.subject)
+async def delete_document(document_id: UUID, force: bool = Query(False), context: AuthContext = Depends(require_permission("documents:write"))) -> Response:
+    workflow_service.delete_document(document_id, context.subject, force=force)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
