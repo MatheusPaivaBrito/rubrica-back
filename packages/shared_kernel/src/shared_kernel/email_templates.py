@@ -113,6 +113,45 @@ ACCOUNT_COPY = {
     },
 }
 
+SIGNATURE_INVITATION_COPY = {
+    "en": {
+        "subject": "Rubrica: signature requested for {document}",
+        "eyebrow": "DOCUMENT FOR SIGNATURE",
+        "title": "Your signature was requested",
+        "invitation": "You were invited to review and sign “{document}”.",
+        "account": "Sign in with the Rubrica account associated with this email address.",
+        "action": "Review and sign document",
+        "note": "This is a private access link. Do not forward this email. You can also scan the QR Code with your phone.",
+    },
+    "pt-BR": {
+        "subject": "Rubrica: assinatura solicitada para {document}",
+        "eyebrow": "DOCUMENTO PARA ASSINATURA",
+        "title": "Sua assinatura foi solicitada",
+        "invitation": "Você foi convidado para revisar e assinar “{document}”.",
+        "account": "Entre com a conta Rubrica associada a este endereço de e-mail.",
+        "action": "Revisar e assinar documento",
+        "note": "Este é um link de acesso privado. Não encaminhe este e-mail. Você também pode escanear o QR Code com seu celular.",
+    },
+    "es": {
+        "subject": "Rubrica: firma solicitada para {document}",
+        "eyebrow": "DOCUMENTO PARA FIRMAR",
+        "title": "Se solicitó tu firma",
+        "invitation": "Te invitaron a revisar y firmar “{document}”.",
+        "account": "Inicia sesión con la cuenta Rubrica asociada a esta dirección de correo.",
+        "action": "Revisar y firmar documento",
+        "note": "Este es un enlace de acceso privado. No reenvíes este correo. También puedes escanear el código QR con tu teléfono.",
+    },
+    "ja-JP": {
+        "subject": "Rubrica: {document} の署名依頼",
+        "eyebrow": "署名対象文書",
+        "title": "署名が依頼されました",
+        "invitation": "「{document}」の確認と署名を依頼されています。",
+        "account": "このメールアドレスに関連付けられた Rubrica アカウントでログインしてください。",
+        "action": "文書を確認して署名する",
+        "note": "これは非公開のアクセスリンクです。このメールを転送しないでください。スマートフォンで QR コードを読み取ることもできます。",
+    },
+}
+
 
 def account_activation_email(
     *, name: str | None, action_url: str, locale: str, public_url: str
@@ -149,21 +188,27 @@ def password_recovery_email(
 
 
 def signature_invitation_email(
-    *, signer_name: str, document_title: str, signing_url: str, public_url: str
+    *,
+    signer_name: str,
+    document_title: str,
+    signing_url: str,
+    locale: str,
+    public_url: str,
 ) -> RenderedEmail:
+    copy = SIGNATURE_INVITATION_COPY[normalize_locale(locale)]
     qr_image = _qr_code(signing_url)
     return _branded_email(
-        subject=f"Rubrica: signature requested for {document_title}",
-        eyebrow="DOCUMENT FOR SIGNATURE",
-        title="Your signature was requested",
+        subject=copy["subject"].format(document=document_title),
+        eyebrow=copy["eyebrow"],
+        title=copy["title"],
         greeting_name=signer_name,
         paragraphs=(
-            f'You were invited to review and sign “{document_title}”.',
-            "Sign in with the Rubrica account associated with this email address.",
+            copy["invitation"].format(document=document_title),
+            copy["account"],
         ),
-        action_label="Review and sign document",
+        action_label=copy["action"],
         action_url=signing_url,
-        note="This is a private access link. Do not forward this email. You can also scan the QR Code with your phone.",
+        note=copy["note"],
         public_url=public_url,
         qr_content_id=qr_image.content_id,
         inline_images=(qr_image,),

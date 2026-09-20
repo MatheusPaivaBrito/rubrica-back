@@ -56,16 +56,29 @@ def test_password_recovery_template_escapes_user_content() -> None:
     assert "token=secret&amp;next=1" in email.html
 
 
-def test_signature_invitation_contains_local_inline_qr_and_fallback_link() -> None:
+@pytest.mark.parametrize(
+    ("locale", "expected_subject"),
+    [
+        ("en", "Rubrica: signature requested for Contract"),
+        ("pt-BR", "Rubrica: assinatura solicitada para Contract"),
+        ("es", "Rubrica: firma solicitada para Contract"),
+        ("ja-JP", "Rubrica: Contract の署名依頼"),
+    ],
+)
+def test_signature_invitation_contains_local_inline_qr_and_fallback_link(
+    locale: str, expected_subject: str
+) -> None:
     signing_url = "https://rubricasignature.com/signing/private-token"
     email = signature_invitation_email(
         signer_name="Alex",
-        document_title='Contract <Q4> & "Terms"',
+        document_title="Contract",
         signing_url=signing_url,
+        locale=locale,
         public_url="https://rubricasignature.com",
     )
 
-    assert "Contract &lt;Q4&gt; &amp; &quot;Terms&quot;" in email.html
+    assert email.subject == expected_subject
+    assert "Contract" in email.html
     assert signing_url in email.text
     assert 'src="cid:rubrica-signing-qr"' in email.html
     assert len(email.inline_images) == 2

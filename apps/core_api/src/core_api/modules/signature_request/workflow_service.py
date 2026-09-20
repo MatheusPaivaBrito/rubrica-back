@@ -158,7 +158,7 @@ class SignatureWorkflowService:
             if any(self.signers[sid].auth_user_id == email for sid in self.request_signers[request_id]):
                 raise WorkflowError("This authenticated user is already a signer", 409)
             now = DateTimeService.utc_now()
-            signer = SignerRead(id=uuid4(), signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, status=SignerStatus.PENDING, token_expires_at=now + timedelta(seconds=payload.token_ttl_seconds))
+            signer = SignerRead(id=uuid4(), signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, preferred_locale=payload.preferred_locale, status=SignerStatus.PENDING, token_expires_at=now + timedelta(seconds=payload.token_ttl_seconds))
             self.signers[signer.id] = signer
             self.request_signers[request_id].append(signer.id)
             self._audit(request_id, actor_id, "signer.link_created", "signer", signer.id, {"token_expires_at": signer.token_expires_at.isoformat()})

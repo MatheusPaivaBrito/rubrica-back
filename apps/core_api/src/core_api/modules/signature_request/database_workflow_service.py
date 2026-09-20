@@ -161,7 +161,7 @@ class DatabaseSignatureWorkflowService:
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Signers can only be added to a draft request", 409)
             email = payload.email.lower()
-            item = SignerEntity(signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, signing_token_hash=sha256(token.encode()).hexdigest(), token_expires_at=DateTimeService.utc_now() + timedelta(seconds=payload.token_ttl_seconds), status=SignerStatus.PENDING.value)
+            item = SignerEntity(signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, preferred_locale=payload.preferred_locale, signing_token_hash=sha256(token.encode()).hexdigest(), token_expires_at=DateTimeService.utc_now() + timedelta(seconds=payload.token_ttl_seconds), status=SignerStatus.PENDING.value)
             db.add(item)
             try:
                 db.flush()
@@ -190,7 +190,7 @@ class DatabaseSignatureWorkflowService:
                 )
             ).all()
             invitations = [
-                (signer.email, signer.name, f"signature-invite:{request.id}:{signer.id}:{request.signing_token_nonce}")
+                (signer.email, signer.name, signer.preferred_locale, f"signature-invite:{request.id}:{signer.id}:{request.signing_token_nonce}")
                 for signer in signers
             ]
             send_email = billing_service.email_invitations_enabled(
@@ -198,12 +198,13 @@ class DatabaseSignatureWorkflowService:
             )
             document_title = document.title
         if send_email:
-            for recipient, signer_name, idempotency_key in invitations:
+            for recipient, signer_name, locale, idempotency_key in invitations:
                 send_signature_invitation(
                     recipient=recipient,
                     signer_name=signer_name,
                     document_title=document_title,
                     signing_url=signing_url,
+                    locale=locale,
                     idempotency_key=idempotency_key,
                 )
         return SigningLinkRead(signing_url=signing_url)
@@ -571,7 +572,7 @@ class DatabaseSignatureWorkflowService:
 
     @staticmethod
     def _signer_read(x: SignerEntity) -> SignerRead:
-        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
+        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, preferred_locale=x.preferred_locale, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
 
     @staticmethod
     def _signing_url(request_id: str) -> str:

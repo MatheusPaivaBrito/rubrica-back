@@ -52,6 +52,7 @@ class SignatureRequestRead(BaseModel):
 class SignerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    preferred_locale: Literal["pt-BR", "en", "es", "ja-JP"] = "en"
     token_ttl_seconds: int = Field(default=604800, ge=300, le=2592000)
 
 
@@ -61,6 +62,7 @@ class SignerRead(BaseModel):
     auth_user_id: str
     name: str
     email: str
+    preferred_locale: Literal["pt-BR", "en", "es", "ja-JP"] = "en"
     status: SignerStatus
     token_expires_at: datetime
     link_revoked_at: datetime | None = None
