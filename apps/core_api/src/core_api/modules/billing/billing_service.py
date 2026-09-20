@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from uuid import UUID
@@ -19,7 +20,10 @@ from core_api.modules.billing.billing_schema import (
     BillingPaymentRead,
     BillingWebhookRead,
 )
-from core_api.modules.billing.notification_client import request_billing_email
+from core_api.modules.billing.notification_client import (
+    BillingEmailDeliveryError,
+    request_billing_email,
+)
 from core_api.modules.billing.providers import billing_provider
 from core_api.modules.billing.providers.protocol import (
     BillingProvider,
@@ -30,6 +34,9 @@ from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.time.datetime_service import DateTimeService
+
+
+logger = logging.getLogger(__name__)
 
 
 class BillingService:
@@ -59,6 +66,7 @@ class BillingService:
         subject: str,
     ) -> BillingAccountRead:
         provider = self._get_provider()
+        notification: tuple[str, object, str | None, str | None] | None = None
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"})
             account = self._account_entity(database, tenant_id, lock=True)
@@ -84,14 +92,29 @@ class BillingService:
                 account.current_product_code
             )
             if current_product != previous_product:
-                self._notify_billing_event(
-                    database,
+                notification = (
                     f"sync:{account.provider_subscription_id}:{current_product}",
-                    "customer.subscription.updated",
-                    tenant_id,
                     resource,
                     previous_status,
                     previous_product,
+                )
+        if notification is not None:
+            event_id, resource, previous_status, previous_product = notification
+            try:
+                with SessionLocal() as database:
+                    self._notify_billing_event(
+                        database,
+                        event_id,
+                        "customer.subscription.updated",
+                        tenant_id,
+                        resource,
+                        previous_status,
+                        previous_product,
+                    )
+            except BillingEmailDeliveryError:
+                logger.exception(
+                    "Billing plan was synchronized, but its notification could not be delivered",
+                    extra={"tenant_id": str(tenant_id), "event_id": event_id},
                 )
         return self._account(tenant_id, subject, {"admin"})
 
