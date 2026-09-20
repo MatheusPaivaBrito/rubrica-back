@@ -4,6 +4,7 @@ import argparse
 from getpass import getpass
 from typing import get_args
 
+from pydantic import ValidationError
 from sqlalchemy import select
 
 from auth_api.infrastructure.database.connection import SessionLocal
@@ -41,6 +42,20 @@ def invite(payload: PublicRegistration) -> str:
         return "verification_resent"
 
 
+def invalid_document_message(document_type: str) -> str:
+    if document_type == "BR_CNPJ":
+        return (
+            "CNPJ invalido. Informe os 14 digitos, com ou sem pontuacao, "
+            "incluindo os dois digitos verificadores."
+        )
+    if document_type == "BR_CPF":
+        return (
+            "CPF invalido. Informe os 11 digitos, com ou sem pontuacao, "
+            "incluindo os dois digitos verificadores."
+        )
+    return "Documento invalido. Confira o numero e tente novamente."
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Create a selected Rubrica account and e-mail its activation link."
@@ -61,14 +76,25 @@ def main() -> None:
     args = parser.parse_args()
 
     document_value = getpass("Document number (hidden): ").strip()
-    payload = PublicRegistration(
-        name=args.name,
-        email=args.email,
-        preferred_locale=args.locale,
-        identity_document_type=args.document_type,
-        identity_document_country=args.document_country,
-        identity_document_value=document_value,
-    )
+    try:
+        payload = PublicRegistration(
+            name=args.name,
+            email=args.email,
+            preferred_locale=args.locale,
+            identity_document_type=args.document_type,
+            identity_document_country=args.document_country,
+            identity_document_value=document_value,
+        )
+    except ValidationError as error:
+        identity_error = any(
+            item.get("loc") == () and "Brazilian" in item.get("msg", "")
+            for item in error.errors()
+        )
+        if identity_error:
+            parser.exit(2, f"[erro] {invalid_document_message(args.document_type)}\n")
+        first_error = error.errors()[0]
+        message = first_error.get("msg", "Dados invalidos.")
+        parser.exit(2, f"[erro] Nao foi possivel criar o convite: {message}\n")
     result = invite(payload)
     if result == "created":
         print(f"[ok] Account invitation sent to {payload.email.lower()}")

@@ -4,7 +4,7 @@ import pytest
 
 from auth_api.modules.accounts.account_schema import PublicRegistration
 from auth_api.modules.accounts.account_service import AccountConflictError
-from toolbox.seeds.lifetime_invitation import invite
+from toolbox.seeds.lifetime_invitation import invalid_document_message, invite, main
 
 
 class DatabaseStub:
@@ -82,3 +82,38 @@ def test_active_account_is_not_silently_recreated(monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="active account"):
         invite(registration())
+
+
+def test_invalid_cnpj_message_explains_required_digits() -> None:
+    message = invalid_document_message("BR_CNPJ")
+
+    assert "14 digitos" in message
+    assert "digitos verificadores" in message
+
+
+def test_command_reports_invalid_cnpj_without_traceback(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "lifetime_invitation.py",
+            "--name",
+            "Selected Company",
+            "--email",
+            "company@example.com",
+            "--locale",
+            "pt-BR",
+            "--document-type",
+            "BR_CNPJ",
+            "--document-country",
+            "BR",
+        ],
+    )
+    monkeypatch.setattr(
+        "toolbox.seeds.lifetime_invitation.getpass", lambda _prompt: "1122233300018"
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        main()
+
+    assert exit_info.value.code == 2
+    assert "CNPJ invalido" in capsys.readouterr().err
