@@ -55,6 +55,7 @@ class SignatureEntity(BaseEntity):
     evidence_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     artifact_storage_key: Mapped[str | None] = mapped_column(String(255), unique=True)
     artifact_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    trusted_timestamp_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
 class AuditEventEntity(BaseEntity):

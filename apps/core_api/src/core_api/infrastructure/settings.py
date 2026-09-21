@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     SERPROID_CLIENT_SECRET: str = ""
     SERPROID_CLIENT_SECRET_FILE: str | None = None
     SERPROID_ENVIRONMENT: Literal["production", "homologation"] = "production"
+    SERPRO_TIMESTAMP_CONSUMER_KEY: str = ""
+    SERPRO_TIMESTAMP_CONSUMER_SECRET: str = ""
+    SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE: str | None = None
+    SERPRO_TIMESTAMP_API_URL: str = "https://gateway.apiserpro.serpro.gov.br/apitimestamp/v1"
+    SERPRO_TIMESTAMP_TOKEN_URL: str = "https://gateway.apiserpro.serpro.gov.br/token"
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     BILLING_PROVIDER: Literal["fake", "stripe"] = "stripe"
@@ -71,6 +76,7 @@ class Settings(BaseSettings):
                 "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",
                 "SERPROID_CLIENT_SECRET": "SERPROID_CLIENT_SECRET_FILE",
+                "SERPRO_TIMESTAMP_CONSUMER_SECRET": "SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE",
             },
         )
 

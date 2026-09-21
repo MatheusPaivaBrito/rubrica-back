@@ -396,9 +396,11 @@ class DatabaseSignatureWorkflowService:
                 artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat(), "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8")})
                 if certificate_signer is not None:
                     artifact = certificate_signer(artifact)
+                from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
+                artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
                 artifact_hash = sha256(artifact).hexdigest()
                 artifact_key, _ = self.storage.put(BytesIO(artifact), filename=f"rubrica-{request.id}-signed.pdf")
-                signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash)
+                signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash, trusted_timestamp_json=trusted_timestamp)
                 db.add(signature)
                 signer.status = SignerStatus.SIGNED.value
                 signer.signed_at = now
@@ -447,7 +449,7 @@ class DatabaseSignatureWorkflowService:
             request = self._request(db, request_id)
             self._require_request_access(db, request, actor_id)
             rows = db.execute(select(SignatureEntity, SignerEntity).join(SignerEntity, SignerEntity.id == SignatureEntity.signer_id).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all()
-            return [SignatureEvidenceRead(signature_id=str(signature.id), signer_id=str(signer.id), request_id=str(request.id), document_id=str(request.document_id), document_version=request.document_version, signed_at=signature.signed_at, signer_name=signer.name, signer_email=signer.email, subject_hmac_sha256=str(signature.evidence_json.get("subject_hmac_sha256", "")), original_sha256=signature.document_sha256, evidence_sha256=signature.evidence_sha256 or evidence_sha256(signature.evidence_json), artifact_sha256=signature.artifact_sha256 or "", evidence=signature.evidence_json) for signature, signer in rows]
+            return [SignatureEvidenceRead(signature_id=str(signature.id), signer_id=str(signer.id), request_id=str(request.id), document_id=str(request.document_id), document_version=request.document_version, signed_at=signature.signed_at, signer_name=signer.name, signer_email=signer.email, subject_hmac_sha256=str(signature.evidence_json.get("subject_hmac_sha256", "")), original_sha256=signature.document_sha256, evidence_sha256=signature.evidence_sha256 or evidence_sha256(signature.evidence_json), artifact_sha256=signature.artifact_sha256 or "", evidence=signature.evidence_json | ({"trusted_timestamp": signature.trusted_timestamp_json} if signature.trusted_timestamp_json else {})) for signature, signer in rows]
 
     def decline(self, token: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
