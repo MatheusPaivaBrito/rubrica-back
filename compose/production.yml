@@ -77,7 +77,7 @@ services:
       redis: { condition: service_healthy }
       notification-api: { condition: service_started }
       core-api: { condition: service_started }
-    networks: [rubrica_internal]
+    networks: [rubrica_internal, rubrica_external]
 
   core-api:
     build:
