@@ -24,7 +24,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
@@ -265,19 +265,33 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def open_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
+    def open_request(self, request_id: str, actor_id: str, signature_mode: SignatureMode = SignatureMode.EVIDENCE) -> SignatureRequestRead:
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
             self._require_request_access(db, request, actor_id)
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Only a draft request can be opened", 409)
-            if not db.scalar(select(SignerEntity.id).where(SignerEntity.signature_request_id == request.id).limit(1)):
+            signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id)) or 0
+            if not signer_count:
                 raise WorkflowError("At least one signer is required", 409)
+            if signature_mode == SignatureMode.SERPRO_TIMESTAMP:
+                from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled
+                if not timestamp_enabled():
+                    raise WorkflowError("SERPRO timestamp is not configured", 409)
+            if signature_mode == SignatureMode.SERPROID:
+                if not settings.SERPROID_CLIENT_ID or not settings.SERPROID_CLIENT_SECRET:
+                    raise WorkflowError("Serpro ID is not configured", 409)
+                if signer_count != 1:
+                    raise WorkflowError("Serpro ID requests currently require exactly one signer", 409)
+                signer = db.scalar(select(SignerEntity).where(SignerEntity.signature_request_id == request.id).limit(1))
+                if signer is None or identity_summary(signer.email).identifier_type not in {"BR_CPF", "BR_CNPJ"}:
+                    raise WorkflowError("The Serpro ID signer must have a Brazilian CPF or CNPJ", 409)
             document = self._document(db, str(request.document_id))
             if document.version != request.document_version or document.sha256 != request.document_sha256:
                 raise WorkflowError("Document changed after request creation", 409)
             request.status = RequestStatus.OPEN.value
-            self._audit(db, request.id, actor_id, "signature_request.opened", "signature_request", request.id, {})
+            request.signature_mode = signature_mode.value
+            self._audit(db, request.id, actor_id, "signature_request.opened", "signature_request", request.id, {"signature_mode": signature_mode.value})
             db.flush()
             return self._request_read(db, request)
 
@@ -358,6 +372,10 @@ class DatabaseSignatureWorkflowService:
                 signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
                 if signer.status == SignerStatus.SIGNED.value:
                     raise WorkflowError("Signer has already signed", 409)
+                if request.signature_mode == SignatureMode.SERPROID.value and certificate_signer is None:
+                    raise WorkflowError("This request requires a Serpro ID certificate signature", 409)
+                if request.signature_mode != SignatureMode.SERPROID.value and certificate_signer is not None:
+                    raise WorkflowError("This request does not accept a Serpro ID certificate signature", 409)
                 if certificate_signer is not None:
                     if signer.status not in {SignerStatus.PENDING.value, SignerStatus.VIEWED.value}:
                         raise WorkflowError("Signer cannot authorize a certificate signature in the current state", 409)
@@ -384,6 +402,7 @@ class DatabaseSignatureWorkflowService:
                         raise WorkflowError("Uploaded PDF already has certificate signatures; this workflow cannot rewrite it safely", 409)
                 now = DateTimeService.utc_now()
                 evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity, tenant_country)
+                evidence["signature_mode"] = request.signature_mode
                 if certificate_info is not None:
                     evidence["certificate_signature"] = certificate_info
                 evidence_hash = evidence_sha256(evidence)
@@ -396,8 +415,10 @@ class DatabaseSignatureWorkflowService:
                 artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat(), "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8")})
                 if certificate_signer is not None:
                     artifact = certificate_signer(artifact)
-                from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
-                artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
+                trusted_timestamp = None
+                if request.signature_mode == SignatureMode.SERPRO_TIMESTAMP.value:
+                    from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
+                    artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
                 artifact_hash = sha256(artifact).hexdigest()
                 artifact_key, _ = self.storage.put(BytesIO(artifact), filename=f"rubrica-{request.id}-signed.pdf")
                 signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash, trusted_timestamp_json=trusted_timestamp)
@@ -582,7 +603,7 @@ class DatabaseSignatureWorkflowService:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
         document = db.get(DocumentEntity, item.document_id)
-        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "")
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode)
 
     @staticmethod
     def _document_read(db, x: DocumentEntity) -> DocumentRead:

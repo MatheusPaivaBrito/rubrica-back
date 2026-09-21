@@ -22,6 +22,12 @@ class SignerStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class SignatureMode(StrEnum):
+    EVIDENCE = "evidence"
+    SERPRO_TIMESTAMP = "serpro_timestamp"
+    SERPROID = "serproid"
+
+
 class SignatureRequestCreate(BaseModel):
     document_id: UUID
     expires_at: datetime
@@ -47,6 +53,11 @@ class SignatureRequestRead(BaseModel):
     signed_count: int = 0
     document_title: str = ""
     original_filename: str = ""
+    signature_mode: SignatureMode = SignatureMode.EVIDENCE
+
+
+class OpenSignatureRequest(BaseModel):
+    signature_mode: SignatureMode
 
 
 class SignerCreate(BaseModel):

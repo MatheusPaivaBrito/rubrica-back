@@ -6,6 +6,7 @@ from core_api.infrastructure.auth_context import AuthContext, authenticated_cont
 from core_api.infrastructure.content_disposition import pdf_content_disposition
 from core_api.modules.signature_request.workflow_schema import (
     AuditEventRead,
+    OpenSignatureRequest,
     SignCommand,
     SignatureRequestCreate,
     SignatureRequestInput,
@@ -104,8 +105,8 @@ async def revoke_signer_link(request_id: UUID, signer_id: UUID, context: AuthCon
 
 
 @router.post("/signature-requests/{request_id}/open", response_model=SignatureRequestRead, tags=["signature requests - command"])
-async def open_request(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
-    return workflow_service.open_request(request_id, context.subject)
+async def open_request(request_id: UUID, payload: OpenSignatureRequest, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+    return workflow_service.open_request(request_id, context.subject, payload.signature_mode)
 
 
 @router.post("/signature-requests/{request_id}/cancel", response_model=SignatureRequestRead, tags=["signature requests - command"])

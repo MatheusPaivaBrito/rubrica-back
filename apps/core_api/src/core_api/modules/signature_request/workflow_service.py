@@ -20,6 +20,7 @@ from core_api.modules.document.storage import DocumentStorage, LocalDocumentStor
 from core_api.modules.signature_request.workflow_schema import (
     AuditEventRead,
     RequestStatus,
+    SignatureMode,
     SignatureRequestCreate,
     SignatureRequestRead,
     SignerCreate,
@@ -213,7 +214,7 @@ class SignatureWorkflowService:
                 self._audit(request.id, actor_id, "signer.link_revoked", "signer", signer.id, {})
             return signer
 
-    def open_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
+    def open_request(self, request_id: str, actor_id: str, signature_mode: SignatureMode = SignatureMode.EVIDENCE) -> SignatureRequestRead:
         with self._lock:
             request = self._request(request_id)
             if request.status != RequestStatus.DRAFT:
@@ -223,7 +224,7 @@ class SignatureWorkflowService:
             document = self._document(request.document_id)
             if document.version != request.document_version or document.sha256 != request.document_sha256:
                 raise WorkflowError("Document changed after request creation", 409)
-            updated = request.model_copy(update={"status": RequestStatus.OPEN})
+            updated = request.model_copy(update={"status": RequestStatus.OPEN, "signature_mode": signature_mode})
             self.requests[request_id] = updated
             self._audit(request_id, actor_id, "signature_request.opened", "signature_request", request_id, {})
             return self._counts(updated)

@@ -19,6 +19,7 @@ class SignatureRequestEntity(BaseEntity):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     signing_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     signing_token_nonce: Mapped[str | None] = mapped_column(String(64), unique=True)
+    signature_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="evidence", server_default="evidence")
 
 
 class SignerEntity(BaseEntity):

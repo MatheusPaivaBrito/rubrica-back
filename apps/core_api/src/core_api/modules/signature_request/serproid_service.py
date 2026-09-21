@@ -26,7 +26,7 @@ from redis import Redis
 from core_api.infrastructure.settings import settings
 from core_api.modules.signature_request.database_workflow_service import database_workflow_service
 from core_api.modules.signature_request.identity_client import identity_matches_certificate, identity_summary
-from core_api.modules.signature_request.workflow_schema import RequestStatus, SignCommand, SignerStatus
+from core_api.modules.signature_request.workflow_schema import RequestStatus, SignCommand, SignatureMode, SignerStatus
 from core_api.modules.signature_request.workflow_service import WorkflowError
 
 STATE_PREFIX = "rubrica:serproid:state:"
@@ -57,6 +57,8 @@ def start_authorization(token: str, subject: str, command: SignCommand, ip: str,
     if identity_summary(subject).identifier_type not in {"BR_CPF", "BR_CNPJ"}:
         raise WorkflowError("A Brazilian CPF or CNPJ is required for Serpro ID signing", 409)
     context = database_workflow_service.signing_context(token, subject)
+    if context.request.signature_mode != SignatureMode.SERPROID:
+        raise WorkflowError("This request does not use Serpro ID", 409)
     if context.request.status != RequestStatus.OPEN or context.signer.status not in {SignerStatus.PENDING, SignerStatus.VIEWED}:
         raise WorkflowError("Signature request is not open", 409)
     if context.request.signer_count - context.request.signed_count != 1:
