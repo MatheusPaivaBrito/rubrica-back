@@ -20,7 +20,7 @@ LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_F
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE)
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-production verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -55,6 +55,7 @@ help:
 	@echo "  sudo make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  sudo make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make backup-production  Back up all databases and signed documents"
+	@echo "  make backup-production-offsite  Back up and upload encrypted copy to B2"
 	@echo "  make verify-backup path=backups/TIMESTAMP"
 
 
@@ -219,6 +220,9 @@ backup:
 
 backup-production:
 	COMPOSE_FILE=$(PRODUCTION_COMPOSE_FILE) ENV_FILE=$(PRODUCTION_ENV_FILE) COMPOSE_PROJECT_NAME=rubrica-prod toolbox/operations/backup.sh $(BACKUP_ROOT)
+
+backup-production-offsite:
+	COMPOSE_FILE=$(PRODUCTION_COMPOSE_FILE) ENV_FILE=$(PRODUCTION_ENV_FILE) COMPOSE_PROJECT_NAME=rubrica-prod BACKUP_ROOT=$(BACKUP_ROOT) toolbox/operations/offsite_backup.sh create
 
 verify-backup:
 	@test -n "$(path)" || (echo "Usage: make verify-backup path=backups/TIMESTAMP"; exit 2)

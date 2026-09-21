@@ -14,11 +14,17 @@ from auth_api.modules.sessions.session_schema import (
     MfaChallengeResponse,
 )
 from auth_api.modules.sessions.session_service import session_service
+from auth_api.modules.sessions.turnstile import login_turnstile_config, verify_login_turnstile
 from auth_api.infrastructure.settings import settings
 from shared_kernel.security.csrf import require_same_origin
 
 
 router = APIRouter(tags=["auth"])
+
+
+@router.get("/auth/turnstile/config")
+async def turnstile_config() -> dict[str, str | bool]:
+    return login_turnstile_config()
 
 
 async def require_authenticated_session(
@@ -33,11 +39,24 @@ async def require_authenticated_session(
     return session
 
 
+async def require_mfa_session(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_auth),
+) -> SessionRead:
+    session = await require_authenticated_session(request, credentials)
+    context = session_service.ui_context(access_token(request, credentials))
+    if context is None or context.mfa_setup_required:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Configure MFA before accessing Rubrica")
+    return session
+
+
 @router.post("/auth/login", response_model=BrowserLoginResponse | MfaChallengeResponse)
 async def login(
     payload: LoginRequest,
     response: Response,
+    request: Request,
 ) -> LoginResponse | MfaChallengeResponse:
+    verify_login_turnstile(payload.turnstile_token, request.headers.get("x-real-ip") or (request.client.host if request.client else None))
     authenticated = session_service.login(payload)
     if authenticated is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")

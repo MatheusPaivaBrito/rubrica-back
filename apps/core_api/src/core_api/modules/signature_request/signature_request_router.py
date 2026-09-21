@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from ipaddress import ip_address
 from uuid import UUID
 
 from core_api.infrastructure.auth_context import AuthContext, authenticated_context, require_permission
@@ -158,9 +159,22 @@ async def view_document(token: str, context: AuthContext = Depends(authenticated
 
 @router.post("/signing/links/{token}/sign", response_model=SignerRead, tags=["signing - command"])
 async def sign_document(token: str, payload: SignCommand, request: Request, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip_address = forwarded.split(",")[-1].strip() if forwarded else (request.client.host if request.client else "unknown")
-    return workflow_service.sign(token, context.subject, payload.consent, payload.stamp, consent_version=payload.consent_version, client=payload.client, geolocation=payload.geolocation, ip_address=ip_address, user_agent=request.headers.get("user-agent", "unknown"))
+    return workflow_service.sign(token, context.subject, payload.consent, payload.stamp, consent_version=payload.consent_version, client=payload.client, geolocation=payload.geolocation, ip_address=_client_ip(request), user_agent=request.headers.get("user-agent", "unknown"))
+
+
+def _client_ip(request: Request) -> str:
+    # Nginx sets X-Real-IP after validating CF-Connecting-IP from its trusted
+    # Cloudflare Tunnel hop. Never parse a client-supplied X-Forwarded-For chain.
+    for value in (request.headers.get("x-real-ip"), request.client.host if request.client else None):
+        if value:
+            try:
+                address = ip_address(value)
+                if value == (request.client.host if request.client else None) and (address.is_private or address.is_loopback):
+                    continue
+                return str(address)
+            except ValueError:
+                continue
+    return "unknown"
 
 
 @router.post("/signing/links/{token}/decline", response_model=SignerRead, tags=["signing - command"])

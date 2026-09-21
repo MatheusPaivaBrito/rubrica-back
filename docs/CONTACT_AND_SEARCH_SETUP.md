@@ -11,11 +11,11 @@ O Email Routing recebe e encaminha mensagens. O envio de respostas como `@rubric
 
 ## Ativar o formulário
 
-1. Crie um widget Cloudflare Turnstile para `rubricasignature.com`.
+1. Crie um widget Cloudflare Turnstile para `rubricasignature.com`. O mesmo widget protege o formulário de contato e o login; no login, o servidor também confere a ação `login` e o hostname.
 2. Coloque a **site key** em `CONTACT_TURNSTILE_SITE_KEY` no arquivo de ambiente de produção.
 3. Grave a **secret key** somente em `${SECRETS_DIR}/contact_turnstile_secret_key` no servidor, com as mesmas permissões dos demais arquivos de segredo.
 4. Antes de subir o novo Compose, confirme que o arquivo existe. O Compose de produção monta esse arquivo como secret no Core API.
-5. Faça um envio pela página `/contato` e confira a chegada no Gmail. O formulário permanece indisponível, com o endereço de contato visível, até as chaves serem configuradas.
+5. Faça um envio pela página `/contato` e confira a chegada no Gmail. Teste também login válido e inválido; o token do Turnstile deve ser renovado a cada tentativa. O formulário permanece indisponível até as chaves serem configuradas. Em produção, o login também falha fechado se faltarem as chaves.
 
 Em desenvolvimento, `compose/local.yml` aceita `CONTACT_TURNSTILE_SITE_KEY` e `CONTACT_TURNSTILE_SECRET_KEY` do ambiente. As chaves de teste oficiais do Turnstile servem apenas para desenvolvimento.
 

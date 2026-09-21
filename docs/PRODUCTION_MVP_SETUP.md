@@ -187,7 +187,7 @@ Crie a senha inicial do administrador no gerenciador de senhas e grave-a em:
 
     sudoedit /etc/rubrica/secrets/auth_seed_admin_password
 
-Confira os onze arquivos exigidos:
+Confira os arquivos exigidos:
 
     sudo find /etc/rubrica/secrets -maxdepth 1 -type f -printf '%f\n' | sort
     sudo chmod 600 /etc/rubrica/secrets/*
@@ -205,7 +205,13 @@ Arquivos esperados:
 - evidence_secret
 - stripe_secret_key
 - stripe_webhook_secret
+- contact_turnstile_secret_key
+- serproid_client_secret
 - cloudflare_tunnel_token
+
+O arquivo `serproid_client_secret` precisa conter o segredo real para o Core
+API iniciar. Consulte [SERPROID_SETUP.md](SERPROID_SETUP.md) para configurar e
+testar a assinatura com certificado.
 
 ## 7. Preparar o ambiente
 
@@ -332,8 +338,10 @@ Depois do primeiro deploy válido:
 
     make backup-production
 
-Guarde a pasta criada em armazenamento criptografado fora do servidor. Em
-seguida prove a restauração sem tocar na produção:
+Para enviar a cópia criptografada para o Backblaze B2, siga
+[`OFFSITE_BACKUP_B2.md`](OFFSITE_BACKUP_B2.md) e use
+`make backup-production-offsite`. Em seguida prove a restauração sem tocar na
+produção:
 
     make verify-backup path=backups/YYYYmmddTHHMMSSZ
 

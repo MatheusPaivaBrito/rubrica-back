@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     AUTH_EMAIL_VERIFICATION_TTL_SECONDS: int = 86400
     AUTH_PASSWORD_RESET_TTL_SECONDS: int = 3600
     AUTH_PUBLIC_WEB_URL: str = "http://localhost:8080"
+    AUTH_TURNSTILE_SITE_KEY: str = ""
+    AUTH_TURNSTILE_SECRET_KEY: str = ""
+    AUTH_TURNSTILE_SECRET_KEY_FILE: str | None = None
     CORE_API_URL: str = "http://localhost:8100"
     CORE_INTERNAL_SERVICE_KEY: str = ""
     CORE_INTERNAL_SERVICE_KEY_FILE: str | None = None
@@ -56,6 +59,7 @@ class Settings(BaseSettings):
                 "AUTH_MFA_ENCRYPTION_KEY": "AUTH_MFA_ENCRYPTION_KEY_FILE",
                 "AUTH_IDENTITY_ENCRYPTION_KEY": "AUTH_IDENTITY_ENCRYPTION_KEY_FILE",
                 "AUTH_IDENTITY_HMAC_KEY": "AUTH_IDENTITY_HMAC_KEY_FILE",
+                "AUTH_TURNSTILE_SECRET_KEY": "AUTH_TURNSTILE_SECRET_KEY_FILE",
             },
         )
         if self.ENVIRONMENT.lower() in {"production", "prod"} and (

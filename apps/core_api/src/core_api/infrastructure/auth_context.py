@@ -42,6 +42,8 @@ def _resolve_context(token: str) -> AuthContext:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Auth service is unavailable") from exc
     except (URLError, TimeoutError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Auth service is unavailable") from exc
+    if payload.get("mfa_setup_required"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Configure MFA before accessing Rubrica")
     return AuthContext(subject=str(payload["subject"]), roles=frozenset(payload.get("roles", [])), permission_keys=frozenset(payload.get("permission_keys", [])))
 
 

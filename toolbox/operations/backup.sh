@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 compose_file="${COMPOSE_FILE:-compose/local.yml}"
 env_file="${ENV_FILE:-.env}"
@@ -63,5 +64,8 @@ compose=(docker compose --project-name "${project_name}" --env-file "${env_file}
   sha256sum databases.tar.gz documents.tar.gz manifest.txt > SHA256SUMS
 )
 chmod -R go-rwx "${target}"
+if [[ -n "${BACKUP_PATH_OUTPUT:-}" ]]; then
+  printf '%s\n' "${target}" > "$BACKUP_PATH_OUTPUT"
+fi
 trap - EXIT
 echo "[ok] Backup created: ${target}"

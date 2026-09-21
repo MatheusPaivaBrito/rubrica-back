@@ -60,6 +60,7 @@ def test_auth_routes_are_registered() -> None:
 
     assert "/health" in paths
     assert "/auth/login" in paths
+    assert "/auth/turnstile/config" in paths
     assert "/auth/refresh" in paths
     assert "/auth/logout" in paths
     assert "/auth/logout-all" in paths
@@ -69,7 +70,7 @@ def test_auth_routes_are_registered() -> None:
     assert "/auth/password-recovery" in paths
     assert "/auth/password-reset" in paths
     assert "/auth/mfa/setup" in paths
-    assert "/auth/mfa/defer" in paths
+    assert "/auth/mfa/defer" not in paths
     assert "/auth/mfa/confirm" in paths
     assert "/auth/mfa" in paths
     assert "/auth/mfa/challenge" in paths

@@ -7,12 +7,14 @@ from auth_api.modules.access_control.access_control_entity import UserRoleEntity
 from auth_api.modules.access_control.access_control_service import (
     access_control_service,
 )
-from auth_api.modules.sessions.session_router import require_authenticated_session
+from auth_api.modules.sessions.session_router import require_authenticated_session, require_mfa_session
 from auth_api.modules.sessions.session_schema import SessionRead
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import UserEntity
 from auth_api.modules.users.user_identifier_entity import UserIdentifierEntity
-from auth_api.modules.users.user_identifier_service import add_identifier
+from auth_api.modules.users.user_identifier_service import add_identifier, validate_identifier
+from hmac import compare_digest, new as hmac_new
+from pydantic import BaseModel
 from auth_api.modules.users.user_schema import (
     UserCreate,
     UserIdentifierRead,
@@ -23,6 +25,49 @@ from auth_api.modules.users.user_schema import (
 
 
 router = APIRouter(prefix="/users", tags=["users - command"])
+
+
+class InternalIdentityMatch(BaseModel):
+    email: str
+    identifier_type: str
+    identifier: str
+
+
+@router.post("/internal/identity-match", include_in_schema=False)
+async def internal_identity_match(
+    payload: InternalIdentityMatch,
+    x_rubrica_service: str | None = Header(default=None),
+    x_rubrica_service_key: str | None = Header(default=None),
+) -> dict[str, bool]:
+    from auth_api.infrastructure.settings import settings
+    from shared_kernel.security.service_tokens import verify_service_token
+
+    if (
+        x_rubrica_service != "core_api"
+        or not settings.CORE_INTERNAL_SERVICE_KEY
+        or not verify_service_token(x_rubrica_service_key or "", settings.CORE_INTERNAL_SERVICE_KEY)
+    ):
+        raise HTTPException(status_code=403, detail="Service authentication failed")
+    if payload.identifier_type not in {"BR_CPF", "BR_CNPJ"}:
+        return {"matches": False}
+    try:
+        normalized = validate_identifier(payload.identifier_type, payload.identifier)
+    except ValueError:
+        return {"matches": False}
+    digest = hmac_new(settings.AUTH_IDENTITY_HMAC_KEY.encode(), normalized.encode(), "sha256").hexdigest()
+    with SessionLocal() as database:
+        identifiers = database.scalars(
+            select(UserIdentifierEntity)
+            .join(UserEntity, UserEntity.id == UserIdentifierEntity.user_id)
+            .where(
+                UserEntity.email == payload.email.strip().lower(),
+                UserEntity.deleted_at.is_(None),
+                UserIdentifierEntity.deleted_at.is_(None),
+                UserIdentifierEntity.identifier_type == payload.identifier_type,
+                UserIdentifierEntity.issuing_country == "BR",
+            )
+        ).all()
+        return {"matches": any(compare_digest(item.lookup_hmac, digest) for item in identifiers)}
 
 
 @router.get("/internal/identity-summary", response_model=UserIdentitySummary, include_in_schema=False)
@@ -118,7 +163,7 @@ async def list_signers(
 @router.patch("/me/preferences", response_model=UserRead)
 async def update_my_preferences(
     payload: UserPreferencesUpdate,
-    session: SessionRead = Depends(require_authenticated_session),
+    session: SessionRead = Depends(require_mfa_session),
 ) -> UserRead:
     with SessionLocal.begin() as database:
         item = database.scalar(
@@ -148,7 +193,7 @@ async def update_my_preferences(
 
 @router.get("/me/identifiers", response_model=list[UserIdentifierRead])
 async def list_my_identifiers(
-    session: SessionRead = Depends(require_authenticated_session),
+    session: SessionRead = Depends(require_mfa_session),
 ) -> list[UserIdentifierRead]:
     with SessionLocal() as database:
         user = database.scalar(

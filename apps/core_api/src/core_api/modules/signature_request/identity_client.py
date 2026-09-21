@@ -32,3 +32,20 @@ def identity_summary(email: str) -> IdentitySummary:
         )
     except (httpx.HTTPError, ValueError, AttributeError):
         return IdentitySummary()
+
+
+def identity_matches_certificate(email: str, identifier_type: str, identifier: str) -> bool:
+    try:
+        response = httpx.post(
+            f"{settings.AUTH_API_URL.rstrip('/')}/users/internal/identity-match",
+            json={"email": email.strip().lower(), "identifier_type": identifier_type, "identifier": identifier},
+            headers={
+                "X-Rubrica-Service": "core_api",
+                "X-Rubrica-Service-Key": settings.CORE_INTERNAL_SERVICE_KEY,
+            },
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        return response.json().get("matches") is True
+    except (httpx.HTTPError, ValueError, AttributeError):
+        return False

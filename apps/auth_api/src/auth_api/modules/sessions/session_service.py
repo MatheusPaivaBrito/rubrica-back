@@ -193,29 +193,15 @@ class SessionService:
             user = database.get(UserEntity, self._user_identifier(state["user_id"]))
             preferred_locale = user.preferred_locale if user is not None else "en"
         fingerprint = sha256(f"{session.subject}:{session.session_id}".encode("utf-8")).hexdigest()
-        setup_required = bool({"signature_admin", "signature_operator"} & set(roles)) and not bool(
-            user and user.mfa_enabled
-        )
-        mfa_deferred = bool(
-            self._redis.exists(self._mfa_deferred_key(str(state["session_id"])))
-        )
+        setup_required = not bool(user and user.mfa_enabled)
         return UiContextResponse(
             subject=session.subject,
             preferred_locale=preferred_locale,
             mfa_enabled=bool(user and user.mfa_enabled),
             mfa_setup_required=setup_required,
-            roles=roles,
-            permission_keys=(
-                permission_keys if not setup_required or mfa_deferred else []
-            ),
+            roles=roles if not setup_required else [],
+            permission_keys=permission_keys if not setup_required else [],
             capability_hash=fingerprint,
-        )
-
-    def defer_mfa_for_session(self, session_id: str) -> None:
-        self._redis.set(
-            self._mfa_deferred_key(session_id),
-            "1",
-            ex=settings.AUTH_ACCESS_TTL_SECONDS,
         )
 
     def _create_session(self, user: UserEntity) -> LoginResponse:
@@ -278,7 +264,6 @@ class SessionService:
             str(state["access_key"]),
             str(state["refresh_key"]),
             self._session_key(str(state["session_id"])),
-            self._mfa_deferred_key(str(state["session_id"])),
         )
         session_keys = [self._user_sessions_key(self._user_identifier(state["user_id"]))]
         if str(state["user_id"]).isdigit():
@@ -293,10 +278,6 @@ class SessionService:
     @staticmethod
     def _session_key(session_id: str) -> str:
         return f"{settings.AUTH_REDIS_KEY_PREFIX}:session:{session_id}"
-
-    @staticmethod
-    def _mfa_deferred_key(session_id: str) -> str:
-        return f"{settings.AUTH_REDIS_KEY_PREFIX}:mfa-deferred:{session_id}"
 
     @staticmethod
     def _user_sessions_key(user_id: UUID | str) -> str:

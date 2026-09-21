@@ -6,6 +6,7 @@ from shared_kernel.localization import SupportedLocale
 class LoginRequest(BaseModel):
     email: str = Field(min_length=5, max_length=255)
     password: str = Field(min_length=8, max_length=128)
+    turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
 
 
 class LoginResponse(BaseModel):

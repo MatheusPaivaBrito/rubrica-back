@@ -24,6 +24,7 @@ dependencies = [
     "stripe (>=13.0.0,<14.0.0)",
     "httpx (>=0.28.1,<0.29.0)",
     "qrcode[pil] (>=8.2,<9.0)",
+    "pyhanko (>=0.37.0,<0.38.0)",
 ]
 
 [tool.poetry]

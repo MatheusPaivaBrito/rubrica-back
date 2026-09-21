@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from auth_api.infrastructure.settings import Settings
 from auth_api.modules.mfa.mfa_crypto import decrypt_secret, encrypt_secret
-from auth_api.modules.mfa.mfa_service import MfaService
+from auth_api.modules.mfa.mfa_service import MfaError, MfaService
 
 
 def test_mfa_secret_is_encrypted_at_rest() -> None:
@@ -45,6 +45,11 @@ def test_same_totp_step_cannot_be_reused() -> None:
     service = MfaService()
     assert service.verify_user_code(Database(), user, code)
     assert not service.verify_user_code(Database(), user, code)
+
+
+def test_mfa_cannot_be_disabled_for_any_account() -> None:
+    with pytest.raises(MfaError, match="required for every account"):
+        MfaService().disable("user@example.com", "password", "123456")
 
 
 def test_production_rejects_development_mfa_encryption_key() -> None:

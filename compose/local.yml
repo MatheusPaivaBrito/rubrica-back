@@ -51,6 +51,11 @@ services:
           DOCUMENT_MAX_PAGES: ${DOCUMENT_MAX_PAGES:-1000}
           SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:7171/signing}
           PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:7171}
+          SERPROID_CLIENT_ID: ${SERPROID_CLIENT_ID:-}
+          SERPROID_CLIENT_SECRET: ${SERPROID_CLIENT_SECRET:-}
+          SERPROID_ENVIRONMENT: ${SERPROID_ENVIRONMENT:-homologation}
+          REDIS_HOST: redis
+          REDIS_PORT: "6379"
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
           BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
           STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
@@ -134,6 +139,8 @@ services:
           REDIS_HOST: redis
           REDIS_PORT: "6379"
           AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:7171}
+          AUTH_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
+          AUTH_TURNSTILE_SECRET_KEY: ${CONTACT_TURNSTILE_SECRET_KEY:-}
           CORE_API_URL: http://core-api:8000
           CORE_INTERNAL_SERVICE_KEY: ${CORE_INTERNAL_SERVICE_KEY:-rubrica-local-core-key}
           AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}

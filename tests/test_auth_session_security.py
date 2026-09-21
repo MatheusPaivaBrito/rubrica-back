@@ -14,8 +14,10 @@ from starlette.requests import Request
 from auth_api.infrastructure.settings import settings
 from auth_api.main import app
 from auth_api.modules.sessions.session_schema import LoginRequest, LoginResponse
+from auth_api.modules.sessions.session_router import require_mfa_session
 from auth_api.modules.sessions.session_service import SessionService, session_service
 from core_api.infrastructure.auth_context import authenticated_context
+from core_api.infrastructure.auth_context import _resolve_context
 from core_api.infrastructure.settings import settings as core_settings
 
 
@@ -25,6 +27,7 @@ def test_browser_auth_responses_keep_refresh_token_in_httponly_cookie(monkeypatc
     tokens = LoginResponse(access_token="access-secret", refresh_token="refresh-secret", session_id="session-id")
     monkeypatch.setattr(session_service, "login", lambda payload: tokens)
     monkeypatch.setattr(session_service, "refresh", lambda token: tokens)
+    monkeypatch.setattr("auth_api.modules.sessions.session_router.verify_login_turnstile", lambda *_args: None)
     client = TestClient(app, base_url="https://rubricasignature.com")
 
     login = client.post("/auth/login", json={"email": "person@example.com", "password": "password123"})
@@ -68,6 +71,68 @@ def test_access_lookup_rejects_stale_mapping_during_rotation(monkeypatch) -> Non
     service._redis = SimpleNamespace(get=lambda _key: "session-id")
     monkeypatch.setattr(service, "_load_state", lambda _session_id: {"access_key": "new-token-key"})
     assert service._state_for_token("access", "old-token") is None
+
+
+@pytest.mark.parametrize("role", ["signature_admin", "signature_operator", "signature_signer"])
+def test_account_context_requires_mfa_before_granting_roles(monkeypatch, role: str) -> None:
+    user = SimpleNamespace(id=uuid4(), preferred_locale="pt-BR", mfa_enabled=False)
+
+    class Database:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def get(self, *_args):
+            return user
+
+    service = SessionService()
+    monkeypatch.setattr(service, "current_session", lambda _token: SimpleNamespace(subject="user@example.com", session_id="session"))
+    monkeypatch.setattr(service, "_state_for_token", lambda *_args: {"user_id": str(user.id), "session_id": "session"})
+    monkeypatch.setattr("auth_api.modules.sessions.session_service.SessionLocal", Database)
+    monkeypatch.setattr("auth_api.modules.sessions.session_service.access_control_service.context_for_user", lambda _id: ([role], ["*"]))
+
+    context = service.ui_context("access-token")
+    assert context is not None
+    assert context.mfa_setup_required
+    assert context.roles == []
+    assert context.permission_keys == []
+
+    user.mfa_enabled = True
+    enabled_context = service.ui_context("access-token")
+    assert enabled_context is not None
+    assert not enabled_context.mfa_setup_required
+    assert enabled_context.roles == [role]
+    assert enabled_context.permission_keys == ["*"]
+
+
+def test_core_rejects_account_without_mfa(monkeypatch) -> None:
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def read(self):
+            return b'{"subject":"user@example.com","mfa_setup_required":true,"roles":[],"permission_keys":[]}'
+
+    monkeypatch.setattr("core_api.infrastructure.auth_context.urlopen", lambda *_args, **_kwargs: Response())
+    with pytest.raises(HTTPException) as error:
+        _resolve_context("access-token")
+    assert error.value.status_code == 403
+
+
+def test_auth_profile_requires_completed_mfa(monkeypatch) -> None:
+    request = Request({"type": "http", "method": "GET", "path": "/users/me/identifiers", "headers": []})
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="access-token")
+    monkeypatch.setattr(session_service, "current_session", lambda _token: SimpleNamespace(subject="user@example.com", session_id="session"))
+    monkeypatch.setattr(session_service, "ui_context", lambda _token: SimpleNamespace(mfa_setup_required=True))
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(require_mfa_session(request, credentials))
+    assert error.value.status_code == 403
 
 
 def test_core_rejects_cross_origin_cookie_mutations(monkeypatch) -> None:

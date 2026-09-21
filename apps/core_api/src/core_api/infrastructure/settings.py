@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
     EVIDENCE_SECRET_FILE: str | None = None
     PUBLIC_WEB_URL: str = "http://localhost:8080"
+    SERPROID_CLIENT_ID: str = ""
+    SERPROID_CLIENT_SECRET: str = ""
+    SERPROID_CLIENT_SECRET_FILE: str | None = None
+    SERPROID_ENVIRONMENT: Literal["production", "homologation"] = "production"
+    REDIS_HOST: str = "localhost"
+    REDIS_PORT: int = 6379
     BILLING_PROVIDER: Literal["fake", "stripe"] = "stripe"
     STRIPE_SECRET_KEY: str | None = None
     STRIPE_SECRET_KEY_FILE: str | None = None
@@ -64,6 +70,7 @@ class Settings(BaseSettings):
                 "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",
                 "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",
+                "SERPROID_CLIENT_SECRET": "SERPROID_CLIENT_SECRET_FILE",
             },
         )
 

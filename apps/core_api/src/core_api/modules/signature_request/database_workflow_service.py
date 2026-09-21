@@ -6,6 +6,7 @@ from hmac import new as hmac_new
 from io import BytesIO
 from pathlib import Path
 from secrets import token_urlsafe
+from typing import Callable
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, or_, select
@@ -347,7 +348,7 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v1", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown") -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v1", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown", certificate_signer: Callable[[bytes], bytes] | None = None, certificate_info: dict[str, str] | None = None) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         signer_identity = identity_summary(auth_user_id)
@@ -357,6 +358,12 @@ class DatabaseSignatureWorkflowService:
                 signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
                 if signer.status == SignerStatus.SIGNED.value:
                     raise WorkflowError("Signer has already signed", 409)
+                if certificate_signer is not None:
+                    if signer.status not in {SignerStatus.PENDING.value, SignerStatus.VIEWED.value}:
+                        raise WorkflowError("Signer cannot authorize a certificate signature in the current state", 409)
+                    remaining = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
+                    if remaining != 1:
+                        raise WorkflowError("Certificate signing must be the final signature on this PDF", 409)
                 version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
                 if version is None or version.sha256 != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
@@ -371,8 +378,14 @@ class DatabaseSignatureWorkflowService:
                 if sha256(original).hexdigest() != request.document_sha256:
                     raise WorkflowError("Document hash does not match the frozen request", 409)
                 validate_pdf_upload(original, filename=version.original_filename, content_type="application/pdf")
+                if certificate_signer is not None:
+                    from pyhanko.pdf_utils.reader import PdfFileReader
+                    if PdfFileReader(BytesIO(original)).embedded_signatures:
+                        raise WorkflowError("Uploaded PDF already has certificate signatures; this workflow cannot rewrite it safely", 409)
                 now = DateTimeService.utc_now()
                 evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity, tenant_country)
+                if certificate_info is not None:
+                    evidence["certificate_signature"] = certificate_info
                 evidence_hash = evidence_sha256(evidence)
                 existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
                 stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
@@ -381,6 +394,8 @@ class DatabaseSignatureWorkflowService:
                 manifest_hash = sha256("|".join(item["evidence_sha256"] for item in stamp_records).encode()).hexdigest()
                 signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{item["subject_hmac_sha256"][:16]}' for item in stamp_records)
                 artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat(), "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8")})
+                if certificate_signer is not None:
+                    artifact = certificate_signer(artifact)
                 artifact_hash = sha256(artifact).hexdigest()
                 artifact_key, _ = self.storage.put(BytesIO(artifact), filename=f"rubrica-{request.id}-signed.pdf")
                 signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash)
