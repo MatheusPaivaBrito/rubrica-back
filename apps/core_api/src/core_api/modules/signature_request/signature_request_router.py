@@ -154,7 +154,15 @@ async def signing_signed_document(token: str, context: AuthContext = Depends(aut
 
 @router.post("/signing/links/{token}/view", response_model=SignerRead, tags=["signing - command"])
 async def view_document(token: str, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.view(token, context.subject)
+    signer = workflow_service.view(token, context.subject)
+    summary = identity_summary(signer.email)
+    return signer.model_copy(
+        update={
+            "identity_document_type": summary.identifier_type,
+            "identity_document_country": summary.issuing_country,
+            "identity_document_masked": summary.masked_display,
+        }
+    )
 
 
 @router.post("/signing/links/{token}/sign", response_model=SignerRead, tags=["signing - command"])
