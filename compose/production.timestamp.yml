@@ -1,0 +1,11 @@
+services:
+  core-api:
+    environment:
+      SERPRO_TIMESTAMP_PROVIDER: serpro
+      SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE: /run/secrets/serpro_timestamp_consumer_secret
+    secrets:
+      - serpro_timestamp_consumer_secret
+
+secrets:
+  serpro_timestamp_consumer_secret:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/serpro_timestamp_consumer_secret

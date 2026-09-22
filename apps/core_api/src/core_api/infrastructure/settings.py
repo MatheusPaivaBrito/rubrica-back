@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     SERPRO_TIMESTAMP_CONSUMER_KEY: str = ""
     SERPRO_TIMESTAMP_CONSUMER_SECRET: str = ""
     SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE: str | None = None
+    SERPRO_TIMESTAMP_PROVIDER: Literal["fake", "serpro"] = "fake"
     SERPRO_TIMESTAMP_API_URL: str = "https://gateway.apiserpro.serpro.gov.br/apitimestamp/v1"
     SERPRO_TIMESTAMP_TOKEN_URL: str = "https://gateway.apiserpro.serpro.gov.br/token"
     REDIS_HOST: str = "localhost"

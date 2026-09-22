@@ -35,6 +35,7 @@ def _dummy_tsa() -> DummyTimeStamper:
 
 
 def test_serpro_timestamp_is_embedded_and_reported(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_PROVIDER", "serpro")
     monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_CONSUMER_KEY", "consumer-key")
     monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_CONSUMER_SECRET", "consumer-secret")
     dummy = _dummy_tsa()
@@ -90,7 +91,8 @@ def test_serpro_timestamp_is_embedded_and_reported(monkeypatch) -> None:
     assert metadata["timestamp_response_base64"]
 
 
-def test_timestamp_is_optional_without_credentials(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_CONSUMER_KEY", "")
-    monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_CONSUMER_SECRET", "")
+def test_fake_timestamp_provider_does_not_require_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_PROVIDER", "fake")
+    monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_CONSUMER_KEY", "consumer-key")
+    monkeypatch.setattr(settings, "SERPRO_TIMESTAMP_CONSUMER_SECRET", "consumer-secret")
     assert serpro_timestamp_service.apply_serpro_timestamp(b"pdf") == (b"pdf", None)

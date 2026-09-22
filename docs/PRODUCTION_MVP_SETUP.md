@@ -118,12 +118,13 @@ O domínio depois do @ precisa ser exatamente o domínio verificado no Resend.
 
 ## 5. Configurar a Stripe em modo de teste
 
-O Rubrica possui os planos mensais Base e Intermediário, cinco assinaturas
+O catálogo possui os planos mensais Essencial e Profissional, cinco assinaturas
 gratuitas antes da cobrança e tolerância padrão de 10 dias após falha de
 pagamento. O vencimento é controlado pelo período informado pelo Stripe.
 
 1. Ative o modo de teste ou crie uma Sandbox.
-2. Crie os produtos `Rubrica Base` e `Rubrica Intermediate`.
+2. Crie os produtos `Rubrica Essencial` por R$ 29,90/mês e
+   `Rubrica Profissional` por R$ 69,90/mês.
 3. Em cada produto, crie preços recorrentes mensais separados em BRL, USD, EUR e JPY. JPY não usa casas decimais.
 4. Copie cada ID iniciado por `price_`.
 5. Preencha no `.env.production`. Uma moeda sem ID retorna indisponibilidade no checkout em vez de cobrar em outra moeda:
@@ -157,8 +158,8 @@ pagamento. O vencimento é controlado pelo período informado pelo Stripe.
 10. Em Billing > Revenue recovery > Retries, configure tentativas por 10 dias e
     escolha cancelar a assinatura se a recuperação falhar.
 11. Em Settings > Billing > Customer portal, habilite a atualização de
-    assinaturas, permita a troca de preço e adicione os preços Base e
-    Intermediário das quatro moedas. Mantenha o ciclo de cobrança inalterado;
+    assinaturas, permita a troca de preço e adicione os preços Essencial e
+    Profissional das moedas configuradas. Mantenha o ciclo de cobrança inalterado;
     o Rubrica preserva o uso do período durante upgrade e downgrade.
 12. Copie o signing secret iniciado por whsec_ para:
 
@@ -286,9 +287,9 @@ erro Resend ou erro de assinatura Stripe.
 4. Use o cartão de teste 4242 4242 4242 4242, data futura e qualquer CVC.
 5. Confirme o retorno para /plan?checkout=success.
 6. No painel Stripe, confirme entrega HTTP 2xx dos eventos.
-7. No Rubrica, confirme o status ativo e a franquia de 25 ou 30 arquivos.
+7. No Rubrica, confirme o status ativo e a franquia de 20 ou 80 arquivos.
 8. Use o botão de upgrade ou troca de plano e confirme que o portal apresenta
-   Base e Intermediário na moeda da conta.
+   Essencial e Profissional na moeda da conta.
 9. Cancele a assinatura no Stripe.
 10. Confirme que customer.subscription.updated ou deleted atualizou o Rubrica.
 

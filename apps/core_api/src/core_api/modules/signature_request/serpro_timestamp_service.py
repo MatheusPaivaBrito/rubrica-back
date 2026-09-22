@@ -15,7 +15,11 @@ from core_api.modules.signature_request.workflow_service import WorkflowError
 
 
 def timestamp_enabled() -> bool:
-    return bool(settings.SERPRO_TIMESTAMP_CONSUMER_KEY and settings.SERPRO_TIMESTAMP_CONSUMER_SECRET)
+    return bool(
+        settings.SERPRO_TIMESTAMP_PROVIDER == "serpro"
+        and settings.SERPRO_TIMESTAMP_CONSUMER_KEY
+        and settings.SERPRO_TIMESTAMP_CONSUMER_SECRET
+    )
 
 
 class SerproTimeStamper(TimeStamper):

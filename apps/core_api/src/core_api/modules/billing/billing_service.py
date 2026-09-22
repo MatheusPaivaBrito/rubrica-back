@@ -40,9 +40,11 @@ logger = logging.getLogger(__name__)
 
 
 class BillingService:
+    # Reserved for the future member-limit feature: Essential 3, Professional 10.
+    # These limits are intentionally not enforced or exposed yet.
     PLAN_FILE_LIMITS = {
-        "rubrica_base": 25,
-        "rubrica_intermediate": 30,
+        "rubrica_base": 20,
+        "rubrica_intermediate": 80,
     }
 
     def __init__(self, provider: BillingProvider | None = None) -> None:
@@ -496,10 +498,10 @@ class BillingService:
         if key != "plan_changed":
             return subject, body, "RUBRICA NOTIFICATION"
         plan_names = {
-            "en": {"rubrica_base": "Base", "rubrica_intermediate": "Intermediate"},
-            "pt-BR": {"rubrica_base": "Base", "rubrica_intermediate": "Intermediário"},
-            "es": {"rubrica_base": "Base", "rubrica_intermediate": "Intermedio"},
-            "ja-JP": {"rubrica_base": "ベーシック", "rubrica_intermediate": "スタンダード"},
+            "en": {"rubrica_base": "Essential", "rubrica_intermediate": "Professional"},
+            "pt-BR": {"rubrica_base": "Essencial", "rubrica_intermediate": "Profissional"},
+            "es": {"rubrica_base": "Esencial", "rubrica_intermediate": "Profesional"},
+            "ja-JP": {"rubrica_base": "エッセンシャル", "rubrica_intermediate": "プロフェッショナル"},
         }
         names = plan_names.get(locale, plan_names["en"])
         normalized_previous = BillingService._normalize_product_code(previous_product)

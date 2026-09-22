@@ -15,6 +15,7 @@ Contrate a API Timestamp no SERPRO e obtenha a `Consumer Key` e a `Consumer Secr
 No `.env.production`, configure:
 
 ```dotenv
+SERPRO_TIMESTAMP_PROVIDER=serpro
 SERPRO_TIMESTAMP_CONSUMER_KEY=sua-consumer-key
 ```
 
@@ -29,8 +30,8 @@ Cole a Consumer Secret, pressione `Enter` e depois `Ctrl+D`.
 
 ## Comportamento
 
-- Sem as duas credenciais, continuam disponíveis as modalidades que não usam a API Timestamp.
-- Com as duas credenciais, o operador pode escolher evidências com carimbo do tempo ao abrir a solicitação.
+- Com `SERPRO_TIMESTAMP_PROVIDER=fake`, continuam disponíveis somente as modalidades que não usam a API Timestamp e nenhum secret do carimbo é exigido.
+- Com o provider `serpro` e as duas credenciais, o operador pode escolher evidências com carimbo do tempo ao abrir a solicitação.
 - Nessa modalidade, se o SERPRO estiver indisponível, a assinatura não é concluída nem cobrada.
 - O relatório de evidências mostra a hora certificada, autoridade, política, número de série e hashes do token.
 - O `timestamp_response_base64` permite validação técnica independente do registro RFC 3161.
@@ -39,8 +40,13 @@ Após configurar, aplique as migrações e reinicie o Core:
 
 ```bash
 sudo make production-migrate
-sudo docker compose --env-file .env.production -f compose/production.yml up -d --build core-api web
+sudo docker compose --env-file .env.production \
+  -f compose/production.yml \
+  -f compose/production.timestamp.yml up -d --build core-api web
 curl -sS https://rubricasignature.com/signing/timestamp/config
 ```
+
+Sem o arquivo complementar `compose/production.timestamp.yml`, a produção não
+monta nem exige o secret do carimbo e o endpoint informa `enabled: false`.
 
 O último comando deve retornar `{"enabled":true}`.

@@ -253,11 +253,11 @@ def test_subscription_deleted_ends_paid_access(monkeypatch) -> None:
     assert not BillingService._paid_access_enabled(account)
 
 
-def test_base_plan_limits_new_files_to_25_per_period() -> None:
+def test_essential_plan_limits_new_files_to_20_per_period() -> None:
     account = SimpleNamespace(
         status="active",
         current_product_code="rubrica_base",
-        files_uploaded_in_period=24,
+        files_uploaded_in_period=19,
         complimentary_lifetime=False,
         deleted_at=None,
         grace_period_ends_at=None,
@@ -265,20 +265,20 @@ def test_base_plan_limits_new_files_to_25_per_period() -> None:
 
     service = BillingService()
     service.consume_document(BillingDatabaseStub(account), uuid4())
-    assert account.files_uploaded_in_period == 25
+    assert account.files_uploaded_in_period == 20
 
     with pytest.raises(WorkflowError) as error:
         service.consume_document(BillingDatabaseStub(account), uuid4())
 
     assert error.value.status_code == 402
-    assert account.files_uploaded_in_period == 25
+    assert account.files_uploaded_in_period == 20
 
 
-def test_intermediate_plan_limits_new_files_to_30_per_period() -> None:
+def test_professional_plan_limits_new_files_to_80_per_period() -> None:
     account = SimpleNamespace(
         status="active",
         current_product_code="rubrica_intermediate",
-        files_uploaded_in_period=29,
+        files_uploaded_in_period=79,
         complimentary_lifetime=False,
         deleted_at=None,
         grace_period_ends_at=None,
@@ -286,7 +286,7 @@ def test_intermediate_plan_limits_new_files_to_30_per_period() -> None:
 
     BillingService().consume_document(BillingDatabaseStub(account), uuid4())
 
-    assert account.files_uploaded_in_period == 30
+    assert account.files_uploaded_in_period == 80
 
 
 def test_switching_plan_does_not_reset_usage_in_the_same_period() -> None:
@@ -611,8 +611,8 @@ def test_plan_change_has_dedicated_localized_email() -> None:
 
     assert message is not None
     assert message[0] == "Plano Rubrica atualizado"
-    assert "Base para Intermediário" in message[1]
-    assert "30 PDFs" in message[1]
+    assert "Essencial para Profissional" in message[1]
+    assert "80 PDFs" in message[1]
     assert message[2] == "ATUALIZAÇÃO DE PLANO"
 
 
