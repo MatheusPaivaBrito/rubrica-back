@@ -14,7 +14,7 @@ def login_turnstile_config() -> dict[str, str | bool]:
     return {"site_key": settings.AUTH_TURNSTILE_SITE_KEY if configured else "", "required": required}
 
 
-def verify_login_turnstile(token: str | None, remote_ip: str | None = None) -> None:
+def verify_turnstile(token: str | None, action: str, remote_ip: str | None = None) -> None:
     config = login_turnstile_config()
     if not config["required"]:
         return
@@ -35,9 +35,13 @@ def verify_login_turnstile(token: str | None, remote_ip: str | None = None) -> N
         verification = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         raise HTTPException(status_code=503, detail="Login verification is unavailable") from exc
-    if not isinstance(verification, dict) or not verification.get("success") or verification.get("action") != "login":
+    if not isinstance(verification, dict) or not verification.get("success") or verification.get("action") != action:
         raise HTTPException(status_code=400, detail="Login verification failed")
     if settings.ENVIRONMENT.lower() in {"production", "prod"}:
         expected_host = settings.AUTH_PUBLIC_WEB_URL.split("//", 1)[-1].split("/", 1)[0].split(":", 1)[0]
         if verification.get("hostname") not in {expected_host, f"www.{expected_host}"}:
             raise HTTPException(status_code=400, detail="Login verification failed")
+
+
+def verify_login_turnstile(token: str | None, remote_ip: str | None = None) -> None:
+    verify_turnstile(token, "login", remote_ip)

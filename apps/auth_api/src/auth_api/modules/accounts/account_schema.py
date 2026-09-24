@@ -50,6 +50,7 @@ class PublicRegistration(BaseModel):
         min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
     )
     preferred_locale: SupportedLocale = "en"
+    turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
     return_url: str | None = Field(default=None, max_length=512, pattern=r"^/signing/[A-Za-z0-9_-]+$")
     identity_document_type: IdentityDocumentType | None = None
     identity_document_country: str | None = None
@@ -106,6 +107,7 @@ class EmailVerificationRequest(BaseModel):
 
 
 class PasswordRecoveryRequest(EmailVerificationRequest):
+    turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
     return_url: str | None = Field(default=None, max_length=512, pattern=r"^/signing/[A-Za-z0-9_-]+$")
 
 

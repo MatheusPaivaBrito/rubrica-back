@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from auth_api.modules.accounts.account_schema import (
     AccountActionAccepted,
@@ -15,13 +15,15 @@ from auth_api.modules.accounts.account_service import (
 )
 from auth_api.modules.accounts.notification_client import AccountEmailDeliveryError
 from auth_api.modules.accounts.tenant_client import TenantProvisioningError
+from auth_api.modules.sessions.turnstile import verify_turnstile
 
 
 router = APIRouter(prefix="/auth", tags=["account lifecycle"])
 
 
 @router.post("/register", response_model=AccountActionAccepted, status_code=status.HTTP_202_ACCEPTED)
-async def register(payload: PublicRegistration) -> AccountActionAccepted:
+async def register(payload: PublicRegistration, request: Request) -> AccountActionAccepted:
+    verify_turnstile(payload.turnstile_token, "register", request.headers.get("x-real-ip") or (request.client.host if request.client else None))
     try:
         account_service.register(payload)
     except AccountConflictError:
@@ -60,7 +62,9 @@ async def verify_email(payload: EmailVerification) -> AccountActionAccepted:
 @router.post("/password-recovery", response_model=AccountActionAccepted)
 async def request_password_recovery(
     payload: PasswordRecoveryRequest,
+    request: Request,
 ) -> AccountActionAccepted:
+    verify_turnstile(payload.turnstile_token, "password_recovery", request.headers.get("x-real-ip") or (request.client.host if request.client else None))
     try:
         account_service.request_password_recovery(payload.email, payload.return_url)
     except AccountEmailDeliveryError as exc:

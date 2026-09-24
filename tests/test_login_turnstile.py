@@ -8,7 +8,7 @@ from starlette.requests import Request
 from auth_api.infrastructure.settings import settings
 from auth_api.modules.sessions.session_router import login
 from auth_api.modules.sessions.session_schema import LoginRequest
-from auth_api.modules.sessions.turnstile import verify_login_turnstile
+from auth_api.modules.sessions.turnstile import verify_login_turnstile, verify_turnstile
 
 
 def test_production_login_fails_closed_without_turnstile_keys(monkeypatch) -> None:
@@ -38,6 +38,22 @@ def test_login_turnstile_checks_action_hostname_and_ip(monkeypatch) -> None:
     verify_login_turnstile("valid-token", "203.0.113.8")
 
     assert calls[0]["data"] == {"secret": "secret-key", "response": "valid-token", "remoteip": "203.0.113.8"}
+
+
+def test_turnstile_accepts_the_expected_account_action(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "AUTH_PUBLIC_WEB_URL", "https://rubricasignature.com")
+    monkeypatch.setattr(settings, "AUTH_TURNSTILE_SITE_KEY", "site-key")
+    monkeypatch.setattr(settings, "AUTH_TURNSTILE_SECRET_KEY", "secret-key")
+    monkeypatch.setattr(
+        "auth_api.modules.sessions.turnstile.httpx.post",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"success": True, "action": "password_recovery", "hostname": "rubricasignature.com"},
+        ),
+    )
+
+    verify_turnstile("valid-token", "password_recovery")
 
 
 @pytest.mark.parametrize("response", [
