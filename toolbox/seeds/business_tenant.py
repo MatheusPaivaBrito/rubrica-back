@@ -1,8 +1,8 @@
 """Convert an existing tenant to business and attach an authorized member.
 
-The CNPJ is read with ``getpass`` so it is not exposed in shell history or
-process arguments. The command is idempotent and never moves or deletes the
-member's personal tenant.
+The CNPJ can be provided explicitly by the server operator or read with
+``getpass``. The command is idempotent and never moves or deletes the member's
+personal tenant.
 """
 
 import argparse
@@ -147,10 +147,11 @@ def main() -> None:
     parser.add_argument("--owner-email", required=True)
     parser.add_argument("--member-email", required=True)
     parser.add_argument("--legal-name", required=True)
+    parser.add_argument("--cnpj", help="CNPJ used only for this migration; omit to use a hidden prompt")
     parser.add_argument("--actor", required=True, help="Operator email recorded in the audit trail")
     args = parser.parse_args()
     try:
-        cnpj = getpass("CNPJ (hidden): ")
+        cnpj = args.cnpj or getpass("CNPJ (hidden): ")
         result = migrate_business_tenant(owner_email=args.owner_email, member_email=args.member_email, legal_name=args.legal_name, cnpj=cnpj, actor=args.actor)
     except (InvalidBusinessIdentifierError, ValueError, WorkflowError) as exc:
         parser.error(str(exc))
