@@ -114,6 +114,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
+      TENANT_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/tenant_identity_encryption_key
+      TENANT_IDENTITY_HMAC_KEY_FILE: /run/secrets/tenant_identity_hmac_key
       BILLING_PROVIDER: stripe
       STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
       STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
@@ -129,6 +131,8 @@ services:
     secrets:
       - postgres_password
       - evidence_secret
+      - tenant_identity_encryption_key
+      - tenant_identity_hmac_key
       - core_internal_service_key
       - notification_internal_service_key
       - contact_turnstile_secret_key
@@ -237,6 +241,10 @@ secrets:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/resend_api_key
   evidence_secret:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/evidence_secret
+  tenant_identity_encryption_key:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/tenant_identity_encryption_key
+  tenant_identity_hmac_key:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/tenant_identity_hmac_key
   contact_turnstile_secret_key:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/contact_turnstile_secret_key
   serproid_client_secret:

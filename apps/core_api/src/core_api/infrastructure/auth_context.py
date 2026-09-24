@@ -17,6 +17,8 @@ class AuthContext:
     subject: str
     roles: frozenset[str]
     permission_keys: frozenset[str]
+    user_id: str | None = None
+    email: str = ""
 
     def allows(self, permission: str) -> bool:
         return "*" in self.permission_keys or permission in self.permission_keys
@@ -44,7 +46,14 @@ def _resolve_context(token: str) -> AuthContext:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Auth service is unavailable") from exc
     if payload.get("mfa_setup_required"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Configure MFA before accessing Rubrica")
-    return AuthContext(subject=str(payload["subject"]), roles=frozenset(payload.get("roles", [])), permission_keys=frozenset(payload.get("permission_keys", [])))
+    subject = str(payload["subject"])
+    return AuthContext(
+        subject=subject,
+        user_id=str(payload["user_id"]) if payload.get("user_id") else None,
+        email=str(payload.get("email") or subject),
+        roles=frozenset(payload.get("roles", [])),
+        permission_keys=frozenset(payload.get("permission_keys", [])),
+    )
 
 
 async def authenticated_context(

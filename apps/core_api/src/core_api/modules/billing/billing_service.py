@@ -847,6 +847,26 @@ class BillingService:
         return price_id
 
     @staticmethod
+    def business_features_enabled(database, tenant_id: UUID) -> bool:
+        account = database.scalar(
+            select(BillingAccountEntity).where(
+                BillingAccountEntity.tenant_id == tenant_id,
+                BillingAccountEntity.deleted_at.is_(None),
+            )
+        )
+        return bool(
+            account
+            and (
+                getattr(account, "complimentary_lifetime", False)
+                or (
+                    BillingService._normalize_product_code(account.current_product_code)
+                    == "rubrica_intermediate"
+                    and BillingService._paid_access_enabled(account)
+                )
+            )
+        )
+
+    @staticmethod
     def email_invitations_enabled(database, tenant_id: UUID) -> bool:
         account = database.scalar(
             select(BillingAccountEntity).where(

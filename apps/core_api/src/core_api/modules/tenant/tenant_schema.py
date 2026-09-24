@@ -1,6 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from shared_kernel.localization import (
@@ -52,6 +54,17 @@ class TenantRead(BaseModel):
     country_code: str | None
     timezone: str
     currency: str
+    kind: Literal["personal", "business"] = "personal"
+    legal_name: str | None = None
+    registration_country: str | None = None
+    registration_type: str | None = None
+    registration_masked: str | None = None
+    registration_verification_status: str | None = None
+
+
+class TenantBusinessConversion(BaseModel):
+    legal_name: str = Field(min_length=2, max_length=240)
+    cnpj: str = Field(min_length=14, max_length=18)
 
 
 class TenantPreferencesUpdate(BaseModel):
@@ -87,6 +100,7 @@ class TenantMemberCreate(BaseModel):
 
 
 class TenantProvision(BaseModel):
+    owner_user_id: UUID | None = None
     owner_email: str = Field(
         min_length=5,
         max_length=255,

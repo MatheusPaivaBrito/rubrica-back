@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RequestStatus(StrEnum):
@@ -20,6 +20,13 @@ class SignerStatus(StrEnum):
     SIGNED = "signed"
     DECLINED = "declined"
     EXPIRED = "expired"
+
+
+class ParticipantRole(StrEnum):
+    PERSONAL_SIGNER = "personal_signer"
+    EXTERNAL_SIGNER = "external_signer"
+    COMPANY_REPRESENTATIVE = "company_representative"
+    CORPORATE_SEAL = "corporate_seal"
 
 
 class SignatureMode(StrEnum):
@@ -54,6 +61,7 @@ class SignatureRequestRead(BaseModel):
     document_title: str = ""
     original_filename: str = ""
     signature_mode: SignatureMode = SignatureMode.EVIDENCE
+    issuer_snapshot: dict[str, object] | None = None
 
 
 class OpenSignatureRequest(BaseModel):
@@ -65,6 +73,18 @@ class SignerCreate(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     preferred_locale: Literal["pt-BR", "en", "es", "ja-JP"] = "en"
     token_ttl_seconds: int = Field(default=604800, ge=300, le=2592000)
+    participant_role: ParticipantRole = ParticipantRole.EXTERNAL_SIGNER
+    represented_tenant_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_representation(self) -> "SignerCreate":
+        represents_company = self.participant_role in {
+            ParticipantRole.COMPANY_REPRESENTATIVE,
+            ParticipantRole.CORPORATE_SEAL,
+        }
+        if represents_company != (self.represented_tenant_id is not None):
+            raise ValueError("represented_tenant_id is required only for company representation")
+        return self
 
 
 class SignerRead(BaseModel):
@@ -81,6 +101,9 @@ class SignerRead(BaseModel):
     identity_document_type: str | None = None
     identity_document_country: str | None = None
     identity_document_masked: str | None = None
+    participant_role: ParticipantRole = ParticipantRole.EXTERNAL_SIGNER
+    represented_tenant_id: UUID | None = None
+    representation_snapshot: dict[str, object] | None = None
 
 
 class SignerContactRead(BaseModel):
@@ -127,6 +150,7 @@ class SigningRead(BaseModel):
     account_country: str | None = None
     stamp: StampPosition | None = None
     viewer_mode: str = Field(default="signer", pattern=r"^(signer|administrator)$")
+    issuer_snapshot: dict[str, object] | None = None
 
 
 class SignCommand(BaseModel):

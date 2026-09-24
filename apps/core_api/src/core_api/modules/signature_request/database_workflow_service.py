@@ -24,7 +24,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, ParticipantRole, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
@@ -145,7 +145,18 @@ class DatabaseSignatureWorkflowService:
         with SessionLocal.begin() as db:
             document = self._document(db, payload.document_id)
             tenant_service.require_role(db, document.tenant_id, payload.created_by, {"admin", "member"})
-            item = SignatureRequestEntity(document_id=document.id, document_version=document.version, document_sha256=document.sha256, status=RequestStatus.DRAFT.value, expires_at=payload.expires_at, created_by=payload.created_by)
+            tenant = db.get(TenantEntity, document.tenant_id)
+            if tenant is None or tenant.deleted_at is not None:
+                raise WorkflowError("Tenant not found", 404)
+            item = SignatureRequestEntity(
+                document_id=document.id,
+                document_version=document.version,
+                document_sha256=document.sha256,
+                status=RequestStatus.DRAFT.value,
+                expires_at=payload.expires_at,
+                created_by=payload.created_by,
+                issuer_snapshot=tenant_service.issuer_snapshot(tenant),
+            )
             db.add(item)
             db.flush()
             self._audit(db, item.id, payload.created_by, "signature_request.created", "signature_request", item.id, {"document_version": document.version, "document_sha256": document.sha256})
@@ -170,7 +181,47 @@ class DatabaseSignatureWorkflowService:
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Signers can only be added to a draft request", 409)
             email = payload.email.lower()
-            item = SignerEntity(signature_request_id=request.id, auth_user_id=email, name=payload.name, email=email, preferred_locale=payload.preferred_locale, signing_token_hash=sha256(token.encode()).hexdigest(), token_expires_at=DateTimeService.utc_now() + timedelta(seconds=payload.token_ttl_seconds), status=SignerStatus.PENDING.value)
+            representation_snapshot = None
+            if payload.participant_role == ParticipantRole.CORPORATE_SEAL:
+                raise WorkflowError("Corporate seal requires a configured organizational credential provider", 409)
+            if payload.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE:
+                document = self._document(db, str(request.document_id))
+                if payload.represented_tenant_id != document.tenant_id:
+                    raise WorkflowError("The represented company must be the document tenant", 422)
+                tenant = db.get(TenantEntity, document.tenant_id)
+                if tenant is None or tenant.kind != "business":
+                    raise WorkflowError("Company representation requires a business tenant", 409)
+                if not billing_service.business_features_enabled(db, tenant.id):
+                    raise WorkflowError("A Professional plan is required for company representation", 403)
+                member = db.scalar(
+                    select(TenantMemberEntity).where(
+                        TenantMemberEntity.tenant_id == tenant.id,
+                        TenantMemberEntity.auth_user_id == email,
+                        TenantMemberEntity.status == "active",
+                        TenantMemberEntity.role.in_(["admin", "member"]),
+                        TenantMemberEntity.deleted_at.is_(None),
+                    )
+                )
+                if member is None:
+                    raise WorkflowError("The representative must be an active authorized tenant member", 422)
+                representation_snapshot = tenant_service.issuer_snapshot(tenant) | {
+                    "representative_role": member.role,
+                    "authorization_status": "active_membership",
+                    "authorized_at": DateTimeService.utc_now().isoformat(),
+                }
+            item = SignerEntity(
+                signature_request_id=request.id,
+                auth_user_id=email,
+                name=payload.name,
+                email=email,
+                preferred_locale=payload.preferred_locale,
+                signing_token_hash=sha256(token.encode()).hexdigest(),
+                token_expires_at=DateTimeService.utc_now() + timedelta(seconds=payload.token_ttl_seconds),
+                status=SignerStatus.PENDING.value,
+                participant_role=payload.participant_role.value,
+                represented_tenant_id=payload.represented_tenant_id,
+                representation_snapshot=representation_snapshot,
+            )
             db.add(item)
             try:
                 db.flush()
@@ -332,7 +383,7 @@ class DatabaseSignatureWorkflowService:
             tenant = db.get(TenantEntity, document.tenant_id)
             signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.signer_id == signer.id))
             stamp = None if administrative_view else signature.evidence_json.get("stamp") if signature is not None else None
-            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, account_country=tenant.country_code if tenant else None, stamp=stamp, viewer_mode="administrator" if administrative_view else "signer")
+            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, account_country=tenant.country_code if tenant else None, stamp=stamp, viewer_mode="administrator" if administrative_view else "signer", issuer_snapshot=request.issuer_snapshot)
 
     def signing_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
@@ -390,6 +441,18 @@ class DatabaseSignatureWorkflowService:
                     raise WorkflowError("Document not found", 404)
                 tenant = db.get(TenantEntity, document.tenant_id)
                 tenant_country = tenant.country_code if tenant is not None else None
+                if signer.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE.value:
+                    active_representation = db.scalar(
+                        select(TenantMemberEntity.id).where(
+                            TenantMemberEntity.tenant_id == signer.represented_tenant_id,
+                            TenantMemberEntity.auth_user_id == auth_user_id.lower(),
+                            TenantMemberEntity.status == "active",
+                            TenantMemberEntity.role.in_(["admin", "member"]),
+                            TenantMemberEntity.deleted_at.is_(None),
+                        )
+                    )
+                    if active_representation is None:
+                        raise WorkflowError("Company representation authorization is no longer active", 403)
                 billing_service.consume_signature(db, document.tenant_id)
                 with self.storage.get(version.storage_key) as stream:
                     original = stream.read()
@@ -545,6 +608,10 @@ class DatabaseSignatureWorkflowService:
             "identity_document_country": identity.issuing_country if identity else None,
             "identity_document_masked": identity.masked_display if identity else None,
             "signer_email": signer.email,
+            "participant_role": getattr(signer, "participant_role", "external_signer"),
+            "represented_tenant_id": str(getattr(signer, "represented_tenant_id", None)) if getattr(signer, "represented_tenant_id", None) else None,
+            "representation_snapshot": getattr(signer, "representation_snapshot", None),
+            "issuer_snapshot": getattr(request, "issuer_snapshot", None),
             "signed_at": signed_at.isoformat(),
             "stamp": stamp_payload,
             "network": {"ip_address": ip_address[:64], "user_agent": normalized_agent, "device_type": device_type},
@@ -603,7 +670,7 @@ class DatabaseSignatureWorkflowService:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
         document = db.get(DocumentEntity, item.document_id)
-        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode)
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot)
 
     @staticmethod
     def _document_read(db, x: DocumentEntity) -> DocumentRead:
@@ -618,7 +685,7 @@ class DatabaseSignatureWorkflowService:
 
     @staticmethod
     def _signer_read(x: SignerEntity) -> SignerRead:
-        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, preferred_locale=x.preferred_locale, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at)
+        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, preferred_locale=x.preferred_locale, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at, participant_role=x.participant_role, represented_tenant_id=x.represented_tenant_id, representation_snapshot=x.representation_snapshot)
 
     @staticmethod
     def _signing_url(request_id: str) -> str:

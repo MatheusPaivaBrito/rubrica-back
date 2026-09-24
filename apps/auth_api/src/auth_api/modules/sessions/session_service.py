@@ -196,6 +196,8 @@ class SessionService:
         setup_required = not bool(user and user.mfa_enabled)
         return UiContextResponse(
             subject=session.subject,
+            user_id=str(user.id),
+            email=getattr(user, "email", session.subject),
             preferred_locale=preferred_locale,
             mfa_enabled=bool(user and user.mfa_enabled),
             mfa_setup_required=setup_required,

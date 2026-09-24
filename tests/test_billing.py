@@ -627,3 +627,32 @@ def test_invoice_service_period_prefers_subscription_line_period() -> None:
 
     assert start == datetime.fromtimestamp(10, tz=UTC)
     assert end == datetime.fromtimestamp(20, tz=UTC)
+
+
+def test_only_professional_or_complimentary_accounts_enable_business_features() -> None:
+    tenant_id = uuid4()
+    professional = SimpleNamespace(
+        deleted_at=None,
+        complimentary_lifetime=False,
+        current_product_code="rubrica_intermediate",
+        status="active",
+        grace_period_ends_at=None,
+    )
+    essential = SimpleNamespace(
+        deleted_at=None,
+        complimentary_lifetime=False,
+        current_product_code="rubrica_base",
+        status="active",
+        grace_period_ends_at=None,
+    )
+    complimentary = SimpleNamespace(
+        deleted_at=None,
+        complimentary_lifetime=True,
+        current_product_code=None,
+        status="not_configured",
+        grace_period_ends_at=None,
+    )
+
+    assert BillingService.business_features_enabled(BillingDatabaseStub(professional), tenant_id)
+    assert not BillingService.business_features_enabled(BillingDatabaseStub(essential), tenant_id)
+    assert BillingService.business_features_enabled(BillingDatabaseStub(complimentary), tenant_id)

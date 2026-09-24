@@ -4,6 +4,8 @@ services:
 
       postgres:
         image: postgres:16-alpine
+        ports:
+          - "127.0.0.1:${POSTGRES_HOST_PORT:-7432}:5432"
         environment:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
           POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
@@ -20,6 +22,8 @@ services:
 
       redis:
         image: redis:7-alpine
+        ports:
+          - "127.0.0.1:${REDIS_HOST_PORT:-7379}:6379"
         healthcheck:
           test: ["CMD", "redis-cli", "ping"]
           interval: 2s
@@ -31,6 +35,8 @@ services:
         build:
           context: ..
           dockerfile: apps/core_api/dockerfile
+        ports:
+          - "127.0.0.1:${CORE_API_HOST_PORT:-7102}:8000"
         command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
         environment:
           PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
@@ -57,6 +63,8 @@ services:
           REDIS_HOST: redis
           REDIS_PORT: "6379"
           EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
+          TENANT_IDENTITY_ENCRYPTION_KEY: ${TENANT_IDENTITY_ENCRYPTION_KEY:-rubrica-development-tenant-encryption-key-change-me}
+          TENANT_IDENTITY_HMAC_KEY: ${TENANT_IDENTITY_HMAC_KEY:-rubrica-development-tenant-hmac-key-change-me}
           BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
           STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
           STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
@@ -117,6 +125,8 @@ services:
         build:
           context: ../../rubrica-web
           dockerfile: Dockerfile
+        ports:
+          - "127.0.0.1:${WEB_HOST_PORT:-7180}:80"
         depends_on:
           - core-api
           - auth-api
@@ -126,6 +136,8 @@ services:
         build:
           context: ..
           dockerfile: apps/auth_api/dockerfile
+        ports:
+          - "127.0.0.1:${AUTH_API_HOST_PORT:-7101}:8000"
         command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
         environment:
           PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
@@ -162,6 +174,8 @@ services:
         build:
           context: ..
           dockerfile: apps/eventing_api/dockerfile
+        ports:
+          - "127.0.0.1:${EVENTING_API_HOST_PORT:-7103}:8000"
         environment:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
           POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
@@ -178,6 +192,8 @@ services:
         build:
           context: ..
           dockerfile: apps/notification_api/dockerfile
+        ports:
+          - "127.0.0.1:${NOTIFICATION_API_HOST_PORT:-7104}:8000"
         environment:
           POSTGRES_USER: ${POSTGRES_USER:-rubrica}
           POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
@@ -202,7 +218,7 @@ services:
         image: nginx:stable-alpine
         profiles: ["gateway"]
         ports:
-          - "${GATEWAY_HOST_PORT:-7171}:8080"
+          - "127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080"
         volumes:
           - ../infra/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
           - ../infra/gateway/proxy_params:/etc/nginx/proxy_params:ro

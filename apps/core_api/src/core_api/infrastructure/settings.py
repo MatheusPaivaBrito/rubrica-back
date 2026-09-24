@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
     EVIDENCE_SECRET_FILE: str | None = None
+    TENANT_IDENTITY_ENCRYPTION_KEY: str = "rubrica-development-tenant-encryption-key-change-me"
+    TENANT_IDENTITY_ENCRYPTION_KEY_FILE: str | None = None
+    TENANT_IDENTITY_HMAC_KEY: str = "rubrica-development-tenant-hmac-key-change-me"
+    TENANT_IDENTITY_HMAC_KEY_FILE: str | None = None
     PUBLIC_WEB_URL: str = "http://localhost:8080"
     SERPROID_CLIENT_ID: str = ""
     SERPROID_CLIENT_SECRET: str = ""
@@ -66,7 +70,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def load_secret_files(self) -> "Settings":
-        return apply_secret_files(
+        apply_secret_files(
             self,
             {
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
@@ -74,12 +78,25 @@ class Settings(BaseSettings):
                 "NOTIFICATION_INTERNAL_SERVICE_KEY": "NOTIFICATION_INTERNAL_SERVICE_KEY_FILE",
                 "CONTACT_TURNSTILE_SECRET_KEY": "CONTACT_TURNSTILE_SECRET_KEY_FILE",
                 "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",
+                "TENANT_IDENTITY_ENCRYPTION_KEY": "TENANT_IDENTITY_ENCRYPTION_KEY_FILE",
+                "TENANT_IDENTITY_HMAC_KEY": "TENANT_IDENTITY_HMAC_KEY_FILE",
                 "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",
                 "SERPROID_CLIENT_SECRET": "SERPROID_CLIENT_SECRET_FILE",
                 "SERPRO_TIMESTAMP_CONSUMER_SECRET": "SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE",
             },
         )
+        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+            len(self.TENANT_IDENTITY_ENCRYPTION_KEY) < 32
+            or len(self.TENANT_IDENTITY_HMAC_KEY) < 32
+            or self.TENANT_IDENTITY_ENCRYPTION_KEY.startswith("rubrica-development-")
+            or self.TENANT_IDENTITY_HMAC_KEY.startswith("rubrica-development-")
+            or self.TENANT_IDENTITY_ENCRYPTION_KEY == self.TENANT_IDENTITY_HMAC_KEY
+            or self.TENANT_IDENTITY_ENCRYPTION_KEY == self.EVIDENCE_SECRET
+            or self.TENANT_IDENTITY_HMAC_KEY == self.EVIDENCE_SECRET
+        ):
+            raise ValueError("Secure and distinct tenant identity keys are required in production")
+        return self
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

@@ -4,6 +4,7 @@ from uuid import UUID
 from core_api.infrastructure.auth_context import AuthContext, require_permission
 from core_api.infrastructure.settings import settings
 from core_api.modules.tenant.tenant_schema import (
+    TenantBusinessConversion,
     TenantCreate,
     TenantMemberCreate,
     TenantProvision,
@@ -53,6 +54,15 @@ async def create_tenant(payload: TenantCreate, context: AuthContext = Depends(re
 async def add_tenant_member(tenant_id: UUID, payload: TenantMemberCreate, context: AuthContext = Depends(require_permission("users:write"))) -> Response:
     tenant_service.add_member(tenant_id, payload, context.subject)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{tenant_id}/business", response_model=TenantRead)
+async def convert_tenant_to_business(
+    tenant_id: UUID,
+    payload: TenantBusinessConversion,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantRead:
+    return tenant_service.convert_to_business(tenant_id, payload, context.subject)
 
 
 @router.patch("/{tenant_id}/preferences", response_model=TenantRead)

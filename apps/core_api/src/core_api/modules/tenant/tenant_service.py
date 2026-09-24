@@ -1,14 +1,18 @@
 from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.modules.billing.billing_entity import BillingAccountEntity
+from core_api.modules.signature_request.signature_request_entity import AuditEventEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
+from core_api.modules.tenant.tenant_identity import InvalidBusinessIdentifierError, protect_cnpj
+from shared_kernel.time.datetime_service import DateTimeService
 from core_api.modules.tenant.tenant_schema import (
+    TenantBusinessConversion,
     TenantCreate,
     TenantMemberCreate,
     TenantProvision,
@@ -68,7 +72,10 @@ class TenantService:
                 TenantMemberEntity(
                     tenant_id=tenant.id,
                     auth_user_id=owner,
+                    auth_user_uuid=payload.owner_user_id,
                     role="admin",
+                    status="active",
+                    joined_at=DateTimeService.utc_now(),
                 )
             )
             db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
@@ -109,11 +116,90 @@ class TenantService:
     def add_member(self, tenant_id: UUID, payload: TenantMemberCreate, subject: str) -> None:
         with SessionLocal.begin() as db:
             self.require_role(db, tenant_id, subject, {"admin"})
-            db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), role=payload.role))
+            tenant = db.get(TenantEntity, tenant_id)
+            if tenant is None or tenant.deleted_at is not None:
+                raise WorkflowError("Tenant not found", 404)
+            if tenant.kind != "business":
+                raise WorkflowError("Additional members require a business tenant", 409)
+            from core_api.modules.billing.billing_service import billing_service
+
+            if not billing_service.business_features_enabled(db, tenant_id):
+                raise WorkflowError("A Professional plan is required for business members", 403)
+            active_members = db.scalar(
+                select(func.count(TenantMemberEntity.id)).where(
+                    TenantMemberEntity.tenant_id == tenant_id,
+                    TenantMemberEntity.deleted_at.is_(None),
+                    TenantMemberEntity.status == "active",
+                )
+            ) or 0
+            if active_members >= 3:
+                raise WorkflowError("The Professional plan allows up to 3 tenant members", 409)
+            db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), role=payload.role, status="active", joined_at=DateTimeService.utc_now()))
             try:
                 db.flush()
             except IntegrityError as exc:
                 raise WorkflowError("User is already a tenant member", 409) from exc
+            self._audit(db, tenant_id, subject, "tenant.member_added", {"member_role": payload.role, "member_count": active_members + 1})
+
+    def convert_to_business(
+        self,
+        tenant_id: UUID,
+        payload: TenantBusinessConversion,
+        subject: str,
+    ) -> TenantRead:
+        with SessionLocal.begin() as db:
+            member = self.require_role(db, tenant_id, subject, {"admin"})
+            tenant = db.scalar(
+                select(TenantEntity)
+                .where(TenantEntity.id == tenant_id, TenantEntity.deleted_at.is_(None))
+                .with_for_update()
+            )
+            if tenant is None:
+                raise WorkflowError("Tenant not found", 404)
+            if tenant.kind == "business":
+                raise WorkflowError("Tenant is already a business tenant", 409)
+            from core_api.modules.billing.billing_service import billing_service
+
+            if not billing_service.business_features_enabled(db, tenant_id):
+                raise WorkflowError("A Professional plan is required for a business tenant", 403)
+            try:
+                encrypted, lookup, masked = protect_cnpj(payload.cnpj)
+            except InvalidBusinessIdentifierError as exc:
+                raise WorkflowError(str(exc), 422) from exc
+            conflict = db.scalar(
+                select(TenantEntity.id).where(
+                    TenantEntity.registration_lookup_hmac == lookup,
+                    TenantEntity.deleted_at.is_(None),
+                    TenantEntity.id != tenant_id,
+                )
+            )
+            if conflict is not None:
+                raise WorkflowError("This CNPJ is already associated with another tenant", 409)
+            tenant.kind = "business"
+            tenant.name = payload.legal_name.strip()
+            tenant.legal_name = payload.legal_name.strip()
+            tenant.registration_country = "BR"
+            tenant.registration_type = "BR_CNPJ"
+            tenant.registration_value_encrypted = encrypted
+            tenant.registration_lookup_hmac = lookup
+            tenant.registration_masked = masked
+            tenant.registration_verification_status = "format_valid"
+            db.flush()
+            self._audit(db, tenant.id, subject, "tenant.converted_to_business", {"registration_country": "BR", "registration_type": "BR_CNPJ", "registration_masked": masked, "verification_status": "format_valid"})
+            return self._read(tenant, member.role)
+
+    @staticmethod
+    def issuer_snapshot(tenant: TenantEntity) -> dict[str, object]:
+        return {
+            "tenant_id": str(tenant.id),
+            "tenant_kind": tenant.kind,
+            "display_name": tenant.name,
+            "legal_name": tenant.legal_name,
+            "registration_country": tenant.registration_country,
+            "registration_type": tenant.registration_type,
+            "registration_masked": tenant.registration_masked,
+            "registration_verification_status": tenant.registration_verification_status,
+        }
 
     def update_preferences(
         self,
@@ -135,7 +221,7 @@ class TenantService:
 
     @staticmethod
     def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None) -> TenantMemberEntity:
-        member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.auth_user_id == subject.lower(), TenantMemberEntity.deleted_at.is_(None)))
+        member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.auth_user_id == subject.lower(), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active"))
         if member is None or (roles is not None and member.role not in roles):
             raise WorkflowError("Tenant access denied", 403)
         return member
@@ -153,7 +239,17 @@ class TenantService:
             country_code=tenant.country_code,
             timezone=tenant.timezone,
             currency=tenant.currency,
+            kind=tenant.kind,
+            legal_name=tenant.legal_name,
+            registration_country=tenant.registration_country,
+            registration_type=tenant.registration_type,
+            registration_masked=tenant.registration_masked,
+            registration_verification_status=tenant.registration_verification_status,
         )
+
+    @staticmethod
+    def _audit(db, tenant_id: UUID, actor_id: str, action: str, metadata: dict[str, object]) -> None:
+        db.add(AuditEventEntity(signature_request_id=None, occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type="tenant", entity_id=tenant_id, correlation_id=uuid4(), metadata_sanitized=metadata))
 
 
 tenant_service = TenantService()

@@ -71,7 +71,7 @@ class AccountService:
                 "verify_email",
                 settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS,
             )
-            provision_account_tenant(payload)
+            provision_account_tenant(payload, user.id)
             self._send_verification(
                 user.email,
                 token,
