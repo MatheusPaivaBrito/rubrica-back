@@ -48,6 +48,10 @@ def test_checkout_requires_a_configured_currency_price(monkeypatch) -> None:
         ("rubrica_intermediate", "USD", "STRIPE_PRICE_INTERMEDIATE_USD"),
         ("rubrica_intermediate", "EUR", "STRIPE_PRICE_INTERMEDIATE_EUR"),
         ("rubrica_intermediate", "JPY", "STRIPE_PRICE_INTERMEDIATE_JPY"),
+        ("rubrica_team", "BRL", "STRIPE_PRICE_TEAM_BRL"),
+        ("rubrica_team", "USD", "STRIPE_PRICE_TEAM_USD"),
+        ("rubrica_team", "EUR", "STRIPE_PRICE_TEAM_EUR"),
+        ("rubrica_team", "JPY", "STRIPE_PRICE_TEAM_JPY"),
     ],
 )
 def test_checkout_selects_price_for_every_plan_and_currency(
@@ -59,6 +63,17 @@ def test_checkout_selects_price_for_every_plan_and_currency(
     )
 
     assert BillingService._price_for_currency(currency, product_code) == expected
+
+
+def test_checkout_selects_annual_team_price(monkeypatch) -> None:
+    monkeypatch.setattr("core_api.modules.billing.billing_service.settings.STRIPE_PRICE_TEAM_ANNUAL_BRL", "price_team_annual_brl")
+    assert BillingService._price_for_currency("BRL", "rubrica_team", "year") == "price_team_annual_brl"
+
+
+def test_team_plan_limits() -> None:
+    assert BillingService.PLAN_MEMBER_LIMITS["rubrica_intermediate"] == 3
+    assert BillingService.PLAN_MEMBER_LIMITS["rubrica_team"] == 10
+    assert BillingService.PLAN_FILE_LIMITS["rubrica_team"] == 200
 
 
 @pytest.mark.parametrize(

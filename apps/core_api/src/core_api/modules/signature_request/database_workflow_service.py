@@ -193,7 +193,7 @@ class DatabaseSignatureWorkflowService:
                 if tenant is None or tenant.kind != "business":
                     raise WorkflowError("Company representation requires a business tenant", 409)
                 if not billing_service.business_features_enabled(db, tenant.id):
-                    raise WorkflowError("A Professional plan is required for company representation", 403)
+                    raise WorkflowError("A Professional or Team plan is required for company representation", 403)
                 member = db.scalar(
                     select(TenantMemberEntity).where(
                         TenantMemberEntity.tenant_id == tenant.id,

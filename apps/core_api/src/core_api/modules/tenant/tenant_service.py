@@ -142,7 +142,10 @@ class TenantService:
             from core_api.modules.billing.billing_service import billing_service
 
             if not billing_service.business_features_enabled(db, tenant_id):
-                raise WorkflowError("A Professional plan is required for business members", 403)
+                raise WorkflowError("A Professional or Team plan is required for business members", 403)
+            billing_account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id, BillingAccountEntity.deleted_at.is_(None)))
+            product_code = billing_service._normalize_product_code(billing_account.current_product_code if billing_account else None)
+            member_limit = billing_service.PLAN_MEMBER_LIMITS.get(product_code, 3)
             active_members = db.scalar(
                 select(func.count(TenantMemberEntity.id)).where(
                     TenantMemberEntity.tenant_id == tenant_id,
@@ -150,8 +153,8 @@ class TenantService:
                     TenantMemberEntity.status == "active",
                 )
             ) or 0
-            if active_members >= 3:
-                raise WorkflowError("The Professional plan allows up to 3 tenant members", 409)
+            if active_members >= member_limit:
+                raise WorkflowError(f"The current plan allows up to {member_limit} tenant members", 409)
             member_user_uuid = resolve_auth_user(payload.auth_user_id.lower())
             db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), auth_user_uuid=member_user_uuid, role=payload.role, status="active", joined_at=DateTimeService.utc_now()))
             try:
@@ -196,7 +199,7 @@ class TenantService:
             from core_api.modules.billing.billing_service import billing_service
 
             if not billing_service.business_features_enabled(db, tenant_id):
-                raise WorkflowError("A Professional plan is required for a business tenant", 403)
+                raise WorkflowError("A Professional or Team plan is required for a business tenant", 403)
             account = db.scalar(
                 select(BillingAccountEntity).where(
                     BillingAccountEntity.tenant_id == tenant_id,

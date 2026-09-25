@@ -48,7 +48,7 @@ async def create_checkout(
     payload: BillingCheckoutCreate,
     context: AuthContext = Depends(require_permission("documents:write")),
 ) -> BillingCheckoutRead:
-    return billing_service.create_checkout(tenant_id, context.subject, payload.product_code)
+    return billing_service.create_checkout(tenant_id, context.subject, payload.product_code, payload.billing_interval)
 
 
 @router.post("/tenants/{tenant_id}/portal", response_model=BillingPortalRead)

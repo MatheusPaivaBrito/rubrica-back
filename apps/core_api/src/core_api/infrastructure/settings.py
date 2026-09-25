@@ -66,6 +66,14 @@ class Settings(BaseSettings):
     STRIPE_PRICE_INTERMEDIATE_USD: str | None = None
     STRIPE_PRICE_INTERMEDIATE_EUR: str | None = None
     STRIPE_PRICE_INTERMEDIATE_JPY: str | None = None
+    STRIPE_PRICE_TEAM_BRL: str | None = None
+    STRIPE_PRICE_TEAM_USD: str | None = None
+    STRIPE_PRICE_TEAM_EUR: str | None = None
+    STRIPE_PRICE_TEAM_JPY: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_BRL: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_USD: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_EUR: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_JPY: str | None = None
     BILLING_GRACE_PERIOD_DAYS: int = Field(default=10, ge=0, le=30)
 
     @model_validator(mode="after")

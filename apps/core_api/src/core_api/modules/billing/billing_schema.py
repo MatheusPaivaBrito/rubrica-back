@@ -39,7 +39,8 @@ class BillingCheckoutRead(BaseModel):
 
 
 class BillingCheckoutCreate(BaseModel):
-    product_code: Literal["rubrica_base", "rubrica_intermediate"]
+    product_code: Literal["rubrica_base", "rubrica_intermediate", "rubrica_team"]
+    billing_interval: Literal["month", "year"] = "month"
 
 
 class BillingPortalRead(BaseModel):

@@ -54,7 +54,7 @@ class StripeBillingProvider:
             },
             "metadata": {"tenant_id": tenant_id, "product_code": product_code},
         }
-        if product_code == "rubrica_intermediate":
+        if product_code in {"rubrica_intermediate", "rubrica_team"}:
             parameters["tax_id_collection"] = {"enabled": True}
             parameters["customer_update"] = {"name": "auto"}
         checkout = stripe.checkout.Session.create(

@@ -41,12 +41,13 @@ logger = logging.getLogger(__name__)
 
 
 class BillingService:
-    # Reserved for the future member-limit feature: Essential 3, Professional 10.
-    # These limits are intentionally not enforced or exposed yet.
     PLAN_FILE_LIMITS = {
         "rubrica_base": 20,
         "rubrica_intermediate": 80,
+        "rubrica_team": 200,
     }
+    BUSINESS_PRODUCT_CODES = frozenset({"rubrica_intermediate", "rubrica_team"})
+    PLAN_MEMBER_LIMITS = {"rubrica_intermediate": 3, "rubrica_team": 10}
 
     def __init__(self, provider: BillingProvider | None = None) -> None:
         self._provider = provider
@@ -88,7 +89,7 @@ class BillingService:
                         account.provider_customer_id
                     )
                     if account.provider_customer_id
-                    and self._product_code(resource) == "rubrica_intermediate"
+                    and self._product_code(resource) in self.BUSINESS_PRODUCT_CODES
                     else None
                 )
             except BillingProviderError as exc:
@@ -191,7 +192,7 @@ class BillingService:
         account.files_uploaded_in_period += 1
 
     def create_checkout(
-        self, tenant_id: UUID, subject: str, product_code: str
+        self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str = "month"
     ) -> BillingCheckoutRead:
         provider = self._get_provider()
         with SessionLocal.begin() as database:
@@ -210,7 +211,7 @@ class BillingService:
                     "Use the billing portal to change the existing subscription",
                     409,
                 )
-            price_id = self._price_for_currency(tenant.currency, product_code)
+            price_id = self._price_for_currency(tenant.currency, product_code, billing_interval)
             try:
                 if not account.provider_customer_id:
                     customer = provider.create_customer(
@@ -303,7 +304,7 @@ class BillingService:
                 "customer.subscription.created",
                 "customer.subscription.updated",
             }
-            and self._product_code(resource) == "rubrica_intermediate"
+            and self._product_code(resource) in self.BUSINESS_PRODUCT_CODES
         ):
             try:
                 business_identity = provider.retrieve_customer_business_identity(
@@ -527,10 +528,10 @@ class BillingService:
         if key != "plan_changed":
             return subject, body, "RUBRICA NOTIFICATION"
         plan_names = {
-            "en": {"rubrica_base": "Essential", "rubrica_intermediate": "Professional"},
-            "pt-BR": {"rubrica_base": "Essencial", "rubrica_intermediate": "Profissional"},
-            "es": {"rubrica_base": "Esencial", "rubrica_intermediate": "Profesional"},
-            "ja-JP": {"rubrica_base": "エッセンシャル", "rubrica_intermediate": "プロフェッショナル"},
+            "en": {"rubrica_base": "Essential", "rubrica_intermediate": "Professional", "rubrica_team": "Team"},
+            "pt-BR": {"rubrica_base": "Essencial", "rubrica_intermediate": "Profissional", "rubrica_team": "Equipe"},
+            "es": {"rubrica_base": "Esencial", "rubrica_intermediate": "Profesional", "rubrica_team": "Equipo"},
+            "ja-JP": {"rubrica_base": "エッセンシャル", "rubrica_intermediate": "プロフェッショナル", "rubrica_team": "チーム"},
         }
         names = plan_names.get(locale, plan_names["en"])
         normalized_previous = BillingService._normalize_product_code(previous_product)
@@ -657,7 +658,7 @@ class BillingService:
         if (
             identity is None
             or BillingService._normalize_product_code(product_code)
-            != "rubrica_intermediate"
+            not in BillingService.BUSINESS_PRODUCT_CODES
         ):
             return
         cnpj = next(
@@ -798,6 +799,16 @@ class BillingService:
                     settings.STRIPE_PRICE_INTERMEDIATE_EUR,
                     settings.STRIPE_PRICE_INTERMEDIATE_JPY,
                 ),
+                "rubrica_team": (
+                    settings.STRIPE_PRICE_TEAM_BRL,
+                    settings.STRIPE_PRICE_TEAM_USD,
+                    settings.STRIPE_PRICE_TEAM_EUR,
+                    settings.STRIPE_PRICE_TEAM_JPY,
+                    settings.STRIPE_PRICE_TEAM_ANNUAL_BRL,
+                    settings.STRIPE_PRICE_TEAM_ANNUAL_USD,
+                    settings.STRIPE_PRICE_TEAM_ANNUAL_EUR,
+                    settings.STRIPE_PRICE_TEAM_ANNUAL_JPY,
+                ),
             }.items()
             for price_id in price_ids
             if price_id
@@ -884,7 +895,7 @@ class BillingService:
             return None
 
     @staticmethod
-    def _price_for_currency(currency: str, product_code: str = "rubrica_base") -> str:
+    def _price_for_currency(currency: str, product_code: str = "rubrica_base", billing_interval: str = "month") -> str:
         prices = {
             "rubrica_base": {
                 "BRL": settings.STRIPE_PRICE_BRL,
@@ -898,8 +909,17 @@ class BillingService:
                 "EUR": settings.STRIPE_PRICE_INTERMEDIATE_EUR,
                 "JPY": settings.STRIPE_PRICE_INTERMEDIATE_JPY,
             },
+            "rubrica_team": {
+                "month": {"BRL": settings.STRIPE_PRICE_TEAM_BRL, "USD": settings.STRIPE_PRICE_TEAM_USD, "EUR": settings.STRIPE_PRICE_TEAM_EUR, "JPY": settings.STRIPE_PRICE_TEAM_JPY},
+                "year": {"BRL": settings.STRIPE_PRICE_TEAM_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_TEAM_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_TEAM_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_TEAM_ANNUAL_JPY},
+            },
         }
-        price_id = prices.get(product_code, {}).get(currency.upper())
+        configured = prices.get(product_code, {})
+        if product_code == "rubrica_team":
+            configured = configured.get(billing_interval, {})
+        elif billing_interval != "month":
+            configured = {}
+        price_id = configured.get(currency.upper())
         if not price_id:
             raise WorkflowError(
                 f"Stripe price is not configured for {product_code} in {currency}",
@@ -921,7 +941,7 @@ class BillingService:
                 getattr(account, "complimentary_lifetime", False)
                 or (
                     BillingService._normalize_product_code(account.current_product_code)
-                    == "rubrica_intermediate"
+                    in BillingService.BUSINESS_PRODUCT_CODES
                     and BillingService._paid_access_enabled(account)
                 )
             )
@@ -940,7 +960,8 @@ class BillingService:
             and (
                 getattr(account, "complimentary_lifetime", False)
                 or (
-                    account.current_product_code == "rubrica_intermediate"
+                    BillingService._normalize_product_code(account.current_product_code)
+                    in BillingService.BUSINESS_PRODUCT_CODES
                     and BillingService._paid_access_enabled(account)
                 )
             )
@@ -1010,7 +1031,7 @@ class BillingService:
                         BillingService._normalize_product_code(
                             account.current_product_code
                         )
-                        == "rubrica_intermediate"
+                        in BillingService.BUSINESS_PRODUCT_CODES
                         and BillingService._paid_access_enabled(account)
                     )
                 ),

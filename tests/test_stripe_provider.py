@@ -19,7 +19,8 @@ def test_stripe_provider_requires_secret_key(monkeypatch) -> None:
         StripeBillingProvider()
 
 
-def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> None:
+@pytest.mark.parametrize("product_code", ["rubrica_intermediate", "rubrica_team"])
+def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch, product_code: str) -> None:
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
         "sk_test_example",
@@ -38,7 +39,7 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> No
     session = StripeBillingProvider().create_checkout_session(
         customer_id="cus_test",
         price_id="price_jpy",
-        product_code="rubrica_intermediate",
+        product_code=product_code,
         tenant_id="019c-tenant",
         success_url="https://rubrica.test/plan?checkout=success",
         cancel_url="https://rubrica.test/plan?checkout=cancelled",
@@ -48,12 +49,12 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> No
     assert captured["client_reference_id"] == "019c-tenant"
     assert captured["metadata"] == {
         "tenant_id": "019c-tenant",
-        "product_code": "rubrica_intermediate",
+        "product_code": product_code,
     }
     assert captured["subscription_data"] == {
         "metadata": {
             "tenant_id": "019c-tenant",
-            "product_code": "rubrica_intermediate",
+            "product_code": product_code,
         }
     }
     assert captured["line_items"] == [{"price": "price_jpy", "quantity": 1}]
