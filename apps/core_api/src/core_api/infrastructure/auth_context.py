@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -12,6 +13,11 @@ from core_api.infrastructure.settings import settings
 from shared_kernel.security.csrf import require_same_origin
 
 
+_active_auth_context: ContextVar["AuthContext | None"] = ContextVar(
+    "active_auth_context", default=None
+)
+
+
 @dataclass(frozen=True)
 class AuthContext:
     subject: str
@@ -19,6 +25,9 @@ class AuthContext:
     permission_keys: frozenset[str]
     user_id: str | None = None
     email: str = ""
+
+    def __post_init__(self) -> None:
+        _active_auth_context.set(self)
 
     def allows(self, permission: str) -> bool:
         return "*" in self.permission_keys or permission in self.permission_keys
@@ -47,13 +56,19 @@ def _resolve_context(token: str) -> AuthContext:
     if payload.get("mfa_setup_required"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Configure MFA before accessing Rubrica")
     subject = str(payload["subject"])
-    return AuthContext(
+    context = AuthContext(
         subject=subject,
         user_id=str(payload["user_id"]) if payload.get("user_id") else None,
         email=str(payload.get("email") or subject),
         roles=frozenset(payload.get("roles", [])),
         permission_keys=frozenset(payload.get("permission_keys", [])),
     )
+    _active_auth_context.set(context)
+    return context
+
+
+def active_auth_context() -> AuthContext | None:
+    return _active_auth_context.get()
 
 
 async def authenticated_context(

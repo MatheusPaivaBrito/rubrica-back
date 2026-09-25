@@ -1,10 +1,11 @@
 from secrets import token_urlsafe
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID, uuid4
 
 from core_api.infrastructure.database.connection import SessionLocal
+from core_api.infrastructure.auth_context import active_auth_context
 from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
@@ -53,13 +54,22 @@ class TenantService:
                 select(TenantEntity, TenantMemberEntity.role)
                 .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
                 .where(
-                    TenantMemberEntity.auth_user_id == owner,
+                    self.membership_identity_filter(owner, payload.owner_user_id),
                     TenantMemberEntity.role == "admin",
                     TenantEntity.deleted_at.is_(None),
                 )
                 .order_by(TenantEntity.created_at)
             ).first()
             if existing is not None:
+                member = db.scalar(
+                    select(TenantMemberEntity).where(
+                        TenantMemberEntity.tenant_id == existing[0].id,
+                        self.membership_identity_filter(owner, payload.owner_user_id),
+                    )
+                )
+                if member is not None and member.auth_user_uuid is None:
+                    member.auth_user_uuid = payload.owner_user_id
+                    db.flush()
                 return self._read(existing[0], existing[1])
 
             tenant = TenantEntity(
@@ -92,7 +102,7 @@ class TenantService:
             rows = db.execute(
                 select(TenantEntity, TenantMemberEntity.role)
                 .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
-                .where(TenantMemberEntity.auth_user_id == subject.lower(), TenantEntity.deleted_at.is_(None))
+                .where(self.membership_identity_filter(subject), TenantEntity.deleted_at.is_(None))
                 .order_by(TenantEntity.name)
             ).all()
             return [self._read(tenant, role) for tenant, role in rows]
@@ -227,10 +237,25 @@ class TenantService:
 
     @staticmethod
     def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None) -> TenantMemberEntity:
-        member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.auth_user_id == subject.lower(), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active"))
+        member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantService.membership_identity_filter(subject), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active"))
         if member is None or (roles is not None and member.role not in roles):
             raise WorkflowError("Tenant access denied", 403)
         return member
+
+    @staticmethod
+    def membership_identity_filter(subject: str, user_id: UUID | None = None):
+        context = active_auth_context()
+        resolved_user_id = user_id
+        if resolved_user_id is None and context is not None and context.user_id:
+            try:
+                resolved_user_id = UUID(context.user_id)
+            except ValueError:
+                resolved_user_id = None
+        legacy = and_(
+            TenantMemberEntity.auth_user_uuid.is_(None),
+            TenantMemberEntity.auth_user_id == subject.lower(),
+        )
+        return or_(TenantMemberEntity.auth_user_uuid == resolved_user_id, legacy) if resolved_user_id else legacy
 
     @staticmethod
     def _read(tenant: TenantEntity, role: str) -> TenantRead:

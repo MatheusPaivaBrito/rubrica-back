@@ -94,7 +94,7 @@ class DatabaseSignatureWorkflowService:
 
     def list_documents(self, actor_id: str) -> list[DocumentRead]:
         with SessionLocal() as db:
-            statement = select(DocumentEntity).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(DocumentEntity.id)
+            statement = select(DocumentEntity).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), tenant_service.membership_identity_filter(actor_id)).order_by(DocumentEntity.id)
             return [self._document_read(db, item) for item in db.scalars(statement).all()]
 
     def get_document(self, document_id: str, actor_id: str) -> DocumentRead:
@@ -164,7 +164,7 @@ class DatabaseSignatureWorkflowService:
 
     def list_requests(self, actor_id: str) -> list[SignatureRequestRead]:
         with SessionLocal() as db:
-            statement = select(SignatureRequestEntity).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(SignatureRequestEntity.deleted_at.is_(None), DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.auth_user_id == actor_id.lower()).order_by(SignatureRequestEntity.id)
+            statement = select(SignatureRequestEntity).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(SignatureRequestEntity.deleted_at.is_(None), DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), tenant_service.membership_identity_filter(actor_id)).order_by(SignatureRequestEntity.id)
             return [self._request_read(db, item) for item in db.scalars(statement).all()]
 
     def get_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
@@ -445,7 +445,7 @@ class DatabaseSignatureWorkflowService:
                     active_representation = db.scalar(
                         select(TenantMemberEntity.id).where(
                             TenantMemberEntity.tenant_id == signer.represented_tenant_id,
-                            TenantMemberEntity.auth_user_id == auth_user_id.lower(),
+                            tenant_service.membership_identity_filter(auth_user_id),
                             TenantMemberEntity.status == "active",
                             TenantMemberEntity.role.in_(["admin", "member"]),
                             TenantMemberEntity.deleted_at.is_(None),
