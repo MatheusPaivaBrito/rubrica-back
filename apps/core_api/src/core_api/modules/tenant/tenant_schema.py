@@ -98,6 +98,14 @@ class TenantMemberCreate(BaseModel):
     role: str = Field(default="member", pattern=r"^(admin|member|auditor)$")
 
 
+class TenantMemberRead(BaseModel):
+    id: UUID
+    auth_user_id: str
+    role: Literal["admin", "member", "auditor"]
+    status: str
+    joined_at: datetime | None = None
+
+
 class TenantProvision(BaseModel):
     owner_user_id: UUID | None = None
     owner_email: str = Field(

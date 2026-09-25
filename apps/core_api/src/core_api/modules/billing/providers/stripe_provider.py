@@ -8,7 +8,9 @@ from core_api.modules.billing.providers.protocol import (
     BillingProviderError,
     InvalidWebhookSignatureError,
     ProviderCustomer,
+    ProviderBusinessIdentity,
     ProviderSession,
+    ProviderTaxId,
 )
 
 
@@ -40,17 +42,23 @@ class StripeBillingProvider:
         success_url: str,
         cancel_url: str,
     ) -> ProviderSession:
-        checkout = stripe.checkout.Session.create(
-            mode="subscription",
-            customer=customer_id,
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=success_url,
-            cancel_url=cancel_url,
-            client_reference_id=tenant_id,
-            subscription_data={
+        parameters: dict[str, object] = {
+            "mode": "subscription",
+            "customer": customer_id,
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "client_reference_id": tenant_id,
+            "subscription_data": {
                 "metadata": {"tenant_id": tenant_id, "product_code": product_code}
             },
-            metadata={"tenant_id": tenant_id, "product_code": product_code},
+            "metadata": {"tenant_id": tenant_id, "product_code": product_code},
+        }
+        if product_code == "rubrica_intermediate":
+            parameters["tax_id_collection"] = {"enabled": True}
+            parameters["customer_update"] = {"name": "auto"}
+        checkout = stripe.checkout.Session.create(
+            **parameters,
         )
         if not checkout.url:
             raise BillingProviderError("Stripe did not return a checkout URL")
@@ -109,6 +117,28 @@ class StripeBillingProvider:
             raise BillingProviderError(
                 "Stripe subscription could not be synchronized"
             ) from exc
+
+    def retrieve_customer_business_identity(
+        self, customer_id: str
+    ) -> ProviderBusinessIdentity:
+        try:
+            customer = stripe.Customer.retrieve(customer_id)
+            tax_ids = stripe.Customer.list_tax_ids(customer_id, limit=100)
+        except Exception as exc:
+            raise BillingProviderError(
+                "Stripe customer business identity could not be retrieved"
+            ) from exc
+        return ProviderBusinessIdentity(
+            name=str(customer.get("name") or "").strip() or None,
+            tax_ids=tuple(
+                ProviderTaxId(
+                    id=str(item.get("id") or ""),
+                    type=str(item.get("type") or ""),
+                    value=str(item.get("value") or ""),
+                )
+                for item in tax_ids.get("data", [])
+            ),
+        )
 
     def construct_webhook_event(
         self,

@@ -2,7 +2,11 @@ import json
 from typing import Any, Mapping
 from uuid import uuid4
 
-from core_api.modules.billing.providers.protocol import ProviderCustomer, ProviderSession
+from core_api.modules.billing.providers.protocol import (
+    ProviderBusinessIdentity,
+    ProviderCustomer,
+    ProviderSession,
+)
 
 
 class FakeBillingProvider:
@@ -45,6 +49,11 @@ class FakeBillingProvider:
             "status": "active",
             "metadata": {"product_code": "rubrica_base"},
         }
+
+    def retrieve_customer_business_identity(
+        self, customer_id: str
+    ) -> ProviderBusinessIdentity:
+        return ProviderBusinessIdentity(name=None, tax_ids=())
 
     def construct_webhook_event(
         self,

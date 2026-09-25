@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from core_api.modules.billing.billing_service import BillingService
 from core_api.modules.billing.providers.stripe_provider import StripeBillingProvider
+from core_api.modules.billing.providers.protocol import ProviderBusinessIdentity, ProviderTaxId
 from core_api.infrastructure.settings import settings
 from core_api.modules.signature_request.workflow_service import WorkflowError
 
@@ -112,6 +113,38 @@ def test_completed_checkout_does_not_unlock_unlimited_signatures(monkeypatch) ->
 
     assert account.status == "pending"
     assert account.provider_subscription_id == "sub_test"
+
+
+def test_professional_event_applies_stripe_cnpj_to_tenant(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.apply_billing_business_identity",
+        lambda _database, tenant_id, **values: captured.update(
+            {"tenant_id": tenant_id, **values}
+        ),
+    )
+    tenant_id = uuid4()
+    identity = ProviderBusinessIdentity(
+        name="Empresa Teste Ltda.",
+        tax_ids=(
+            ProviderTaxId(
+                id="txi_cnpj",
+                type="br_cnpj",
+                value="11222333000181",
+            ),
+        ),
+    )
+
+    BillingService._apply_business_identity(
+        object(), tenant_id, "rubrica_intermediate", identity
+    )
+
+    assert captured == {
+        "tenant_id": tenant_id,
+        "legal_name": "Empresa Teste Ltda.",
+        "cnpj": "11222333000181",
+        "provider_reference": "txi_cnpj",
+    }
 
 
 def test_free_account_consumes_each_completed_signer_signature() -> None:

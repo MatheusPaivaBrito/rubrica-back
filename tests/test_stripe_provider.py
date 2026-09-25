@@ -57,6 +57,69 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch) -> No
         }
     }
     assert captured["line_items"] == [{"price": "price_jpy", "quantity": 1}]
+    assert captured["tax_id_collection"] == {"enabled": True}
+    assert captured["customer_update"] == {"name": "auto"}
+
+
+def test_stripe_provider_does_not_collect_cnpj_for_essential_checkout(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    captured: dict[str, object] = {}
+
+    def create_checkout(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(url="https://checkout.stripe.test/session")
+
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.checkout.Session.create",
+        create_checkout,
+    )
+
+    StripeBillingProvider().create_checkout_session(
+        customer_id="cus_test",
+        price_id="price_base",
+        product_code="rubrica_base",
+        tenant_id="019c-tenant",
+        success_url="https://rubrica.test/plan?checkout=success",
+        cancel_url="https://rubrica.test/plan?checkout=cancelled",
+    )
+
+    assert "tax_id_collection" not in captured
+    assert "customer_update" not in captured
+
+
+def test_stripe_provider_reads_customer_cnpj(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Customer.retrieve",
+        lambda _customer_id: {"name": "Empresa Teste Ltda."},
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Customer.list_tax_ids",
+        lambda _customer_id, **_kwargs: {
+            "data": [
+                {
+                    "id": "txi_cnpj",
+                    "type": "br_cnpj",
+                    "value": "11222333000181",
+                }
+            ]
+        },
+    )
+
+    identity = StripeBillingProvider().retrieve_customer_business_identity("cus_test")
+
+    assert identity.name == "Empresa Teste Ltda."
+    assert identity.tax_ids[0].id == "txi_cnpj"
+    assert identity.tax_ids[0].type == "br_cnpj"
+    assert identity.tax_ids[0].value == "11222333000181"
 
 
 def test_stripe_provider_translates_invalid_webhook_signature(monkeypatch) -> None:

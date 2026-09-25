@@ -34,6 +34,8 @@ class TenantEntity(BaseEntity):
     registration_lookup_hmac: Mapped[str | None] = mapped_column(String(64), index=True)
     registration_masked: Mapped[str | None] = mapped_column(String(40))
     registration_verification_status: Mapped[str | None] = mapped_column(String(32))
+    registration_source: Mapped[str | None] = mapped_column(String(32))
+    registration_provider_reference: Mapped[str | None] = mapped_column(String(255))
 
 
 class TenantMemberEntity(BaseEntity):

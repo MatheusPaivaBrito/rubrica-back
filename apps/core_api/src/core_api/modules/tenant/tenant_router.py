@@ -7,6 +7,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantBusinessConversion,
     TenantCreate,
     TenantMemberCreate,
+    TenantMemberRead,
     TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
@@ -54,6 +55,14 @@ async def create_tenant(payload: TenantCreate, context: AuthContext = Depends(re
 async def add_tenant_member(tenant_id: UUID, payload: TenantMemberCreate, context: AuthContext = Depends(require_permission("users:write"))) -> Response:
     tenant_service.add_member(tenant_id, payload, context.subject)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{tenant_id}/members", response_model=list[TenantMemberRead])
+async def list_tenant_members(
+    tenant_id: UUID,
+    context: AuthContext = Depends(require_permission("users:read")),
+) -> list[TenantMemberRead]:
+    return tenant_service.list_members(tenant_id, context.subject)
 
 
 @router.post("/{tenant_id}/business", response_model=TenantRead)

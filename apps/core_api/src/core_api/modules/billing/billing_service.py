@@ -29,6 +29,7 @@ from core_api.modules.billing.providers.protocol import (
     BillingProvider,
     BillingProviderError,
     InvalidWebhookSignatureError,
+    ProviderBusinessIdentity,
 )
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
@@ -82,6 +83,14 @@ class BillingService:
                 resource = provider.retrieve_subscription(
                     account.provider_subscription_id
                 )
+                business_identity = (
+                    provider.retrieve_customer_business_identity(
+                        account.provider_customer_id
+                    )
+                    if account.provider_customer_id
+                    and self._product_code(resource) == "rubrica_intermediate"
+                    else None
+                )
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 502) from exc
             self._apply_event(
@@ -89,6 +98,7 @@ class BillingService:
                 "customer.subscription.updated",
                 resource,
                 tenant_id,
+                business_identity=business_identity,
             )
             current_product = self._normalize_product_code(
                 account.current_product_code
@@ -283,6 +293,24 @@ class BillingService:
                         BillingAccountEntity.provider_customer_id == str(resource["customer"])
                     )
                 )
+        business_identity = None
+        if (
+            tenant_id is not None
+            and resource.get("customer")
+            and event_type
+            in {
+                "checkout.session.completed",
+                "customer.subscription.created",
+                "customer.subscription.updated",
+            }
+            and self._product_code(resource) == "rubrica_intermediate"
+        ):
+            try:
+                business_identity = provider.retrieve_customer_business_identity(
+                    str(resource["customer"])
+                )
+            except BillingProviderError as exc:
+                raise WorkflowError(str(exc), 503) from exc
         sanitized = {
             "type": event_type,
             "resource_id": resource_id,
@@ -345,6 +373,7 @@ class BillingService:
                     tenant_id,
                     event_created_at,
                     event_id,
+                    business_identity,
                 )
                 if applied:
                     self._notify_billing_event(
@@ -526,6 +555,7 @@ class BillingService:
         database, event_type: str, resource, tenant_id: UUID | None,
         event_created_at: datetime | None = None,
         provider_event_id: str = "",
+        business_identity: ProviderBusinessIdentity | None = None,
     ) -> bool:
         if tenant_id is None:
             return True
@@ -542,6 +572,9 @@ class BillingService:
             account.current_product_code = BillingService._product_code(resource)
             if account.status != "active":
                 account.status = "pending"
+            BillingService._apply_business_identity(
+                database, tenant_id, account.current_product_code, business_identity
+            )
             return True
         if event_type in {"invoice.payment_succeeded", "invoice.payment_failed"}:
             BillingService._record_payment(
@@ -609,7 +642,35 @@ class BillingService:
                 )
             elif period_end is not None:
                 account.current_period_ends_at = period_end
+            BillingService._apply_business_identity(
+                database, tenant_id, account.current_product_code, business_identity
+            )
         return True
+
+    @staticmethod
+    def _apply_business_identity(
+        database,
+        tenant_id: UUID,
+        product_code: str | None,
+        identity: ProviderBusinessIdentity | None,
+    ) -> None:
+        if (
+            identity is None
+            or BillingService._normalize_product_code(product_code)
+            != "rubrica_intermediate"
+        ):
+            return
+        cnpj = next(
+            (tax_id for tax_id in identity.tax_ids if tax_id.type == "br_cnpj"),
+            None,
+        ) if identity is not None else None
+        tenant_service.apply_billing_business_identity(
+            database,
+            tenant_id,
+            legal_name=identity.name if identity is not None else None,
+            cnpj=cnpj.value if cnpj is not None else None,
+            provider_reference=cnpj.id if cnpj is not None else None,
+        )
 
     @staticmethod
     def _record_payment(

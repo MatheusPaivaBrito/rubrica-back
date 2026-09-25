@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,7 @@ from core_api.modules.tenant.tenant_identity import (
     normalize_cnpj,
     protect_cnpj,
 )
+from core_api.modules.tenant.tenant_service import tenant_service
 
 
 def test_cnpj_is_validated_protected_and_masked() -> None:
@@ -52,3 +54,46 @@ def test_corporate_seal_is_distinct_from_a_personal_signature() -> None:
         represented_tenant_id=uuid4(),
     )
     assert payload.participant_role == ParticipantRole.CORPORATE_SEAL
+
+
+def test_stripe_cnpj_converts_the_existing_tenant_to_business() -> None:
+    tenant_id = uuid4()
+    tenant = SimpleNamespace(
+        id=tenant_id,
+        kind="personal",
+        name="Conta pessoal",
+        legal_name=None,
+        registration_lookup_hmac=None,
+        registration_verification_status=None,
+        registration_source=None,
+        registration_provider_reference=None,
+    )
+
+    class Database:
+        def __init__(self) -> None:
+            self.results = iter((tenant, None))
+            self.added = []
+
+        def scalar(self, _statement):
+            return next(self.results)
+
+        def add(self, item) -> None:
+            self.added.append(item)
+
+    database = Database()
+    status = tenant_service.apply_billing_business_identity(
+        database,
+        tenant_id,
+        legal_name="Empresa Teste Ltda.",
+        cnpj="11.222.333/0001-81",
+        provider_reference="txi_cnpj",
+    )
+
+    assert status == "stripe_format_valid"
+    assert tenant.kind == "business"
+    assert tenant.legal_name == "Empresa Teste Ltda."
+    assert tenant.registration_type == "BR_CNPJ"
+    assert tenant.registration_masked == "••.•••.•••/••••-81"
+    assert tenant.registration_source == "stripe"
+    assert tenant.registration_provider_reference == "txi_cnpj"
+    assert database.added
