@@ -4,6 +4,7 @@ PRODUCTION_ENV_FILE ?= .env.production
 export
 
 GATEWAY_HOST_PORT ?= 7171
+LOCAL_TEST_ACCOUNT_PASSWORD ?= RubricaLocal123!
 
 
 
@@ -20,7 +21,7 @@ LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_F
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE)
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -71,6 +72,7 @@ help:
 	@echo "  make revision-core msg=create_domain"
 	@echo "  make migrate-auth           Run Auth Alembic migrations"
 	@echo "  make seed-auth              Create the local signature administrator"
+	@echo "  make seed-local-users       Create the three local test accounts"
 	@echo "  make invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  make grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
@@ -155,6 +157,9 @@ migrate-all: migrate
 seed-auth: migrate-auth
 	$(LOCAL_COMPOSE) exec -T auth-api python toolbox/seeds/auth_admin.py
 
+seed-local-users: migrate
+	$(LOCAL_COMPOSE) exec -T -e PYTHONPATH=.:apps/auth_api/src:apps/core_api/src:packages/shared_kernel/src -e LOCAL_TEST_ACCOUNT_PASSWORD="$(LOCAL_TEST_ACCOUNT_PASSWORD)" core-api python toolbox/seeds/local_test_accounts.py
+
 invite-lifetime: migrate
 	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
 	$(LOCAL_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
@@ -174,7 +179,7 @@ revoke-lifetime: migrate-core
 
 compose-up: local-up
 
-bootstrap: compose-up migrate seed-auth
+bootstrap: compose-up migrate seed-local-users
 	@echo "[ok] Rubrica is ready at http://localhost:7171"
 
 compose-down: local-down

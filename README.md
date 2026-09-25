@@ -43,8 +43,10 @@ signatures and audit events in the project's PostgreSQL database. File bytes use
 the local storage adapter in development. Authenticated identity must still be
 supplied by Auth: Core forwards the request's bearer token (or access cookie) to
 Auth's `/access-control/context` contract. The client cannot choose its actor
-identity. Run `make seed-auth` after setting `AUTH_SEED_ADMIN_PASSWORD` in
-`.env` to create the local `signature_admin` user.
+identity. Run `make seed-local-users` to create the local personal account,
+business administrator and business member. Their shared development password
+comes from `LOCAL_TEST_ACCOUNT_PASSWORD`; each account configures MFA on its
+first login. The seed refuses to run when `ENVIRONMENT` is production.
 
 ## Verifying a signed PDF
 
