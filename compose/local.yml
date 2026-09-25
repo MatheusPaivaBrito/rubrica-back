@@ -3,7 +3,7 @@ name: rubrica
 include:
   - path: ./resources/local.yml
     project_directory: .
-  - path: ./features/stripe-local.yml
+  - path: ./services/stripe-cli.yml
     project_directory: .
 
 services:
