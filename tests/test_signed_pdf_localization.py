@@ -24,6 +24,41 @@ def test_japanese_stamp_and_locale_are_embedded_in_signed_pdf() -> None:
     assert "山田" in (reader.pages[0].extract_text() or "")
 
 
+def test_company_representative_stamp_shows_legal_name_and_cnpj() -> None:
+    source = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.write(source)
+    stamp = {
+        "signer_name": "Representante Local",
+        "signed_at": "2026-09-25T01:30:00-03:00",
+        "evidence_sha256": "b" * 64,
+        "participant_role": "company_representative",
+        "representation_snapshot": {
+            "legal_name": "Empresa Local de Testes Ltda.",
+            "registration_type": "BR_CNPJ",
+            "registration_masked": "••.•••.•••/••••-61",
+        },
+        "stamp": {
+            "page": 1,
+            "x": 0.5,
+            "y": 0.8,
+            "locale": "pt-BR",
+            "timezone": "America/Sao_Paulo",
+            "country_code": "BR",
+            "show_flag": True,
+        },
+    }
+
+    rendered = generate_signed_pdf(source.getvalue(), stamps=[stamp], metadata={})
+    text = PdfReader(BytesIO(rendered)).pages[0].extract_text() or ""
+
+    assert "Representante Local" in text
+    assert "Empresa Local de Testes Ltda." in text
+    assert "CNPJ:" in text
+    assert "61" in text
+
+
 def test_signature_evidence_uses_tenant_country_when_identity_is_optional() -> None:
     request = SimpleNamespace(id=uuid4(), document_id=uuid4(), document_version=1, document_sha256="b" * 64)
     signer = SimpleNamespace(id=uuid4(), name="山田 太郎", email="aiko@example.jp")
