@@ -135,10 +135,20 @@ docker compose --env-file .env.production -f compose/production.yml exec core-ap
 Cloudflare R2 setup, automatic encrypted backups and private document storage
 are documented in [docs/CLOUDFLARE_R2.md](docs/CLOUDFLARE_R2.md).
 
-Create a consistent backup of every Rubrica PostgreSQL database and the signed
-document volume:
+Create a consistent backup of every Rubrica PostgreSQL database and every
+referenced document from the configured storage provider (local or R2):
 
-    make backup-production
+    make backup-all environment=production
+
+Back up only databases or one application database:
+
+    make backup-database environment=production database=all
+    make backup-database environment=production database=auth
+
+Valid database aliases are `core`, `auth`, `eventing`, and `notification`.
+Back up only files with:
+
+    make backup-files environment=production
 
 The command writes an ignored, permission-restricted timestamped directory under
 backups. Copy that directory to encrypted storage outside the application host.

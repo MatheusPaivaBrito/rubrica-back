@@ -22,23 +22,37 @@ cleanup() {
 }
 trap cleanup EXIT
 
-tar -C "${work}" -xzf "${backup_dir}/databases.tar.gz"
 if [[ -f "${backup_dir}/documents.tar.gz" ]]; then
   tar -tzf "${backup_dir}/documents.tar.gz" >/dev/null
 fi
+
+if [[ ! -f "${backup_dir}/databases.tar.gz" ]]; then
+  echo "[ok] Checksums valid; document archive readable"
+  exit 0
+fi
+
+tar -C "${work}" -xzf "${backup_dir}/databases.tar.gz"
 
 docker run --detach --name "${container}" \
   --env POSTGRES_PASSWORD="${password}" \
   --volume "${work}:/backup:ro" \
   postgres:16-alpine >/dev/null
 
-for _ in $(seq 1 30); do
-  if docker exec "${container}" pg_isready --username postgres >/dev/null 2>&1; then
-    break
-  fi
-  sleep 1
-done
-docker exec "${container}" pg_isready --username postgres >/dev/null
+wait_for_postgres() {
+  for _ in $(seq 1 30); do
+    if docker exec "${container}" psql --username postgres --dbname postgres --command "SELECT 1" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+wait_for_postgres
+# The official image briefly starts PostgreSQL while initializing, then restarts
+# it. Wait past that handoff and confirm the final server before restoring.
+sleep 2
+wait_for_postgres
 
 if [[ -f "${work}/roles.sql" ]]; then
   docker exec -i "${container}" psql --username postgres --set ON_ERROR_STOP=1 < "${work}/roles.sql"

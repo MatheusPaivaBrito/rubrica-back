@@ -21,7 +21,7 @@ LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_F
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE)
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -55,7 +55,10 @@ help:
 	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  sudo make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  sudo make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
-	@echo "  make backup-production  Back up all databases and signed documents"
+	@echo "  make backup-all [environment=production]"
+	@echo "  make backup-database database=all|core|auth|eventing|notification [environment=production]"
+	@echo "  make backup-files [environment=production]"
+	@echo "  make backup-production  Alias for backup-all environment=production"
 	@echo "  make backup-production-offsite  Back up and upload encrypted copy to B2"
 	@echo "  make verify-backup path=backups/TIMESTAMP"
 
@@ -220,11 +223,23 @@ production-revoke-lifetime: production-migrate
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
 	$(PRODUCTION_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py revoke --tenant-id "$(tenant_id)" --actor "$(actor)" --reason "$(reason)"
 
-backup:
-	COMPOSE_FILE=$(LOCAL_COMPOSE_FILE) ENV_FILE=$(LOCAL_ENV_FILE) toolbox/operations/backup.sh $(BACKUP_ROOT)
+BACKUP_COMPOSE_FILE = $(if $(filter production,$(environment)),$(PRODUCTION_COMPOSE_FILE),$(LOCAL_COMPOSE_FILE))
+BACKUP_ENV_FILE = $(if $(filter production,$(environment)),$(PRODUCTION_ENV_FILE),$(LOCAL_ENV_FILE))
+BACKUP_PROJECT = $(if $(filter production,$(environment)),rubrica-prod,rubrica)
+
+backup: backup-all
+
+backup-all:
+	COMPOSE_FILE=$(BACKUP_COMPOSE_FILE) ENV_FILE=$(BACKUP_ENV_FILE) COMPOSE_PROJECT_NAME=$(BACKUP_PROJECT) BACKUP_INCLUDE_DATABASES=1 BACKUP_INCLUDE_DOCUMENTS=1 BACKUP_DATABASE=all toolbox/operations/backup.sh $(BACKUP_ROOT)
+
+backup-database:
+	COMPOSE_FILE=$(BACKUP_COMPOSE_FILE) ENV_FILE=$(BACKUP_ENV_FILE) COMPOSE_PROJECT_NAME=$(BACKUP_PROJECT) BACKUP_INCLUDE_DATABASES=1 BACKUP_INCLUDE_DOCUMENTS=0 BACKUP_DATABASE=$(or $(database),all) toolbox/operations/backup.sh $(BACKUP_ROOT)
+
+backup-files:
+	COMPOSE_FILE=$(BACKUP_COMPOSE_FILE) ENV_FILE=$(BACKUP_ENV_FILE) COMPOSE_PROJECT_NAME=$(BACKUP_PROJECT) BACKUP_INCLUDE_DATABASES=0 BACKUP_INCLUDE_DOCUMENTS=1 toolbox/operations/backup.sh $(BACKUP_ROOT)
 
 backup-production:
-	COMPOSE_FILE=$(PRODUCTION_COMPOSE_FILE) ENV_FILE=$(PRODUCTION_ENV_FILE) COMPOSE_PROJECT_NAME=rubrica-prod toolbox/operations/backup.sh $(BACKUP_ROOT)
+	@$(MAKE) --no-print-directory backup-all environment=production BACKUP_ROOT=$(BACKUP_ROOT)
 
 backup-production-offsite:
 	COMPOSE_FILE=$(PRODUCTION_COMPOSE_FILE) ENV_FILE=$(PRODUCTION_ENV_FILE) COMPOSE_PROJECT_NAME=rubrica-prod BACKUP_ROOT=$(BACKUP_ROOT) toolbox/operations/offsite_backup.sh create

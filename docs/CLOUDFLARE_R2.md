@@ -26,8 +26,8 @@ docker compose --env-file .env.production \
   up -d --build core-api gateway
 ```
 
-O banco continua guardando somente a chave opaca do objeto. Upload, leitura e
-exclusão passam pelo Core; o navegador não recebe credenciais nem URL pública.
+O banco continua guardando somente a chave opaca do objeto. Upload, leitura,
+exclusão e backup passam pelo Core; o navegador não recebe credenciais nem URL pública.
 Antes de habilitar isso no servidor, os objetos do volume atual devem ser
 copiados preservando as chaves e conferidos pelo SHA-256 registrado no banco.
 Com o ambiente em janela de manutenção, faça primeiro a conferência e depois a
@@ -42,6 +42,26 @@ docker compose --env-file .env.production \
   -f compose/production.yml -f compose/features/r2-documents.yml \
   run --rm core-api python toolbox/operations/migrate_documents_to_r2.py --apply
 ```
+
+A migração e o backup abrangem tanto as versões originais dos documentos quanto
+os PDFs finais gerados pelas assinaturas. Cada objeto é conferido pelo SHA-256
+registrado no banco.
+
+## Backups manuais
+
+Os comandos aceitam o ambiente local por padrão. Use `environment=production`
+no servidor:
+
+```bash
+make backup-all environment=production
+make backup-database environment=production database=all
+make backup-database environment=production database=auth
+make backup-files environment=production
+```
+
+Os aliases de banco são `core`, `auth`, `eventing` e `notification`.
+`backup-files` lê os objetos pelo provedor configurado, inclusive R2, valida os
+hashes e gera um arquivo independente para restauração.
 
 ## Backup diário dos bancos
 
