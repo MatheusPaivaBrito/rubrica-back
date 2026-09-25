@@ -1,302 +1,53 @@
 name: rubrica-prod
 
+include:
+  - path: ./resources/production.yml
+    project_directory: .
+  - path: ./features/stripe-production-resources.yml
+    project_directory: .
+
 services:
   postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_DB: ${POSTGRES_DB:-rubrica}
-      POSTGRES_MULTIPLE_DATABASES: ${CORE_POSTGRES_DB:-rubrica_core},${AUTH_POSTGRES_DB:-rubrica_auth},${EVENTING_POSTGRES_DB:-rubrica_eventing},${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
-    secrets: [postgres_password]
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ../toolbox/database/init_multiple_databases.sh:/docker-entrypoint-initdb.d/init-multiple-databases.sh:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB:-rubrica}"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    networks: [rubrica_internal]
+    extends:
+      file: ./services/postgres.yml
+      service: production
 
   redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
-    networks: [rubrica_internal]
+    extends:
+      file: ./services/redis.yml
+      service: production
 
   auth-api:
-    build:
-      context: ..
-      dockerfile: apps/auth_api/dockerfile
-    restart: unless-stopped
-    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
-    environment:
-      ENVIRONMENT: production
-      APP_DEBUG: "false"
-      PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:?AUTH_SEED_ADMIN_EMAIL is required}
-      AUTH_SEED_ADMIN_PASSWORD_FILE: /run/secrets/auth_seed_admin_password
-      AUTH_PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
-      AUTH_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
-      AUTH_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
-      CORE_API_URL: http://core-api:8000
-      CORE_INTERNAL_SERVICE_KEY_FILE: /run/secrets/core_internal_service_key
-      NOTIFICATION_API_URL: http://notification-api:8000
-      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
-      AUTH_MFA_ENCRYPTION_KEY_FILE: /run/secrets/auth_mfa_encryption_key
-      AUTH_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/auth_identity_encryption_key
-      AUTH_IDENTITY_HMAC_KEY_FILE: /run/secrets/auth_identity_hmac_key
-      AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
-    secrets:
-      - postgres_password
-      - auth_seed_admin_password
-      - notification_internal_service_key
-      - core_internal_service_key
-      - auth_mfa_encryption_key
-      - auth_identity_encryption_key
-      - auth_identity_hmac_key
-      - contact_turnstile_secret_key
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-      notification-api: { condition: service_started }
-      core-api: { condition: service_started }
-    networks: [rubrica_internal, rubrica_external]
+    extends:
+      file: ./services/auth-api.yml
+      service: production
 
   core-api:
-    build:
-      context: ..
-      dockerfile: apps/core_api/dockerfile
-    restart: unless-stopped
-    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
-    environment:
-      ENVIRONMENT: production
-      APP_DEBUG: "false"
-      PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
-      AUTH_API_URL: http://auth-api:8000
-      CORE_INTERNAL_SERVICE_KEY_FILE: /run/secrets/core_internal_service_key
-      NOTIFICATION_API_URL: http://notification-api:8000
-      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
-      DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
-      DOCUMENT_MAX_SIZE_BYTES: ${DOCUMENT_MAX_SIZE_BYTES:-52428800}
-      DOCUMENT_MAX_PAGES: ${DOCUMENT_MAX_PAGES:-1000}
-      CONTACT_INBOX_EMAIL: ${CONTACT_INBOX_EMAIL:-contact@rubricasignature.com}
-      CONTACT_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
-      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
-      SIGNING_APP_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}/signing
-      PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
-      SERPROID_CLIENT_ID: ${SERPROID_CLIENT_ID:-}
-      SERPROID_ENVIRONMENT: ${SERPROID_ENVIRONMENT:-production}
-      SERPROID_CLIENT_SECRET_FILE: /run/secrets/serproid_client_secret
-      SERPRO_TIMESTAMP_PROVIDER: ${SERPRO_TIMESTAMP_PROVIDER:-fake}
-      SERPRO_TIMESTAMP_CONSUMER_KEY: ${SERPRO_TIMESTAMP_CONSUMER_KEY:-}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
-      TENANT_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/tenant_identity_encryption_key
-      TENANT_IDENTITY_HMAC_KEY_FILE: /run/secrets/tenant_identity_hmac_key
-      BILLING_PROVIDER: stripe
-      STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
-      STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
-      STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:?STRIPE_PRICE_BRL is required}
-      STRIPE_PRICE_INTERMEDIATE_BRL: ${STRIPE_PRICE_INTERMEDIATE_BRL:?STRIPE_PRICE_INTERMEDIATE_BRL is required}
-      STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
-      STRIPE_PRICE_EUR: ${STRIPE_PRICE_EUR:-}
-      STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
-      STRIPE_PRICE_ANNUAL_BRL: ${STRIPE_PRICE_ANNUAL_BRL:?STRIPE_PRICE_ANNUAL_BRL is required}
-      STRIPE_PRICE_ANNUAL_USD: ${STRIPE_PRICE_ANNUAL_USD:-}
-      STRIPE_PRICE_ANNUAL_EUR: ${STRIPE_PRICE_ANNUAL_EUR:-}
-      STRIPE_PRICE_ANNUAL_JPY: ${STRIPE_PRICE_ANNUAL_JPY:-}
-      STRIPE_PRICE_INTERMEDIATE_USD: ${STRIPE_PRICE_INTERMEDIATE_USD:-}
-      STRIPE_PRICE_INTERMEDIATE_EUR: ${STRIPE_PRICE_INTERMEDIATE_EUR:-}
-      STRIPE_PRICE_INTERMEDIATE_JPY: ${STRIPE_PRICE_INTERMEDIATE_JPY:-}
-      STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL:?STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL is required}
-      STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD:-}
-      STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR:-}
-      STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY:-}
-      STRIPE_PRICE_TEAM_BRL: ${STRIPE_PRICE_TEAM_BRL:?STRIPE_PRICE_TEAM_BRL is required}
-      STRIPE_PRICE_TEAM_USD: ${STRIPE_PRICE_TEAM_USD:-}
-      STRIPE_PRICE_TEAM_EUR: ${STRIPE_PRICE_TEAM_EUR:-}
-      STRIPE_PRICE_TEAM_JPY: ${STRIPE_PRICE_TEAM_JPY:-}
-      STRIPE_PRICE_TEAM_ANNUAL_BRL: ${STRIPE_PRICE_TEAM_ANNUAL_BRL:?STRIPE_PRICE_TEAM_ANNUAL_BRL is required}
-      STRIPE_PRICE_TEAM_ANNUAL_USD: ${STRIPE_PRICE_TEAM_ANNUAL_USD:-}
-      STRIPE_PRICE_TEAM_ANNUAL_EUR: ${STRIPE_PRICE_TEAM_ANNUAL_EUR:-}
-      STRIPE_PRICE_TEAM_ANNUAL_JPY: ${STRIPE_PRICE_TEAM_ANNUAL_JPY:-}
-      BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
-    secrets:
-      - postgres_password
-      - evidence_secret
-      - tenant_identity_encryption_key
-      - tenant_identity_hmac_key
-      - core_internal_service_key
-      - notification_internal_service_key
-      - contact_turnstile_secret_key
-      - stripe_secret_key
-      - stripe_webhook_secret
-      - serproid_client_secret
-    volumes:
-      - document_storage:/var/lib/rubrica/documents
-    depends_on:
-      postgres: { condition: service_healthy }
-      redis: { condition: service_healthy }
-      notification-api: { condition: service_started }
-    networks: [rubrica_internal, rubrica_external]
+    extends:
+      file: ./services/core-api.yml
+      service: production
 
   eventing-api:
-    build:
-      context: ..
-      dockerfile: apps/eventing_api/dockerfile
-    restart: unless-stopped
-    environment:
-      ENVIRONMENT: production
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
-      EVENTING_DEFAULT_EVENT_TOPIC: rubrica.events
-      EVENTING_DEAD_LETTER_TOPIC: rubrica.events.dead_letter
-    secrets: [postgres_password]
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks: [rubrica_internal]
+    extends:
+      file: ./services/eventing-api.yml
+      service: production
 
   notification-api:
-    build:
-      context: ..
-      dockerfile: apps/notification_api/dockerfile
-    restart: unless-stopped
-    environment:
-      ENVIRONMENT: production
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
-      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: "5432"
-      NOTIFICATION_POSTGRES_DB: ${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
-      NOTIFICATION_PERSISTENCE_MODE: durable
-      NOTIFICATION_EMAIL_PROVIDER: resend
-      NOTIFICATION_DEFAULT_FROM_EMAIL: ${NOTIFICATION_DEFAULT_FROM_EMAIL:?NOTIFICATION_DEFAULT_FROM_EMAIL is required}
-      RESEND_API_KEY_FILE: /run/secrets/resend_api_key
-      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:?RESEND_FROM_EMAIL is required}
-      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
-      NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
-    secrets:
-      - postgres_password
-      - resend_api_key
-      - notification_internal_service_key
-    depends_on:
-      postgres: { condition: service_healthy }
-    networks: [rubrica_internal, rubrica_external]
+    extends:
+      file: ./services/notification-api.yml
+      service: production
 
   web:
-    build:
-      context: ${RUBRICA_WEB_CONTEXT:-../../rubrica-front}
-      dockerfile: Dockerfile.prod
-    restart: unless-stopped
-    environment:
-      RUBRICA_DOMAIN: ${RUBRICA_DOMAIN:?RUBRICA_DOMAIN is required}
-    depends_on:
-      auth-api: { condition: service_started }
-      core-api: { condition: service_started }
-      eventing-api: { condition: service_started }
-      notification-api: { condition: service_started }
-    networks: [rubrica_internal]
+    extends:
+      file: ./services/web.yml
+      service: production
 
   gateway:
-    image: nginx:stable-alpine
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080"
-    volumes:
-      - ../infra/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ../infra/gateway/proxy_params:/etc/nginx/proxy_params:ro
-    depends_on:
-      web: { condition: service_started }
-      auth-api: { condition: service_started }
-      core-api: { condition: service_started }
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    networks: [rubrica_internal]
+    extends:
+      file: ./services/gateway.yml
+      service: production
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    # Compose bind-mounts file-backed secrets with their host ownership. Run as
-    # root so the container can read the required root:root 0600 token without
-    # weakening its permissions on the server.
-    user: "0:0"
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
-    secrets: [cloudflare_tunnel_token]
-    depends_on:
-      gateway: { condition: service_healthy }
-    networks: [rubrica_internal, rubrica_external]
-
-secrets:
-  postgres_password:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/postgres_password
-  auth_seed_admin_password:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_seed_admin_password
-  auth_mfa_encryption_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_mfa_encryption_key
-  auth_identity_encryption_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_identity_encryption_key
-  auth_identity_hmac_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/auth_identity_hmac_key
-  notification_internal_service_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/notification_internal_service_key
-  core_internal_service_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/core_internal_service_key
-  resend_api_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/resend_api_key
-  evidence_secret:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/evidence_secret
-  tenant_identity_encryption_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/tenant_identity_encryption_key
-  tenant_identity_hmac_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/tenant_identity_hmac_key
-  contact_turnstile_secret_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/contact_turnstile_secret_key
-  serproid_client_secret:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/serproid_client_secret
-  stripe_secret_key:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_secret_key
-  stripe_webhook_secret:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_webhook_secret
-  cloudflare_tunnel_token:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/cloudflare_tunnel_token
-
-volumes:
-  postgres_data:
-  redis_data:
-  document_storage:
-
-networks:
-  rubrica_internal:
-    internal: true
-  rubrica_external:
+    extends:
+      file: ./services/cloudflared.yml
+      service: production

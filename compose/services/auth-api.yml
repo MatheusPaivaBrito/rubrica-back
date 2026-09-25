@@ -1,0 +1,89 @@
+services:
+  local:
+    build:
+      context: ../..
+      dockerfile: apps/auth_api/dockerfile
+    ports:
+      - "127.0.0.1:${AUTH_API_HOST_PORT:-7101}:8000"
+    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
+    environment:
+      PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
+      AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:-admin@example.local}
+      AUTH_SEED_ADMIN_PASSWORD: ${AUTH_SEED_ADMIN_PASSWORD:-change-me-before-seeding}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      AUTH_PUBLIC_WEB_URL: ${AUTH_PUBLIC_WEB_URL:-http://localhost:7171}
+      AUTH_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
+      AUTH_TURNSTILE_SECRET_KEY: ${CONTACT_TURNSTILE_SECRET_KEY:-}
+      CORE_API_URL: http://core-api:8000
+      CORE_INTERNAL_SERVICE_KEY: ${CORE_INTERNAL_SERVICE_KEY:-rubrica-local-core-key}
+      AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
+      AUTH_MFA_ENCRYPTION_KEY: ${AUTH_MFA_ENCRYPTION_KEY:-rubrica-development-mfa-key-change-me}
+      AUTH_IDENTITY_ENCRYPTION_KEY: ${AUTH_IDENTITY_ENCRYPTION_KEY:-rubrica-development-identity-key-change-me}
+      AUTH_IDENTITY_HMAC_KEY: ${AUTH_IDENTITY_HMAC_KEY:-rubrica-development-identity-hmac-change-me}
+      AUTH_JP_MY_NUMBER_ENABLED: ${AUTH_JP_MY_NUMBER_ENABLED:-false}
+      AUTH_MFA_CHALLENGE_TTL_SECONDS: ${AUTH_MFA_CHALLENGE_TTL_SECONDS:-300}
+      NOTIFICATION_API_URL: http://notification-api:8000
+      NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
+    depends_on:
+      - postgres
+      - redis
+      - notification-api
+      - core-api
+
+  production:
+    build:
+      context: ../..
+      dockerfile: apps/auth_api/dockerfile
+    restart: unless-stopped
+    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
+    environment:
+      ENVIRONMENT: production
+      APP_DEBUG: "false"
+      PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      AUTH_POSTGRES_DB: ${AUTH_POSTGRES_DB:-rubrica_auth}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:-admin@rubricasignature.com}
+      AUTH_SEED_ADMIN_PASSWORD_FILE: /run/secrets/auth_seed_admin_password
+      AUTH_PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:-rubricasignature.com}
+      AUTH_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
+      AUTH_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
+      CORE_API_URL: http://core-api:8000
+      CORE_INTERNAL_SERVICE_KEY_FILE: /run/secrets/core_internal_service_key
+      NOTIFICATION_API_URL: http://notification-api:8000
+      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
+      AUTH_MFA_ENCRYPTION_KEY_FILE: /run/secrets/auth_mfa_encryption_key
+      AUTH_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/auth_identity_encryption_key
+      AUTH_IDENTITY_HMAC_KEY_FILE: /run/secrets/auth_identity_hmac_key
+      AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
+    secrets:
+      - postgres_password
+      - auth_seed_admin_password
+      - notification_internal_service_key
+      - core_internal_service_key
+      - auth_mfa_encryption_key
+      - auth_identity_encryption_key
+      - auth_identity_hmac_key
+      - contact_turnstile_secret_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      notification-api:
+        condition: service_started
+      core-api:
+        condition: service_started
+    networks:
+      - rubrica_internal
+      - rubrica_external

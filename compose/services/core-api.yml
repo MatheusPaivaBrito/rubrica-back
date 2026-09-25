@@ -1,0 +1,104 @@
+services:
+  local:
+    extends:
+      file: ../features/stripe.yml
+      service: local
+    build:
+      context: ../..
+      dockerfile: apps/core_api/dockerfile
+    ports:
+      - "127.0.0.1:${CORE_API_HOST_PORT:-7102}:8000"
+    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
+    environment:
+      PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
+      AUTH_API_URL: http://auth-api:8000
+      CORE_INTERNAL_SERVICE_KEY: ${CORE_INTERNAL_SERVICE_KEY:-rubrica-local-core-key}
+      NOTIFICATION_API_URL: http://notification-api:8000
+      NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
+      CONTACT_INBOX_EMAIL: ${CONTACT_INBOX_EMAIL:-contact@rubricasignature.com}
+      CONTACT_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
+      CONTACT_TURNSTILE_SECRET_KEY: ${CONTACT_TURNSTILE_SECRET_KEY:-}
+      DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
+      DOCUMENT_MAX_SIZE_BYTES: ${DOCUMENT_MAX_SIZE_BYTES:-52428800}
+      DOCUMENT_MAX_PAGES: ${DOCUMENT_MAX_PAGES:-1000}
+      SIGNING_APP_URL: ${SIGNING_APP_URL:-http://localhost:7171/signing}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-http://localhost:7171}
+      SERPROID_CLIENT_ID: ${SERPROID_CLIENT_ID:-}
+      SERPROID_CLIENT_SECRET: ${SERPROID_CLIENT_SECRET:-}
+      SERPROID_ENVIRONMENT: ${SERPROID_ENVIRONMENT:-homologation}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
+      TENANT_IDENTITY_ENCRYPTION_KEY: ${TENANT_IDENTITY_ENCRYPTION_KEY:-rubrica-development-tenant-encryption-key-change-me}
+      TENANT_IDENTITY_HMAC_KEY: ${TENANT_IDENTITY_HMAC_KEY:-rubrica-development-tenant-hmac-key-change-me}
+    volumes:
+      - ../../data/documents:/var/lib/rubrica/documents
+    depends_on:
+      - postgres
+
+  production:
+    extends:
+      file: ../features/stripe.yml
+      service: production
+    build:
+      context: ../..
+      dockerfile: apps/core_api/dockerfile
+    restart: unless-stopped
+    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
+    environment:
+      ENVIRONMENT: production
+      APP_DEBUG: "false"
+      PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
+      AUTH_API_URL: http://auth-api:8000
+      CORE_INTERNAL_SERVICE_KEY_FILE: /run/secrets/core_internal_service_key
+      NOTIFICATION_API_URL: http://notification-api:8000
+      NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
+      DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
+      DOCUMENT_MAX_SIZE_BYTES: ${DOCUMENT_MAX_SIZE_BYTES:-52428800}
+      DOCUMENT_MAX_PAGES: ${DOCUMENT_MAX_PAGES:-1000}
+      CONTACT_INBOX_EMAIL: ${CONTACT_INBOX_EMAIL:-contact@rubricasignature.com}
+      CONTACT_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
+      SIGNING_APP_URL: https://${RUBRICA_DOMAIN:-rubricasignature.com}/signing
+      PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:-rubricasignature.com}
+      SERPROID_CLIENT_ID: ${SERPROID_CLIENT_ID:-}
+      SERPROID_ENVIRONMENT: ${SERPROID_ENVIRONMENT:-production}
+      SERPROID_CLIENT_SECRET_FILE: /run/secrets/serproid_client_secret
+      SERPRO_TIMESTAMP_PROVIDER: ${SERPRO_TIMESTAMP_PROVIDER:-fake}
+      SERPRO_TIMESTAMP_CONSUMER_KEY: ${SERPRO_TIMESTAMP_CONSUMER_KEY:-}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
+      TENANT_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/tenant_identity_encryption_key
+      TENANT_IDENTITY_HMAC_KEY_FILE: /run/secrets/tenant_identity_hmac_key
+    secrets:
+      - postgres_password
+      - evidence_secret
+      - tenant_identity_encryption_key
+      - tenant_identity_hmac_key
+      - core_internal_service_key
+      - notification_internal_service_key
+      - contact_turnstile_secret_key
+      - serproid_client_secret
+    volumes:
+      - document_storage:/var/lib/rubrica/documents
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      notification-api:
+        condition: service_started
+    networks:
+      - rubrica_internal
+      - rubrica_external

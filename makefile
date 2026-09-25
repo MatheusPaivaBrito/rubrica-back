@@ -98,36 +98,36 @@ doctor:
 	@poetry check >/dev/null
 	@docker compose version >/dev/null
 	@docker info >/dev/null 2>&1 || (echo "[error] Docker daemon is unavailable; start Docker Engine or another compatible daemon"; exit 1)
-	@$(LOCAL_COMPOSE) --profile gateway config --quiet
+	@$(LOCAL_COMPOSE) config --quiet
 
 	@echo "[ok] Poetry, Docker Compose, environment and project metadata are ready"
 
 local-config:
-	$(LOCAL_COMPOSE) --profile gateway config --quiet
+	$(LOCAL_COMPOSE) config --quiet
 
 local-start: local-config
-	$(LOCAL_COMPOSE) --profile gateway up -d --wait
+	$(LOCAL_COMPOSE) up -d --wait
 
 local-up: local-config
-	$(LOCAL_COMPOSE) --profile gateway up -d --build --wait
+	$(LOCAL_COMPOSE) up -d --build --wait
 
 local-up-stripe: local-config
-	$(LOCAL_COMPOSE) --profile gateway --profile stripe up -d --build --wait
+	$(LOCAL_COMPOSE) up -d --build --wait
 
 local-down:
 	$(LOCAL_COMPOSE) --profile "*" down --remove-orphans
 
 local-logs:
-	$(LOCAL_COMPOSE) --profile gateway logs -f --tail=100
+	$(LOCAL_COMPOSE) logs -f --tail=100
 
 local-rebuild:
-	$(LOCAL_COMPOSE) --profile gateway up -d --build --force-recreate --wait
+	$(LOCAL_COMPOSE) up -d --build --force-recreate --wait
 
 stripe-up:
-	$(LOCAL_COMPOSE) --profile stripe up -d stripe-cli
+	$(LOCAL_COMPOSE) up -d stripe-cli
 
 stripe-logs:
-	$(LOCAL_COMPOSE) --profile stripe logs -f --tail=100 stripe-cli
+	$(LOCAL_COMPOSE) logs -f --tail=100 stripe-cli
 
 migrate-core: local-start
 	$(LOCAL_COMPOSE) exec -T core-api alembic -c apps/core_api/alembic.ini upgrade head

@@ -1,0 +1,5 @@
+services: {}
+
+secrets:
+  resend_api_key:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/resend_api_key

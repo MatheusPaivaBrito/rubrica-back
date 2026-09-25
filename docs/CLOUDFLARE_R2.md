@@ -22,7 +22,7 @@ O último arquivo contém `rubrica-documents`. Para subir o ambiente com o R2:
 
 ```bash
 docker compose --env-file .env.production \
-  -f compose/production.yml -f compose/r2-documents.yml \
+  -f compose/production.yml -f compose/features/r2-documents.yml \
   up -d --build core-api gateway
 ```
 
@@ -35,11 +35,11 @@ cópia. O comando não remove o volume local:
 
 ```bash
 docker compose --env-file .env.production \
-  -f compose/production.yml -f compose/r2-documents.yml \
+  -f compose/production.yml -f compose/features/r2-documents.yml \
   run --rm core-api python toolbox/operations/migrate_documents_to_r2.py
 
 docker compose --env-file .env.production \
-  -f compose/production.yml -f compose/r2-documents.yml \
+  -f compose/production.yml -f compose/features/r2-documents.yml \
   run --rm core-api python toolbox/operations/migrate_documents_to_r2.py --apply
 ```
 

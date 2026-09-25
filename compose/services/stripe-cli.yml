@@ -1,0 +1,30 @@
+services:
+  local:
+    image: stripe/stripe-cli:latest
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        api_key="$$(tr -d '\r\n' < /run/secrets/stripe_secret_key)"
+        /bin/stripe listen \
+          --api-key "$$api_key" \
+          --device-name rubrica-local-compose \
+          --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed \
+          --forward-to http://core-api:8000/billing/webhooks/stripe 2>&1 | \
+        while IFS= read -r line; do
+          webhook_secret="$$(printf '%s\n' "$$line" | sed -n 's/.*\(whsec_[[:alnum:]]*\).*/\1/p')"
+          if [ -n "$$webhook_secret" ]; then
+            umask 077
+            printf '%s' "$$webhook_secret" > /runtime/stripe_webhook_secret.tmp
+            mv /runtime/stripe_webhook_secret.tmp /runtime/stripe_webhook_secret
+            echo "Ready! Stripe webhook signing secret synchronized with Core."
+          else
+            printf '%s\n' "$$line"
+          fi
+        done
+    secrets:
+      - stripe_secret_key
+    volumes:
+      - stripe_webhook_runtime:/runtime
+    depends_on:
+      - core-api
+    restart: unless-stopped
