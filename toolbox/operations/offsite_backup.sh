@@ -3,7 +3,7 @@ set -euo pipefail
 umask 077
 
 usage() {
-  echo "Usage: RESTIC_REPOSITORY=s3:s3.REGION.backblazeb2.com/BUCKET/rubrica RESTIC_PASSWORD_FILE=/path/password AWS_ACCESS_KEY_ID_FILE=/path/key-id AWS_SECRET_ACCESS_KEY_FILE=/path/key toolbox/operations/offsite_backup.sh init|create|upload|check|restore [directory]" >&2
+  echo "Usage: RESTIC_REPOSITORY=s3:https://S3-ENDPOINT/BUCKET/PREFIX RESTIC_PASSWORD_FILE=/path/password AWS_ACCESS_KEY_ID_FILE=/path/key-id AWS_SECRET_ACCESS_KEY_FILE=/path/key toolbox/operations/offsite_backup.sh init|create|upload|check|restore [directory]" >&2
   exit 2
 }
 
@@ -16,8 +16,8 @@ for variable in RESTIC_REPOSITORY RESTIC_PASSWORD_FILE AWS_ACCESS_KEY_ID_FILE AW
     exit 2
   fi
 done
-if [[ "${RESTIC_REPOSITORY}" != s3:*backblazeb2.com/* ]]; then
-  echo "[error] RESTIC_REPOSITORY must point to a Backblaze B2 S3 endpoint" >&2
+if [[ "${RESTIC_REPOSITORY}" != s3:* ]]; then
+  echo "[error] RESTIC_REPOSITORY must point to an S3-compatible repository" >&2
   exit 2
 fi
 for file in "$RESTIC_PASSWORD_FILE" "$AWS_ACCESS_KEY_ID_FILE" "$AWS_SECRET_ACCESS_KEY_FILE"; do
@@ -48,10 +48,22 @@ case "$action" in
     flock -n 9 || { echo "[error] Another offsite backup is running" >&2; exit 1; }
     path_file="$(mktemp)"
     trap 'rm -f "$path_file"' EXIT
-    BACKUP_PATH_OUTPUT="$path_file" "$(dirname "$0")/backup.sh" "${BACKUP_ROOT:-backups}"
+    BACKUP_INCLUDE_DOCUMENTS="${BACKUP_INCLUDE_DOCUMENTS:-1}" BACKUP_PATH_OUTPUT="$path_file" "$(dirname "$0")/backup.sh" "${BACKUP_ROOT:-backups}"
     backup_dir="$(cat "$path_file")"
     (cd "$backup_dir" && sha256sum --check SHA256SUMS)
     "${restic_cmd[@]}" backup --tag rubrica-production "$backup_dir"
+    "${restic_cmd[@]}" forget --tag rubrica-production \
+      --keep-daily "${RESTIC_KEEP_DAILY:-7}" \
+      --keep-weekly "${RESTIC_KEEP_WEEKLY:-4}" \
+      --keep-monthly "${RESTIC_KEEP_MONTHLY:-6}" --prune
+    if [[ "${DELETE_LOCAL_AFTER_UPLOAD:-0}" == "1" ]]; then
+      backup_root="$(cd "${BACKUP_ROOT:-backups}" && pwd)"
+      [[ "$backup_dir" == "$backup_root"/* ]] || {
+        echo "[error] Refusing to remove backup outside BACKUP_ROOT" >&2
+        exit 1
+      }
+      rm -rf -- "$backup_dir"
+    fi
     ;;
   upload)
     backup_dir="${2:-}"

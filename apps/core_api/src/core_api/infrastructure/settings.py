@@ -30,6 +30,16 @@ class Settings(BaseSettings):
     CONTACT_TURNSTILE_SECRET_KEY: str = ""
     CONTACT_TURNSTILE_SECRET_KEY_FILE: str | None = None
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
+    DOCUMENT_STORAGE_PROVIDER: Literal["local", "r2"] = "local"
+    R2_DOCUMENTS_ENDPOINT: str = ""
+    R2_DOCUMENTS_ENDPOINT_FILE: str | None = None
+    R2_DOCUMENTS_ACCESS_KEY_ID: str = ""
+    R2_DOCUMENTS_ACCESS_KEY_ID_FILE: str | None = None
+    R2_DOCUMENTS_SECRET_ACCESS_KEY: str = ""
+    R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: str | None = None
+    R2_DOCUMENTS_BUCKET: str = ""
+    R2_DOCUMENTS_BUCKET_FILE: str | None = None
+    R2_DOCUMENTS_PREFIX: str = "documents"
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
@@ -100,8 +110,21 @@ class Settings(BaseSettings):
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",
                 "SERPROID_CLIENT_SECRET": "SERPROID_CLIENT_SECRET_FILE",
                 "SERPRO_TIMESTAMP_CONSUMER_SECRET": "SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE",
+                "R2_DOCUMENTS_ENDPOINT": "R2_DOCUMENTS_ENDPOINT_FILE",
+                "R2_DOCUMENTS_ACCESS_KEY_ID": "R2_DOCUMENTS_ACCESS_KEY_ID_FILE",
+                "R2_DOCUMENTS_SECRET_ACCESS_KEY": "R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE",
+                "R2_DOCUMENTS_BUCKET": "R2_DOCUMENTS_BUCKET_FILE",
             },
         )
+        if self.DOCUMENT_STORAGE_PROVIDER == "r2" and not all(
+            (
+                self.R2_DOCUMENTS_ENDPOINT,
+                self.R2_DOCUMENTS_ACCESS_KEY_ID,
+                self.R2_DOCUMENTS_SECRET_ACCESS_KEY,
+                self.R2_DOCUMENTS_BUCKET,
+            )
+        ):
+            raise ValueError("R2 document storage requires endpoint, credentials and bucket")
         if self.ENVIRONMENT.lower() in {"production", "prod"} and (
             len(self.TENANT_IDENTITY_ENCRYPTION_KEY) < 32
             or len(self.TENANT_IDENTITY_HMAC_KEY) < 32

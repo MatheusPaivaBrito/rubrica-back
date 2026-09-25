@@ -132,6 +132,9 @@ docker compose --env-file .env.production -f compose/production.yml exec core-ap
 
 ### Production backup and restore verification
 
+Cloudflare R2 setup, automatic encrypted backups and private document storage
+are documented in [docs/CLOUDFLARE_R2.md](docs/CLOUDFLARE_R2.md).
+
 Create a consistent backup of every Rubrica PostgreSQL database and the signed
 document volume:
 

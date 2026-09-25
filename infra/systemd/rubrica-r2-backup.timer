@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Rubrica R2 backup every day
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 America/Sao_Paulo
+Persistent=true
+RandomizedDelaySec=10m
+Unit=rubrica-r2-backup.service
+
+[Install]
+WantedBy=timers.target

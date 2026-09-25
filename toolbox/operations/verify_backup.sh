@@ -23,7 +23,9 @@ cleanup() {
 trap cleanup EXIT
 
 tar -C "${work}" -xzf "${backup_dir}/databases.tar.gz"
-tar -tzf "${backup_dir}/documents.tar.gz" >/dev/null
+if [[ -f "${backup_dir}/documents.tar.gz" ]]; then
+  tar -tzf "${backup_dir}/documents.tar.gz" >/dev/null
+fi
 
 docker run --detach --name "${container}" \
   --env POSTGRES_PASSWORD="${password}" \
@@ -56,4 +58,4 @@ if [[ "${restored}" -eq 0 ]]; then
   exit 1
 fi
 
-echo "[ok] Checksums valid; ${restored} databases restored in an isolated PostgreSQL container; document archive readable"
+echo "[ok] Checksums valid; ${restored} databases restored in an isolated PostgreSQL container"

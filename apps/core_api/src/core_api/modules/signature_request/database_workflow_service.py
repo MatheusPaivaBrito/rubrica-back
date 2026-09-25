@@ -4,7 +4,6 @@ from datetime import timedelta
 from hashlib import sha256
 from hmac import new as hmac_new
 from io import BytesIO
-from pathlib import Path
 from secrets import token_urlsafe
 from typing import Callable
 from uuid import UUID, uuid4
@@ -18,7 +17,7 @@ from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.pdf_validation import validate_pdf_upload
-from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
+from core_api.modules.document.storage import DocumentStorage, configured_document_storage
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
@@ -697,4 +696,4 @@ class DatabaseSignatureWorkflowService:
         db.add(AuditEventEntity(signature_request_id=request_id, occurred_at=DateTimeService.utc_now(), actor_type="user", actor_id=actor_id, action=action, entity_type=entity_type, entity_id=UUID(str(entity_id)), correlation_id=uuid4(), metadata_sanitized=metadata))
 
 
-database_workflow_service = DatabaseSignatureWorkflowService(LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH)))
+database_workflow_service = DatabaseSignatureWorkflowService(configured_document_storage(settings))

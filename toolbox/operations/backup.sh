@@ -33,7 +33,7 @@ compose=(docker compose --project-name "${project_name}" --env-file "${env_file}
   work="$(mktemp -d)"
   trap "rm -rf -- $work" EXIT
   pg_dumpall --roles-only --username "$POSTGRES_USER" > "$work/roles.sql"
-  databases="$POSTGRES_DB,$POSTGRES_MULTIPLE_DATABASES"
+  databases="$POSTGRES_MULTIPLE_DATABASES"
   old_ifs="$IFS"
   IFS=","
   for database in $databases; do
@@ -48,20 +48,24 @@ compose=(docker compose --project-name "${project_name}" --env-file "${env_file}
   tar -C "$work" -czf - .
 ' > "${target}/databases.tar.gz"
 
-"${compose[@]}" exec -T core-api \
-  tar -C /var/lib/rubrica/documents -czf - . > "${target}/documents.tar.gz"
+if [[ "${BACKUP_INCLUDE_DOCUMENTS:-1}" == "1" ]]; then
+  "${compose[@]}" exec -T core-api \
+    tar -C /var/lib/rubrica/documents -czf - . > "${target}/documents.tar.gz"
+fi
 
 {
   echo "created_at=${timestamp}"
   echo "compose_project=${project_name}"
   echo "compose_file=${compose_file}"
   echo "database_format=pg_dump_custom"
-  echo "documents_format=tar_gzip"
+  echo "documents_format=$([[ -f "${target}/documents.tar.gz" ]] && echo tar_gzip || echo external_r2)"
 } > "${target}/manifest.txt"
 
 (
   cd "${target}"
-  sha256sum databases.tar.gz documents.tar.gz manifest.txt > SHA256SUMS
+  files=(databases.tar.gz manifest.txt)
+  [[ ! -f documents.tar.gz ]] || files+=(documents.tar.gz)
+  sha256sum "${files[@]}" > SHA256SUMS
 )
 chmod -R go-rwx "${target}"
 if [[ -n "${BACKUP_PATH_OUTPUT:-}" ]]; then

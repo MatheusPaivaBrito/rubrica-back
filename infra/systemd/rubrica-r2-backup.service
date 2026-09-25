@@ -1,0 +1,15 @@
+[Unit]
+Description=Rubrica encrypted PostgreSQL backup to Cloudflare R2
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/rubrica-r2-backup create
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target
