@@ -51,6 +51,7 @@ class UiContextResponse(BaseModel):
     subject: str
     user_id: str | None = None
     email: str | None = None
+    account_public_slug: str
     preferred_locale: SupportedLocale = "en"
     mfa_enabled: bool = False
     mfa_setup_required: bool = False

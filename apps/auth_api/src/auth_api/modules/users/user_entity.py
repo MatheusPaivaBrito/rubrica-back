@@ -1,4 +1,5 @@
 from datetime import datetime
+from secrets import token_urlsafe
 from uuid import UUID
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Uuid
@@ -11,6 +12,9 @@ class UserEntity(BaseEntity):
     __tablename__ = "users"
 
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    public_slug: Mapped[str] = mapped_column(
+        String(32), unique=True, index=True, nullable=False, default=lambda: token_urlsafe(18)
+    )
     name: Mapped[str | None] = mapped_column(String(180), index=True)
     preferred_locale: Mapped[str] = mapped_column(
         String(10), default="en", server_default="en", nullable=False, index=True

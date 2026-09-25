@@ -1,4 +1,4 @@
-from hashlib import sha256
+from secrets import token_urlsafe
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,11 @@ EURO_COUNTRY_CODES = frozenset(
         "SK", "SM", "VA", "XK",
     }
 )
+
+
+def _public_slug() -> str:
+    """Return an opaque, URL-safe identifier with 144 bits of entropy."""
+    return token_urlsafe(18)
 
 
 def billing_currency_for_country(country_code: str | None) -> str:
@@ -59,7 +64,7 @@ class TenantService:
 
             tenant = TenantEntity(
                 name=payload.name.strip(),
-                slug=f"account-{sha256(owner.encode()).hexdigest()[:20]}",
+                slug=_public_slug(),
                 status="active",
                 default_locale=payload.default_locale,
                 country_code=payload.country_code,
@@ -96,7 +101,7 @@ class TenantService:
         with SessionLocal.begin() as db:
             tenant = TenantEntity(
                 name=payload.name.strip(),
-                slug=payload.slug,
+                slug=_public_slug(),
                 status="active",
                 default_locale=payload.default_locale,
                 country_code=payload.country_code,
@@ -108,7 +113,8 @@ class TenantService:
                 db.flush()
             except IntegrityError as exc:
                 raise WorkflowError("Tenant slug is already in use", 409) from exc
-            db.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id=subject.lower(), role="admin"))
+            member = TenantMemberEntity(tenant_id=tenant.id, auth_user_id=subject.lower(), role="admin")
+            db.add(member)
             db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
             db.flush()
             return self._read(tenant, "admin")

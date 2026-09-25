@@ -75,7 +75,7 @@ def test_access_lookup_rejects_stale_mapping_during_rotation(monkeypatch) -> Non
 
 @pytest.mark.parametrize("role", ["signature_admin", "signature_operator", "signature_signer"])
 def test_account_context_requires_mfa_before_granting_roles(monkeypatch, role: str) -> None:
-    user = SimpleNamespace(id=uuid4(), preferred_locale="pt-BR", mfa_enabled=False)
+    user = SimpleNamespace(id=uuid4(), public_slug="account-public", preferred_locale="pt-BR", mfa_enabled=False)
 
     class Database:
         def __enter__(self):
@@ -94,6 +94,8 @@ def test_account_context_requires_mfa_before_granting_roles(monkeypatch, role: s
     monkeypatch.setattr("auth_api.modules.sessions.session_service.access_control_service.context_for_user", lambda _id: ([role], ["*"]))
 
     context = service.ui_context("access-token")
+
+    assert context.account_public_slug == "account-public"
     assert context is not None
     assert context.mfa_setup_required
     assert context.roles == []

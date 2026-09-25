@@ -38,6 +38,7 @@ def test_user_locale_is_normalized_in_creation_and_preferences() -> None:
 def test_ui_context_v2_exposes_the_user_locale() -> None:
     context = UiContextResponse(
         subject="demo@example.com",
+        account_public_slug="account-public",
         preferred_locale="ja-JP",
         permission_keys=[],
         capability_hash="fingerprint",
@@ -50,7 +51,6 @@ def test_ui_context_v2_exposes_the_user_locale() -> None:
 def test_tenant_international_preferences_are_normalized() -> None:
     tenant = TenantCreate(
         name="Tokyo",
-        slug="tokyo",
         default_locale="ja",
         country_code="jp",
         timezone="Asia/Tokyo",

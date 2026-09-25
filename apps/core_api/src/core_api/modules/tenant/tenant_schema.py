@@ -16,7 +16,6 @@ from shared_kernel.localization import (
 
 class TenantCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
-    slug: str = Field(min_length=2, max_length=120, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     default_locale: SupportedLocale = "en"
     country_code: str | None = None
     timezone: str = "UTC"
