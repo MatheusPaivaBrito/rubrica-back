@@ -65,9 +65,18 @@ def test_checkout_selects_price_for_every_plan_and_currency(
     assert BillingService._price_for_currency(currency, product_code) == expected
 
 
-def test_checkout_selects_annual_team_price(monkeypatch) -> None:
-    monkeypatch.setattr("core_api.modules.billing.billing_service.settings.STRIPE_PRICE_TEAM_ANNUAL_BRL", "price_team_annual_brl")
-    assert BillingService._price_for_currency("BRL", "rubrica_team", "year") == "price_team_annual_brl"
+@pytest.mark.parametrize(
+    ("product_code", "setting_name"),
+    [
+        ("rubrica_base", "STRIPE_PRICE_ANNUAL_BRL"),
+        ("rubrica_intermediate", "STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL"),
+        ("rubrica_team", "STRIPE_PRICE_TEAM_ANNUAL_BRL"),
+    ],
+)
+def test_checkout_selects_annual_price(monkeypatch, product_code: str, setting_name: str) -> None:
+    expected = f"price_{product_code}_annual_brl"
+    monkeypatch.setattr(f"core_api.modules.billing.billing_service.settings.{setting_name}", expected)
+    assert BillingService._price_for_currency("BRL", product_code, "year") == expected
 
 
 def test_team_plan_limits() -> None:

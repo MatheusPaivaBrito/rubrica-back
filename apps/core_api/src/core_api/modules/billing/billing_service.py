@@ -792,12 +792,20 @@ class BillingService:
                     settings.STRIPE_PRICE_USD,
                     settings.STRIPE_PRICE_EUR,
                     settings.STRIPE_PRICE_JPY,
+                    settings.STRIPE_PRICE_ANNUAL_BRL,
+                    settings.STRIPE_PRICE_ANNUAL_USD,
+                    settings.STRIPE_PRICE_ANNUAL_EUR,
+                    settings.STRIPE_PRICE_ANNUAL_JPY,
                 ),
                 "rubrica_intermediate": (
                     settings.STRIPE_PRICE_INTERMEDIATE_BRL,
                     settings.STRIPE_PRICE_INTERMEDIATE_USD,
                     settings.STRIPE_PRICE_INTERMEDIATE_EUR,
                     settings.STRIPE_PRICE_INTERMEDIATE_JPY,
+                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL,
+                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD,
+                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR,
+                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY,
                 ),
                 "rubrica_team": (
                     settings.STRIPE_PRICE_TEAM_BRL,
@@ -898,27 +906,19 @@ class BillingService:
     def _price_for_currency(currency: str, product_code: str = "rubrica_base", billing_interval: str = "month") -> str:
         prices = {
             "rubrica_base": {
-                "BRL": settings.STRIPE_PRICE_BRL,
-                "USD": settings.STRIPE_PRICE_USD,
-                "EUR": settings.STRIPE_PRICE_EUR,
-                "JPY": settings.STRIPE_PRICE_JPY,
+                "month": {"BRL": settings.STRIPE_PRICE_BRL, "USD": settings.STRIPE_PRICE_USD, "EUR": settings.STRIPE_PRICE_EUR, "JPY": settings.STRIPE_PRICE_JPY},
+                "year": {"BRL": settings.STRIPE_PRICE_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_ANNUAL_JPY},
             },
             "rubrica_intermediate": {
-                "BRL": settings.STRIPE_PRICE_INTERMEDIATE_BRL,
-                "USD": settings.STRIPE_PRICE_INTERMEDIATE_USD,
-                "EUR": settings.STRIPE_PRICE_INTERMEDIATE_EUR,
-                "JPY": settings.STRIPE_PRICE_INTERMEDIATE_JPY,
+                "month": {"BRL": settings.STRIPE_PRICE_INTERMEDIATE_BRL, "USD": settings.STRIPE_PRICE_INTERMEDIATE_USD, "EUR": settings.STRIPE_PRICE_INTERMEDIATE_EUR, "JPY": settings.STRIPE_PRICE_INTERMEDIATE_JPY},
+                "year": {"BRL": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY},
             },
             "rubrica_team": {
                 "month": {"BRL": settings.STRIPE_PRICE_TEAM_BRL, "USD": settings.STRIPE_PRICE_TEAM_USD, "EUR": settings.STRIPE_PRICE_TEAM_EUR, "JPY": settings.STRIPE_PRICE_TEAM_JPY},
                 "year": {"BRL": settings.STRIPE_PRICE_TEAM_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_TEAM_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_TEAM_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_TEAM_ANNUAL_JPY},
             },
         }
-        configured = prices.get(product_code, {})
-        if product_code == "rubrica_team":
-            configured = configured.get(billing_interval, {})
-        elif billing_interval != "month":
-            configured = {}
+        configured = prices.get(product_code, {}).get(billing_interval, {})
         price_id = configured.get(currency.upper())
         if not price_id:
             raise WorkflowError(
