@@ -15,6 +15,7 @@ from auth_api.modules.users.user_identifier_entity import UserIdentifierEntity
 from auth_api.modules.users.user_identifier_service import add_identifier, validate_identifier
 from hmac import compare_digest, new as hmac_new
 from pydantic import BaseModel
+from uuid import UUID
 from auth_api.modules.users.user_schema import (
     UserCreate,
     UserIdentifierRead,
@@ -31,6 +32,40 @@ class InternalIdentityMatch(BaseModel):
     email: str
     identifier_type: str
     identifier: str
+
+
+class InternalUserResolve(BaseModel):
+    user_id: UUID
+    email: str
+
+
+@router.get("/internal/resolve", response_model=InternalUserResolve, include_in_schema=False)
+async def internal_user_resolve(
+    email: str,
+    x_rubrica_service: str | None = Header(default=None),
+    x_rubrica_service_key: str | None = Header(default=None),
+) -> InternalUserResolve:
+    from auth_api.infrastructure.settings import settings
+    from shared_kernel.security.service_tokens import verify_service_token
+
+    if (
+        x_rubrica_service != "core_api"
+        or not settings.CORE_INTERNAL_SERVICE_KEY
+        or not verify_service_token(x_rubrica_service_key or "", settings.CORE_INTERNAL_SERVICE_KEY)
+    ):
+        raise HTTPException(status_code=403, detail="Service authentication failed")
+    normalized = email.strip().lower()
+    with SessionLocal() as database:
+        user = database.scalar(
+            select(UserEntity).where(
+                UserEntity.email == normalized,
+                UserEntity.deleted_at.is_(None),
+                UserEntity.is_active.is_(True),
+            )
+        )
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        return InternalUserResolve(user_id=user.id, email=user.email)
 
 
 @router.post("/internal/identity-match", include_in_schema=False)

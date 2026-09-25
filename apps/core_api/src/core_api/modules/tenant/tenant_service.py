@@ -11,6 +11,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_identity import InvalidBusinessIdentifierError, protect_cnpj
+from core_api.modules.tenant.user_client import resolve_auth_user
 from shared_kernel.time.datetime_service import DateTimeService
 from core_api.modules.tenant.tenant_schema import (
     TenantBusinessConversion,
@@ -130,6 +131,7 @@ class TenantService:
             return self._read(tenant, "admin")
 
     def add_member(self, tenant_id: UUID, payload: TenantMemberCreate, subject: str) -> None:
+        member_user_uuid = resolve_auth_user(payload.auth_user_id.lower())
         with SessionLocal.begin() as db:
             self.require_role(db, tenant_id, subject, {"admin"})
             tenant = db.get(TenantEntity, tenant_id)
@@ -150,7 +152,7 @@ class TenantService:
             ) or 0
             if active_members >= 3:
                 raise WorkflowError("The Professional plan allows up to 3 tenant members", 409)
-            db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), role=payload.role, status="active", joined_at=DateTimeService.utc_now()))
+            db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), auth_user_uuid=member_user_uuid, role=payload.role, status="active", joined_at=DateTimeService.utc_now()))
             try:
                 db.flush()
             except IntegrityError as exc:
