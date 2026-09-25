@@ -25,6 +25,9 @@ class UserEntity(BaseEntity):
     mfa_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    mfa_exempt: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     mfa_secret_ciphertext: Mapped[str | None] = mapped_column(String(512))
     mfa_pending_secret_ciphertext: Mapped[str | None] = mapped_column(String(512))
     mfa_last_used_step: Mapped[int | None] = mapped_column(Integer)

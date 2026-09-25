@@ -39,6 +39,7 @@ def _auth_users(password: str) -> dict[str, UUID]:
                 user.password_hash = hash_password(password)
             user.email_verified = True
             user.is_active = True
+            user.mfa_exempt = True
             role = database.scalar(
                 select(UserRoleEntity).where(
                     UserRoleEntity.user_id == user.id,
