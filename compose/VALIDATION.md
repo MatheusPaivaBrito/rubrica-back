@@ -6,8 +6,8 @@
 - O modelo efetivo dos serviços de `local.yml` foi comparado com a entrega anterior e permaneceu equivalente.
 - O modelo efetivo dos serviços de `production.yml` foi comparado com a entrega anterior e permaneceu equivalente.
 - O conjunto efetivo de secrets, volumes e networks de local e produção permaneceu equivalente à entrega anterior.
-- A configuração Stripe do Core foi movida para `features/stripe.yml`.
-- `stripe_secret_key`, `stripe_webhook_secret` e o runtime volume local foram removidos de `resources/` genérico e passaram para arquivos de recursos da feature Stripe.
+- A configuração Stripe do Core está nas variantes local e produção de `services/core-api.yml`.
+- `stripe_secret_key`, `stripe_webhook_secret` e o runtime volume local ficam nos dois arquivos Stripe da pasta `features/`.
 - `stripe_webhook_runtime` existe somente no modelo local; produção não recebe volume Stripe não utilizado.
 - `stripe-cli` continua presente no local e ausente em produção.
 - Na produção resolvida estaticamente, somente `gateway` possui `ports`, com `127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080`.
@@ -19,19 +19,19 @@
 
 ### Local
 
-- `core-api` herda a configuração de `features/stripe.yml` na variante `local`;
-- `stripe-cli` continua em `services/stripe-cli.yml`;
+- `core-api` recebe a configuração Stripe em sua variante `local`;
+- `stripe-cli` fica em `features/stripe-local.yml`;
 - `stripe-cli` usa `stripe_secret_key` e `stripe_webhook_runtime`;
 - o Core lê o signing secret efêmero em `/run/rubrica/stripe/stripe_webhook_secret`;
-- os recursos específicos ficam em `features/stripe-local-resources.yml`.
+- os recursos específicos ficam em `features/stripe-local.yml`.
 
 ### Produção
 
-- `core-api` herda a configuração de `features/stripe.yml` na variante `production`;
+- `core-api` recebe a configuração Stripe em sua variante `production`;
 - `BILLING_PROVIDER` continua `stripe`;
 - os mesmos nomes de variáveis/preços Stripe foram preservados;
 - `stripe_secret_key` e `stripe_webhook_secret` continuam secrets baseados em arquivos;
-- os recursos específicos ficam em `features/stripe-production-resources.yml`;
+- os recursos específicos ficam em `features/stripe-production.yml`;
 - `stripe-cli` não faz parte da topologia de produção.
 
 ## Arquivos desta revisão
@@ -43,9 +43,8 @@
 - `compose/VALIDATION.md`
 - arquivos por serviço em `compose/services/`
 - recursos compartilhados em `compose/resources/`
-- `compose/features/stripe.yml`
-- `compose/features/stripe-local-resources.yml`
-- `compose/features/stripe-production-resources.yml`
+- `compose/features/stripe-local.yml`
+- `compose/features/stripe-production.yml`
 - `compose/features/r2-documents.yml`
 - `compose/features/serpro-timestamp.yml`
 

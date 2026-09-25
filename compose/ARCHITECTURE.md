@@ -29,13 +29,11 @@ compose/
 │   ├── notification-api.yml
 │   ├── web.yml
 │   ├── gateway.yml
-│   ├── stripe-cli.yml
 │   ├── cloudflared.yml
 │   └── k6.yml
 ├── features/
-│   ├── stripe.yml
-│   ├── stripe-local-resources.yml
-│   ├── stripe-production-resources.yml
+│   ├── stripe-local.yml
+│   ├── stripe-production.yml
 │   ├── r2-documents.yml
 │   └── serpro-timestamp.yml
 └── resources/
@@ -58,7 +56,7 @@ Exemplos:
 
 ### Stripe CLI não é a integração Stripe
 
-`services/stripe-cli.yml` existe exclusivamente para desenvolvimento local. Ele executa `stripe listen`, recebe eventos do Stripe e encaminha o webhook para:
+O serviço `stripe-cli`, definido em `features/stripe-local.yml`, existe exclusivamente para desenvolvimento local. Ele executa `stripe listen`, recebe eventos do Stripe e encaminha o webhook para:
 
 ```text
 http://core-api:8000/billing/webhooks/stripe
@@ -74,7 +72,7 @@ Uma feature representa uma capacidade da aplicação que não precisa correspond
 
 ### Stripe
 
-`features/stripe.yml` contém a configuração de billing Stripe aplicada ao Core:
+As variantes `local` e `production` de `services/core-api.yml` contêm a configuração de billing Stripe aplicada ao Core:
 
 - `BILLING_PROVIDER`;
 - referências para `stripe_secret_key` e `stripe_webhook_secret`;
@@ -82,11 +80,11 @@ Uma feature representa uma capacidade da aplicação que não precisa correspond
 - `BILLING_GRACE_PERIOD_DAYS`;
 - no local, o caminho do signing secret gerado pelo Stripe CLI.
 
-`features/stripe-local-resources.yml` e `features/stripe-production-resources.yml` declaram os recursos Docker pertencentes à feature por ambiente:
+`features/stripe-local.yml` e `features/stripe-production.yml` declaram os recursos Docker pertencentes à integração por ambiente:
 
 - `stripe_secret_key`;
 - `stripe_webhook_secret`;
-- `stripe_webhook_runtime` somente no local.
+- `stripe_webhook_runtime` e o container `stripe-cli` somente no local.
 
 O arquivo de recursos é separado porque o Docker Compose **não importa automaticamente secrets, volumes ou networks referenciados por um serviço recebido via `extends`**. Os pontos de entrada incluem explicitamente o arquivo de recursos Stripe do próprio ambiente.
 
@@ -114,7 +112,7 @@ Exemplos:
 - volumes persistentes gerais;
 - redes `rubrica_internal` e `rubrica_external`.
 
-Não devolver secrets do Stripe para esses arquivos. Eles pertencem a `features/stripe-local-resources.yml` / `features/stripe-production-resources.yml`.
+Não devolver secrets do Stripe para esses arquivos. Eles pertencem a `features/stripe-local.yml` / `features/stripe-production.yml`.
 
 ## Pontos de entrada
 
@@ -163,9 +161,9 @@ sudo docker compose --env-file .env.production -f compose/production.yml up -d -
 2. A porta publicada de produção continua `127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080`.
 3. `cloudflared` deve alcançar `http://gateway:8080` e depender do healthcheck do gateway.
 4. `stripe-cli` é exclusivamente local.
-5. Stripe é billing padrão de produção e sua configuração pertence a `features/stripe.yml`.
+5. Stripe é billing padrão de produção; sua configuração do Core pertence a `services/core-api.yml` e seus recursos pertencem aos dois arquivos Stripe em `features/`.
 6. R2 e SERPRO Timestamp continuam opcionais.
-7. Não mover novamente variáveis/preços/secrets do Stripe para `services/core-api.yml`.
+7. Manter variáveis e preços do Stripe nas variantes correspondentes de `services/core-api.yml`.
 8. Não mover secrets específicos do Stripe para `resources/local.yml` ou `resources/production.yml`.
 9. Nunca versionar valores reais de secrets; usar arquivos em `${SECRETS_DIR:-/etc/rubrica/secrets}`.
 10. Preservar os nomes dos serviços porque são usados por DNS interno, Nginx, scripts e dependências.

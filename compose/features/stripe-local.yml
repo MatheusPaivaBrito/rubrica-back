@@ -1,5 +1,5 @@
 services:
-  local:
+  stripe-cli:
     image: stripe/stripe-cli:latest
     entrypoint: ["/bin/sh", "-ec"]
     command:
@@ -28,3 +28,12 @@ services:
     depends_on:
       - core-api
     restart: unless-stopped
+
+secrets:
+  stripe_secret_key:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_secret_key
+  stripe_webhook_secret:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/stripe_webhook_secret
+
+volumes:
+  stripe_webhook_runtime:

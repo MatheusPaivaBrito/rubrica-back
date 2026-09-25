@@ -3,7 +3,7 @@ name: rubrica
 include:
   - path: ./resources/local.yml
     project_directory: .
-  - path: ./features/stripe-local-resources.yml
+  - path: ./features/stripe-local.yml
     project_directory: .
 
 services:
@@ -20,11 +20,6 @@ services:
   core-api:
     extends:
       file: ./services/core-api.yml
-      service: local
-
-  stripe-cli:
-    extends:
-      file: ./services/stripe-cli.yml
       service: local
 
   web:

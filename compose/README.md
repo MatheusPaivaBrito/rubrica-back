@@ -9,8 +9,8 @@ Para regras de manutenção e para agentes de código, leia **`ARCHITECTURE.md` 
 - `local.yml`: ponto de entrada do ambiente local.
 - `production.yml`: ponto de entrada da produção.
 - `services/`: containers/processos da topologia.
-- `features/stripe.yml`: configuração Stripe aplicada ao Core.
-- `features/stripe-local-resources.yml` e `features/stripe-production-resources.yml`: recursos pertencentes ao Stripe por ambiente.
+- `features/stripe-local.yml`: Stripe CLI, secrets e volume de webhook do ambiente local.
+- `features/stripe-production.yml`: secrets Stripe usados em produção.
 - `features/r2-documents.yml`: override opcional para documentos no Cloudflare R2.
 - `features/serpro-timestamp.yml`: override opcional para SERPRO Timestamp.
 - `resources/`: secrets, volumes e networks compartilhados que não pertencem a uma feature específica.
@@ -19,9 +19,9 @@ Para regras de manutenção e para agentes de código, leia **`ARCHITECTURE.md` 
 
 Stripe é o billing padrão e já faz parte da composição normal.
 
-No local, `services/stripe-cli.yml` sobe o container auxiliar que executa `stripe listen` e sincroniza o signing secret efêmero com o Core através de `stripe_webhook_runtime`.
+No local, `features/stripe-local.yml` sobe o container auxiliar que executa `stripe listen` e sincroniza o signing secret efêmero com o Core através de `stripe_webhook_runtime`.
 
-Em produção **não existe `stripe-cli`**. O Core recebe a configuração de `features/stripe.yml`, usa `stripe_secret_key` e `stripe_webhook_secret`, e os webhooks chegam pelo endpoint público normal.
+Em produção **não existe `stripe-cli`**. `features/stripe-production.yml` declara somente `stripe_secret_key` e `stripe_webhook_secret`; os webhooks chegam pelo endpoint público normal.
 
 ## Local
 

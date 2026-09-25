@@ -1,8 +1,5 @@
 services:
   local:
-    extends:
-      file: ../features/stripe.yml
-      service: local
     build:
       context: ../..
       dockerfile: apps/core_api/dockerfile
@@ -10,6 +7,35 @@ services:
       - "127.0.0.1:${CORE_API_HOST_PORT:-7102}:8000"
     command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
     environment:
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
+      STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
+      STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
+      STRIPE_RUNTIME_WEBHOOK_SECRET_FILE: /run/rubrica/stripe/stripe_webhook_secret
+      STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
+      STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
+      STRIPE_PRICE_EUR: ${STRIPE_PRICE_EUR:-}
+      STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
+      STRIPE_PRICE_ANNUAL_BRL: ${STRIPE_PRICE_ANNUAL_BRL:-}
+      STRIPE_PRICE_ANNUAL_USD: ${STRIPE_PRICE_ANNUAL_USD:-}
+      STRIPE_PRICE_ANNUAL_EUR: ${STRIPE_PRICE_ANNUAL_EUR:-}
+      STRIPE_PRICE_ANNUAL_JPY: ${STRIPE_PRICE_ANNUAL_JPY:-}
+      STRIPE_PRICE_INTERMEDIATE_BRL: ${STRIPE_PRICE_INTERMEDIATE_BRL:-}
+      STRIPE_PRICE_INTERMEDIATE_USD: ${STRIPE_PRICE_INTERMEDIATE_USD:-}
+      STRIPE_PRICE_INTERMEDIATE_EUR: ${STRIPE_PRICE_INTERMEDIATE_EUR:-}
+      STRIPE_PRICE_INTERMEDIATE_JPY: ${STRIPE_PRICE_INTERMEDIATE_JPY:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY:-}
+      STRIPE_PRICE_TEAM_BRL: ${STRIPE_PRICE_TEAM_BRL:-}
+      STRIPE_PRICE_TEAM_USD: ${STRIPE_PRICE_TEAM_USD:-}
+      STRIPE_PRICE_TEAM_EUR: ${STRIPE_PRICE_TEAM_EUR:-}
+      STRIPE_PRICE_TEAM_JPY: ${STRIPE_PRICE_TEAM_JPY:-}
+      STRIPE_PRICE_TEAM_ANNUAL_BRL: ${STRIPE_PRICE_TEAM_ANNUAL_BRL:-}
+      STRIPE_PRICE_TEAM_ANNUAL_USD: ${STRIPE_PRICE_TEAM_ANNUAL_USD:-}
+      STRIPE_PRICE_TEAM_ANNUAL_EUR: ${STRIPE_PRICE_TEAM_ANNUAL_EUR:-}
+      STRIPE_PRICE_TEAM_ANNUAL_JPY: ${STRIPE_PRICE_TEAM_ANNUAL_JPY:-}
+      BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
       PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
       POSTGRES_USER: ${POSTGRES_USER:-rubrica}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
@@ -38,19 +64,48 @@ services:
       TENANT_IDENTITY_HMAC_KEY: ${TENANT_IDENTITY_HMAC_KEY:-rubrica-development-tenant-hmac-key-change-me}
     volumes:
       - ../../data/documents:/var/lib/rubrica/documents
+      - stripe_webhook_runtime:/run/rubrica/stripe:ro
+    secrets:
+      - stripe_secret_key
+      - stripe_webhook_secret
     depends_on:
       - postgres
 
   production:
-    extends:
-      file: ../features/stripe.yml
-      service: production
     build:
       context: ../..
       dockerfile: apps/core_api/dockerfile
     restart: unless-stopped
     command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
     environment:
+      BILLING_PROVIDER: stripe
+      STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
+      STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
+      STRIPE_PRICE_BRL: ${STRIPE_PRICE_BRL:-}
+      STRIPE_PRICE_INTERMEDIATE_BRL: ${STRIPE_PRICE_INTERMEDIATE_BRL:-}
+      STRIPE_PRICE_USD: ${STRIPE_PRICE_USD:-}
+      STRIPE_PRICE_EUR: ${STRIPE_PRICE_EUR:-}
+      STRIPE_PRICE_JPY: ${STRIPE_PRICE_JPY:-}
+      STRIPE_PRICE_ANNUAL_BRL: ${STRIPE_PRICE_ANNUAL_BRL:-}
+      STRIPE_PRICE_ANNUAL_USD: ${STRIPE_PRICE_ANNUAL_USD:-}
+      STRIPE_PRICE_ANNUAL_EUR: ${STRIPE_PRICE_ANNUAL_EUR:-}
+      STRIPE_PRICE_ANNUAL_JPY: ${STRIPE_PRICE_ANNUAL_JPY:-}
+      STRIPE_PRICE_INTERMEDIATE_USD: ${STRIPE_PRICE_INTERMEDIATE_USD:-}
+      STRIPE_PRICE_INTERMEDIATE_EUR: ${STRIPE_PRICE_INTERMEDIATE_EUR:-}
+      STRIPE_PRICE_INTERMEDIATE_JPY: ${STRIPE_PRICE_INTERMEDIATE_JPY:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR:-}
+      STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY: ${STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY:-}
+      STRIPE_PRICE_TEAM_BRL: ${STRIPE_PRICE_TEAM_BRL:-}
+      STRIPE_PRICE_TEAM_USD: ${STRIPE_PRICE_TEAM_USD:-}
+      STRIPE_PRICE_TEAM_EUR: ${STRIPE_PRICE_TEAM_EUR:-}
+      STRIPE_PRICE_TEAM_JPY: ${STRIPE_PRICE_TEAM_JPY:-}
+      STRIPE_PRICE_TEAM_ANNUAL_BRL: ${STRIPE_PRICE_TEAM_ANNUAL_BRL:-}
+      STRIPE_PRICE_TEAM_ANNUAL_USD: ${STRIPE_PRICE_TEAM_ANNUAL_USD:-}
+      STRIPE_PRICE_TEAM_ANNUAL_EUR: ${STRIPE_PRICE_TEAM_ANNUAL_EUR:-}
+      STRIPE_PRICE_TEAM_ANNUAL_JPY: ${STRIPE_PRICE_TEAM_ANNUAL_JPY:-}
+      BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
       ENVIRONMENT: production
       APP_DEBUG: "false"
       PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
@@ -90,6 +145,8 @@ services:
       - notification_internal_service_key
       - contact_turnstile_secret_key
       - serproid_client_secret
+      - stripe_secret_key
+      - stripe_webhook_secret
     volumes:
       - document_storage:/var/lib/rubrica/documents
     depends_on:

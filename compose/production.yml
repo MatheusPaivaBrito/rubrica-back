@@ -3,7 +3,7 @@ name: rubrica-prod
 include:
   - path: ./resources/production.yml
     project_directory: .
-  - path: ./features/stripe-production-resources.yml
+  - path: ./features/stripe-production.yml
     project_directory: .
 
 services:
