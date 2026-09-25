@@ -40,6 +40,7 @@ def _auth_users(password: str) -> dict[str, UUID]:
             user.email_verified = True
             user.is_active = True
             user.mfa_exempt = True
+            user.preferred_locale = "pt-BR"
             role = database.scalar(
                 select(UserRoleEntity).where(
                     UserRoleEntity.user_id == user.id,

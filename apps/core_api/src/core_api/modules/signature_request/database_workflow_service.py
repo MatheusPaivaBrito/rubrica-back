@@ -9,12 +9,11 @@ from secrets import token_urlsafe
 from typing import Callable
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
-from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
@@ -42,15 +41,17 @@ class DatabaseSignatureWorkflowService:
         key, size = self.storage.put(BytesIO(content), filename=payload.original_filename)
         try:
             with SessionLocal.begin() as db:
-                tenant = db.scalar(select(TenantEntity).where(or_(TenantEntity.slug == payload.organization_id.lower(), func.lower(TenantEntity.name) == payload.organization_id.lower()), TenantEntity.deleted_at.is_(None)))
+                tenant = db.scalar(
+                    select(TenantEntity).where(
+                        TenantEntity.slug == payload.organization_id,
+                        TenantEntity.deleted_at.is_(None),
+                    )
+                )
                 if tenant is None:
-                    tenant = TenantEntity(name=payload.organization_id, slug=payload.organization_id.lower(), status="active")
-                    db.add(tenant)
-                    db.flush()
-                    db.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id=payload.created_by.lower(), role="admin"))
-                    db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
-                else:
-                    tenant_service.require_role(db, tenant.id, payload.created_by, {"admin", "member"})
+                    raise WorkflowError("Tenant not found", 404)
+                tenant_service.require_role(
+                    db, tenant.id, payload.created_by, {"admin", "member"}
+                )
                 billing_service.consume_document(db, tenant.id)
                 item = DocumentEntity(**payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
                 db.add(item)

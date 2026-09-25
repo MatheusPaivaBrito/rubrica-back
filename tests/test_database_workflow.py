@@ -75,9 +75,26 @@ def test_signature_entitlement_limit_and_active_subscription() -> None:
 
 def test_database_workflow_round_trip(tmp_path: Path) -> None:
     service = DatabaseSignatureWorkflowService(LocalDocumentStorage(tmp_path / "objects"))
-    organization = "database-smoke-test"
+    organization = f"database-smoke-{uuid4()}"
     document_id: UUID | None = None
     try:
+        with SessionLocal.begin() as db:
+            tenant = TenantEntity(name="Database smoke test", slug=organization)
+            db.add(tenant)
+            db.flush()
+            db.add(
+                TenantMemberEntity(
+                    tenant_id=tenant.id,
+                    auth_user_id="operator",
+                    role="admin",
+                )
+            )
+            db.add(
+                BillingAccountEntity(
+                    tenant_id=tenant.id,
+                    status="not_configured",
+                )
+            )
         source = BytesIO()
         writer = PdfWriter()
         writer.add_blank_page(width=595, height=842)
