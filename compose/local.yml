@@ -106,7 +106,6 @@ services:
 
 
       stripe-cli:
-        profiles: ["stripe"]
         image: stripe/stripe-cli:latest
         entrypoint: ["/bin/sh", "-ec"]
         command:
@@ -232,7 +231,6 @@ services:
 
       gateway:
         image: nginx:stable-alpine
-        profiles: ["gateway"]
         ports:
           - "127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080"
         volumes:

@@ -223,6 +223,25 @@ services:
       notification-api: { condition: service_started }
     networks: [rubrica_internal]
 
+  gateway:
+    image: nginx:stable-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080"
+    volumes:
+      - ../infra/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../infra/gateway/proxy_params:/etc/nginx/proxy_params:ro
+    depends_on:
+      web: { condition: service_started }
+      auth-api: { condition: service_started }
+      core-api: { condition: service_started }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [rubrica_internal]
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
@@ -235,7 +254,7 @@ services:
     command: ["tunnel", "--no-autoupdate", "run", "--token-file", "/run/secrets/cloudflare_tunnel_token"]
     secrets: [cloudflare_tunnel_token]
     depends_on:
-      web: { condition: service_started }
+      gateway: { condition: service_healthy }
     networks: [rubrica_internal, rubrica_external]
 
 secrets:
