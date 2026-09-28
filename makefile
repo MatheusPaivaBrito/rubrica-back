@@ -19,9 +19,12 @@ LOCAL_COMPOSE_FILE ?= compose/local.yml
 PRODUCTION_COMPOSE_FILE ?= compose/production.yml
 LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_FILE)
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE)
+LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
+LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
+PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs-build local-config local-start local-up local-up-stripe local-down local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -30,6 +33,7 @@ help:
 	@echo "  make local-up            Build and start the local stack"
 	@echo "  make local-up-stripe     Build local stack and start Stripe webhook forwarding"
 	@echo "  make local-down          Stop the local stack"
+	@echo "  make local-reset         Delete local database volumes, migrate, seed and start again"
 	@echo "  make local-logs          Follow local service logs"
 	@echo "  make local-rebuild       Rebuild and recreate the local stack"
 	@echo "  make stripe-up           Start the optional local Stripe listener"
@@ -48,7 +52,7 @@ help:
 	@echo "Runtime"
 	@echo "  make compose-up          Alias for local-up"
 	@echo "  make compose-down        Alias for local-down"
-	@echo "  make bootstrap           Start local containers, migrate and seed Auth"
+	@echo "  make bootstrap           Migrate, seed local plan accounts, then start the stack"
 	@echo "  make production-config  Validate the production Compose and secrets"
 	@echo "  make production-up      Build and start the production stack"
 	@echo "  make production-migrate Apply every production migration"
@@ -69,13 +73,13 @@ help:
 	@echo ""
 	@echo "Database"
 	@echo "  Postgres and Redis are available only inside the Compose network"
-	@echo "  make migrate             Run Core and Auth database migrations"
+	@echo "  make migrate             Run all four databases in a one-shot container"
 	@echo "  make migrate-all         Alias for make migrate"
 	@echo "  make migrate-core           Run Core Alembic migrations"
 	@echo "  make revision-core msg=create_domain"
 	@echo "  make migrate-auth           Run Auth Alembic migrations"
 	@echo "  make seed-auth              Create the local signature administrator"
-	@echo "  make seed-local-users       Create the three local test accounts"
+	@echo "  make seed-local-users       Create 14 local test accounts across all implemented plans"
 	@echo "  make invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  make grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
@@ -89,7 +93,12 @@ test:
 lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
+docs:
+	poetry run python -m toolbox.docs.local_accounts
+	poetry run mkdocs serve -f mkdocs.local.yml --dev-addr 127.0.0.1:8000
+
 docs-build:
+	poetry run python -m toolbox.docs.local_accounts
 	poetry run mkdocs build --strict
 
 
@@ -120,6 +129,11 @@ local-up-stripe: local-config
 local-down:
 	$(LOCAL_COMPOSE) --profile "*" down --remove-orphans
 
+local-reset:
+	@test "$(environment)" != "production" || (echo "[error] Local reset cannot run in production"; exit 2)
+	$(LOCAL_COMPOSE) --profile "*" down --volumes --remove-orphans
+	$(MAKE) bootstrap
+
 local-logs:
 	$(LOCAL_COMPOSE) logs -f --tail=100
 
@@ -132,36 +146,38 @@ stripe-up:
 stripe-logs:
 	$(LOCAL_COMPOSE) logs -f --tail=100 stripe-cli
 
-migrate-core: local-start
-	$(LOCAL_COMPOSE) exec -T core-api alembic -c apps/core_api/alembic.ini upgrade head
+migrate-core:
+	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py core
 
 revision-core:
 	@test -n "$(msg)" || (echo "Usage: make revision-core msg=create_domain"; exit 2)
 	$(LOCAL_COMPOSE) exec -T core-api alembic -c apps/core_api/alembic.ini revision --autogenerate -m "$(msg)"
 
-migrate-auth: local-start
-	$(LOCAL_COMPOSE) exec -T auth-api alembic -c apps/auth_api/alembic.ini upgrade head
+migrate-auth:
+	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py auth
 
-migrate-eventing: local-start
-	$(LOCAL_COMPOSE) exec -T eventing-api alembic -c apps/eventing_api/alembic.ini upgrade head
+migrate-eventing:
+	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py eventing
 
-migrate-notification: local-start
-	$(LOCAL_COMPOSE) exec -T notification-api alembic -c apps/notification_api/alembic.ini upgrade head
+migrate-notification:
+	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py notification
 
 revision-auth:
 	@test -n "$(msg)" || (echo "Usage: make revision-auth msg=create_users"; exit 2)
 	$(LOCAL_COMPOSE) exec -T auth-api alembic -c apps/auth_api/alembic.ini revision --autogenerate -m "$(msg)"
 
-migrate: migrate-core migrate-auth migrate-eventing migrate-notification
-	@echo "[ok] Selected database migrations are current"
+migrate:
+	$(LOCAL_MAINTENANCE) run --rm --build alembic
 
 migrate-all: migrate
 
 seed-auth: migrate-auth
 	$(LOCAL_COMPOSE) exec -T auth-api python toolbox/seeds/auth_admin.py
 
-seed-local-users: migrate
-	$(LOCAL_COMPOSE) exec -T -e PYTHONPATH=.:apps/auth_api/src:apps/core_api/src:packages/shared_kernel/src -e LOCAL_TEST_ACCOUNT_PASSWORD="$(LOCAL_TEST_ACCOUNT_PASSWORD)" core-api python toolbox/seeds/local_test_accounts.py
+seed-local-users:
+	@test "$(environment)" != "production" || (echo "[error] Test seed is local only"; exit 2)
+	$(LOCAL_SEED) run --rm --build seed
+
 
 invite-lifetime: migrate
 	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
@@ -182,12 +198,16 @@ revoke-lifetime: migrate-core
 
 compose-up: local-up
 
-bootstrap: compose-up migrate seed-local-users
+bootstrap:
+	$(MAKE) migrate
+	$(MAKE) seed-local-users
+	$(MAKE) local-up
 	@echo "[ok] Rubrica is ready at http://localhost:7171"
 
 compose-down: local-down
 
 production-config:
+	poetry run python toolbox/checks/production_readiness.py $(PRODUCTION_ENV_FILE)
 	$(PRODUCTION_COMPOSE) config --quiet
 	@web_context="$$( $(PRODUCTION_COMPOSE) config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["web"]["build"]["context"])' )"; \
 		test -f "$$web_context/Dockerfile.prod" || (echo "[error] Frontend not found at $$web_context; set RUBRICA_WEB_CONTEXT=../../rubrica-front in $(PRODUCTION_ENV_FILE)"; exit 1)
@@ -202,10 +222,7 @@ production-logs:
 	$(PRODUCTION_COMPOSE) logs -f --tail=100
 
 production-migrate:
-	$(PRODUCTION_COMPOSE) exec -T auth-api alembic -c apps/auth_api/alembic.ini upgrade head
-	$(PRODUCTION_COMPOSE) exec -T core-api alembic -c apps/core_api/alembic.ini upgrade head
-	$(PRODUCTION_COMPOSE) exec -T eventing-api alembic -c apps/eventing_api/alembic.ini upgrade head
-	$(PRODUCTION_COMPOSE) exec -T notification-api alembic -c apps/notification_api/alembic.ini upgrade head
+	$(PRODUCTION_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py $(or $(database),all)
 
 production-seed:
 	$(PRODUCTION_COMPOSE) exec -T auth-api python toolbox/seeds/auth_admin.py

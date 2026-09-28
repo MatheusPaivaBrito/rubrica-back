@@ -72,7 +72,7 @@ class BillingService:
         provider = self._get_provider()
         notification: tuple[str, object, str | None, str | None] | None = None
         with SessionLocal.begin() as database:
-            tenant_service.require_role(database, tenant_id, subject, {"admin"})
+            tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
             account = self._account_entity(database, tenant_id, lock=True)
             if not account.provider_subscription_id:
                 raise WorkflowError("Stripe subscription is not configured", 409)
@@ -133,7 +133,7 @@ class BillingService:
 
     def payments(self, tenant_id: UUID, subject: str) -> list[BillingPaymentRead]:
         with SessionLocal() as database:
-            tenant_service.require_role(database, tenant_id, subject, {"admin", "auditor"})
+            tenant_service.require_role(database, tenant_id, subject, {"admin", "auditor"}, allow_over_limit=True)
             return [
                 BillingPaymentRead.model_validate(payment)
                 for payment in database.scalars(
@@ -196,7 +196,7 @@ class BillingService:
     ) -> BillingCheckoutRead:
         provider = self._get_provider()
         with SessionLocal.begin() as database:
-            tenant_service.require_role(database, tenant_id, subject, {"admin"})
+            tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
             tenant = database.get(TenantEntity, tenant_id)
             if tenant is None or tenant.deleted_at is not None:
                 raise WorkflowError("Tenant not found", 404)
@@ -209,6 +209,13 @@ class BillingService:
             if self._subscription_requires_portal(account):
                 raise WorkflowError(
                     "Use the billing portal to change the existing subscription",
+                    409,
+                )
+            if account.status == "active" and self._normalize_product_code(
+                product_code
+            ) == self._normalize_product_code(account.current_product_code):
+                raise WorkflowError(
+                    "The selected plan is already active",
                     409,
                 )
             price_id = self._price_for_currency(tenant.currency, product_code, billing_interval)
@@ -233,14 +240,20 @@ class BillingService:
                 raise WorkflowError(str(exc), 502) from exc
             return BillingCheckoutRead(checkout_url=checkout.url)
 
-    def create_portal(self, tenant_id: UUID, subject: str) -> BillingPortalRead:
+    def create_portal(self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str) -> BillingPortalRead:
         provider = self._get_provider()
         with SessionLocal.begin() as database:
-            tenant_service.require_role(database, tenant_id, subject, {"admin"})
+            tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
             account = self._account_entity(database, tenant_id)
             if not account.provider_customer_id:
                 raise WorkflowError("Stripe customer is not configured", 409)
+            if self._normalize_product_code(account.current_product_code) == self._normalize_product_code(product_code):
+                raise WorkflowError("The selected plan is already active", 409)
             try:
+                tenant = database.get(TenantEntity, tenant_id)
+                if tenant is None or tenant.deleted_at is not None:
+                    raise WorkflowError("Tenant not found", 404)
+                price_id = self._price_for_currency(tenant.currency, product_code, billing_interval)
                 return_url = f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan"
                 portal = provider.create_portal_session(
                     customer_id=account.provider_customer_id,
@@ -254,6 +267,7 @@ class BillingService:
                         f"{return_url}?billing=updated&from_plan="
                         f"{self._normalize_product_code(account.current_product_code)}"
                     ),
+                    price_id=price_id,
                 )
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 502) from exc
@@ -377,15 +391,25 @@ class BillingService:
                     business_identity,
                 )
                 if applied:
-                    self._notify_billing_event(
-                        database,
-                        event_id,
-                        event_type,
-                        tenant_id,
-                        resource,
-                        previous_status,
-                        previous_product,
-                    )
+                    try:
+                        self._notify_billing_event(
+                            database,
+                            event_id,
+                            event_type,
+                            tenant_id,
+                            resource,
+                            previous_status,
+                            previous_product,
+                        )
+                    except BillingEmailDeliveryError:
+                        # Stripe is the source of truth for access and quotas.
+                        # A temporary notification outage must not roll back an
+                        # already paid subscription or make Stripe retry it as
+                        # an unprocessed billing event.
+                        logger.exception(
+                            "Billing webhook was applied, but its notification could not be delivered",
+                            extra={"tenant_id": str(tenant_id), "event_id": event_id},
+                        )
                 billing_event.status = "processed" if applied else "ignored_stale"
                 billing_event.processed_at = DateTimeService.utc_now()
                 billing_event.error_code = None
@@ -646,6 +670,7 @@ class BillingService:
             BillingService._apply_business_identity(
                 database, tenant_id, account.current_product_code, business_identity
             )
+            tenant_service.reconcile_single_member_plan(database, tenant_id)
         return True
 
     @staticmethod
@@ -788,30 +813,30 @@ class BillingService:
             price_id: product_code
             for product_code, price_ids in {
                 "rubrica_base": (
-                    settings.STRIPE_PRICE_BRL,
-                    settings.STRIPE_PRICE_USD,
-                    settings.STRIPE_PRICE_EUR,
-                    settings.STRIPE_PRICE_JPY,
-                    settings.STRIPE_PRICE_ANNUAL_BRL,
-                    settings.STRIPE_PRICE_ANNUAL_USD,
-                    settings.STRIPE_PRICE_ANNUAL_EUR,
-                    settings.STRIPE_PRICE_ANNUAL_JPY,
+                    settings.STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL,
+                    settings.STRIPE_PRICE_ESSENTIAL_MONTHLY_USD,
+                    settings.STRIPE_PRICE_ESSENTIAL_MONTHLY_EUR,
+                    settings.STRIPE_PRICE_ESSENTIAL_MONTHLY_JPY,
+                    settings.STRIPE_PRICE_ESSENTIAL_ANNUAL_BRL,
+                    settings.STRIPE_PRICE_ESSENTIAL_ANNUAL_USD,
+                    settings.STRIPE_PRICE_ESSENTIAL_ANNUAL_EUR,
+                    settings.STRIPE_PRICE_ESSENTIAL_ANNUAL_JPY,
                 ),
                 "rubrica_intermediate": (
-                    settings.STRIPE_PRICE_INTERMEDIATE_BRL,
-                    settings.STRIPE_PRICE_INTERMEDIATE_USD,
-                    settings.STRIPE_PRICE_INTERMEDIATE_EUR,
-                    settings.STRIPE_PRICE_INTERMEDIATE_JPY,
-                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL,
-                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD,
-                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR,
-                    settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY,
+                    settings.STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL,
+                    settings.STRIPE_PRICE_PROFESSIONAL_MONTHLY_USD,
+                    settings.STRIPE_PRICE_PROFESSIONAL_MONTHLY_EUR,
+                    settings.STRIPE_PRICE_PROFESSIONAL_MONTHLY_JPY,
+                    settings.STRIPE_PRICE_PROFESSIONAL_ANNUAL_BRL,
+                    settings.STRIPE_PRICE_PROFESSIONAL_ANNUAL_USD,
+                    settings.STRIPE_PRICE_PROFESSIONAL_ANNUAL_EUR,
+                    settings.STRIPE_PRICE_PROFESSIONAL_ANNUAL_JPY,
                 ),
                 "rubrica_team": (
-                    settings.STRIPE_PRICE_TEAM_BRL,
-                    settings.STRIPE_PRICE_TEAM_USD,
-                    settings.STRIPE_PRICE_TEAM_EUR,
-                    settings.STRIPE_PRICE_TEAM_JPY,
+                    settings.STRIPE_PRICE_TEAM_MONTHLY_BRL,
+                    settings.STRIPE_PRICE_TEAM_MONTHLY_USD,
+                    settings.STRIPE_PRICE_TEAM_MONTHLY_EUR,
+                    settings.STRIPE_PRICE_TEAM_MONTHLY_JPY,
                     settings.STRIPE_PRICE_TEAM_ANNUAL_BRL,
                     settings.STRIPE_PRICE_TEAM_ANNUAL_USD,
                     settings.STRIPE_PRICE_TEAM_ANNUAL_EUR,
@@ -906,16 +931,16 @@ class BillingService:
     def _price_for_currency(currency: str, product_code: str = "rubrica_base", billing_interval: str = "month") -> str:
         prices = {
             "rubrica_base": {
-                "month": {"BRL": settings.STRIPE_PRICE_BRL, "USD": settings.STRIPE_PRICE_USD, "EUR": settings.STRIPE_PRICE_EUR, "JPY": settings.STRIPE_PRICE_JPY},
-                "year": {"BRL": settings.STRIPE_PRICE_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_ANNUAL_JPY},
+                "month": BillingService._configured_prices("ESSENTIAL", "MONTHLY"),
+                "year": BillingService._configured_prices("ESSENTIAL", "ANNUAL"),
             },
             "rubrica_intermediate": {
-                "month": {"BRL": settings.STRIPE_PRICE_INTERMEDIATE_BRL, "USD": settings.STRIPE_PRICE_INTERMEDIATE_USD, "EUR": settings.STRIPE_PRICE_INTERMEDIATE_EUR, "JPY": settings.STRIPE_PRICE_INTERMEDIATE_JPY},
-                "year": {"BRL": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_INTERMEDIATE_ANNUAL_JPY},
+                "month": BillingService._configured_prices("PROFESSIONAL", "MONTHLY"),
+                "year": BillingService._configured_prices("PROFESSIONAL", "ANNUAL"),
             },
             "rubrica_team": {
-                "month": {"BRL": settings.STRIPE_PRICE_TEAM_BRL, "USD": settings.STRIPE_PRICE_TEAM_USD, "EUR": settings.STRIPE_PRICE_TEAM_EUR, "JPY": settings.STRIPE_PRICE_TEAM_JPY},
-                "year": {"BRL": settings.STRIPE_PRICE_TEAM_ANNUAL_BRL, "USD": settings.STRIPE_PRICE_TEAM_ANNUAL_USD, "EUR": settings.STRIPE_PRICE_TEAM_ANNUAL_EUR, "JPY": settings.STRIPE_PRICE_TEAM_ANNUAL_JPY},
+                "month": BillingService._configured_prices("TEAM", "MONTHLY"),
+                "year": BillingService._configured_prices("TEAM", "ANNUAL"),
             },
         }
         configured = prices.get(product_code, {}).get(billing_interval, {})
@@ -926,6 +951,13 @@ class BillingService:
                 503,
             )
         return price_id
+
+    @staticmethod
+    def _configured_prices(plan: str, interval: str) -> dict[str, str | None]:
+        return {
+            currency: getattr(settings, f"STRIPE_PRICE_{plan}_{interval}_{currency}")
+            for currency in ("BRL", "USD", "EUR", "JPY")
+        }
 
     @staticmethod
     def business_features_enabled(database, tenant_id: UUID) -> bool:
@@ -991,7 +1023,7 @@ class BillingService:
     @staticmethod
     def _account(tenant_id: UUID, subject: str, roles: set[str]) -> BillingAccountRead:
         with SessionLocal.begin() as database:
-            tenant_service.require_role(database, tenant_id, subject, roles)
+            tenant_service.require_role(database, tenant_id, subject, roles, allow_over_limit=True)
             account = BillingService._account_entity(database, tenant_id)
             unlimited = BillingService._has_unlimited_signatures(account)
             paid_access = BillingService._paid_access_enabled(account)

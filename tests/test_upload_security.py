@@ -86,7 +86,7 @@ def test_storage_uses_an_opaque_non_executable_file(tmp_path) -> None:
     stored = storage.root / key
     assert size == stored.stat().st_size
     assert key.isalnum() and "." not in key
-    assert stored.stat().st_mode & 0o777 == 0o600
+    assert stored.stat().st_mode & 0o777 == 0o400
     assert storage.root.stat().st_mode & 0o777 == 0o700
 
 

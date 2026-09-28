@@ -7,6 +7,7 @@ from core_api.modules.billing.billing_schema import (
     BillingCheckoutRead,
     BillingCheckoutCreate,
     BillingPortalRead,
+    BillingPlanChangeCreate,
     BillingPaymentRead,
     BillingWebhookRead,
 )
@@ -54,9 +55,10 @@ async def create_checkout(
 @router.post("/tenants/{tenant_id}/portal", response_model=BillingPortalRead)
 async def create_portal(
     tenant_id: UUID,
+    payload: BillingPlanChangeCreate,
     context: AuthContext = Depends(require_permission("documents:write")),
 ) -> BillingPortalRead:
-    return billing_service.create_portal(tenant_id, context.subject)
+    return billing_service.create_portal(tenant_id, context.subject, payload.product_code, payload.billing_interval)
 
 
 @router.post("/webhooks/stripe", response_model=BillingWebhookRead)

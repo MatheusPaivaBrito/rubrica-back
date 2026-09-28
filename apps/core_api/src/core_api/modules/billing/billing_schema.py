@@ -47,6 +47,10 @@ class BillingPortalRead(BaseModel):
     portal_url: str
 
 
+class BillingPlanChangeCreate(BillingCheckoutCreate):
+    pass
+
+
 class BillingWebhookRead(BaseModel):
     accepted: bool = True
     duplicate: bool = False

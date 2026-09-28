@@ -96,6 +96,17 @@ Stripe é diferente de R2/SERPRO em uma coisa importante: **Stripe é o billing 
 
 Ele deve continuar utilizável sobre local ou produção com um segundo `-f`.
 
+Os documentos usam o prefixo `${R2_DOCUMENTS_PREFIX:-documents}`. Em produção,
+configure no bucket `rubrica-documents` uma regra **Bucket Lock** para esse prefixo.
+A aplicação cria cada chave uma única vez, grava o SHA-256 nos metadados do objeto
+e nunca remove um objeto já confirmado no banco. Defina o período de retenção com
+a política jurídica do produto antes de ativar a regra; uma retenção indefinida não
+deve ser escolhida como padrão técnico.
+
+O token S3 usado pelo Core deve permanecer limitado a leitura e gravação de objetos
+nesse bucket e não deve possuir permissão administrativa para alterar regras de
+retenção.
+
 ### SERPRO Timestamp
 
 `features/serpro-timestamp.yml` é um override opcional. Ele habilita o provider de timestamp SERPRO e declara o secret correspondente.
@@ -196,3 +207,49 @@ Ao fazer qualquer refatoração:
 5. confirme novamente que produção só publica a porta do gateway;
 6. teste overlays opcionais de R2 e SERPRO;
 7. não altere código Python/Angular para resolver um problema puramente de Compose.
+
+## Operações manuais: Alembic e seed
+
+Migração e seed são processos descartáveis, definidos em `services/`, sem inclusão
+em `local.yml` ou `production.yml`. Possuem profile `maintenance`, `restart: no`
+e são executados explicitamente com `run --rm --build` pelo Makefile.
+
+- `make migrate` / `make migrate-all`: Auth, Core, Eventing e Notification, em ordem;
+  interrompe na primeira falha. Sobe somente o PostgreSQL necessário.
+- `make migrate-auth`, `make migrate-core`, `make migrate-eventing`,
+  `make migrate-notification`: apenas o banco indicado.
+- `make production-migrate [database=auth|core|eventing|notification|all]`:
+  execução manual, com o overlay `alembic-production.yml`, secrets e rede de produção.
+- `make seed-local-users`: seed local após as migrações; não migra implicitamente.
+- `make bootstrap`: migra, executa o seed local e então sobe a aplicação, em sequência
+  mesmo com `make -j`. Nunca executa tarefas de produção.
+
+O seed exige `ENVIRONMENT=local|development` e `ALLOW_LOCAL_TEST_SEED=1`.
+Não existe conexão do seed à composição de produção. `production-seed` é o comando
+legado explícito para o administrador Auth; não cria estas contas de teste.
+
+### Logins locais
+
+Senha: `LOCAL_TEST_ACCOUNT_PASSWORD` (padrão de desenvolvimento `RubricaLocal123!`).
+Todos têm e-mail confirmado, idioma pt-BR e dispensa individual de MFA.
+
+| Cenário | E-mails |
+| --- | --- |
+| Gratuito | `local.pessoal@example.local` |
+| Essencial | `local.essencial@example.local` |
+| Profissional, 3 membros incluindo admin | `local.empresa.admin@example.local`, `local.empresa.membro@example.local`, `local.profissional.membro2@example.local` |
+| Equipe, 6 membros incluindo admin | `local.equipe.admin@example.local`, `local.equipe.membro1@example.local` até `local.equipe.membro5@example.local` |
+
+São 11 identidades em 4 tenants: Gratuito, Essencial, Profissional e Equipe. Os tenants
+empresariais têm CNPJ fictício de teste e slugs públicos gerados pelo domínio.
+O plano Empresarial personalizado ainda não possui um produto implementado;
+não se cria um plano artificial para representá-lo.
+
+Reexecuções preservam IDs, slugs, consumo, planos alterados e memberships suspensas.
+A antiga empresa local vitalícia é convertida uma vez para Profissional.
+As assinaturas iniciais são fixtures `fake`, sem IDs fictícios do Stripe: servem para
+validar permissões e limites. Para testar cobrança e webhooks de ponta a ponta,
+é necessário fazer checkout com os Prices do modo de teste do Stripe.
+
+`make docs` serve somente a página de logins em http://127.0.0.1:8000. A senha
+vem da configuração local e o conteúdo gerado fica em `.artifacts/`, fora do Git.

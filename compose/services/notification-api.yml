@@ -18,7 +18,7 @@ services:
       RESEND_API_KEY_FILE: /run/secrets/resend_api_key
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Rubrica <onboarding@resend.dev>}
       NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
-      NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
+      NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: ${NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW:-auth_api,core_api,bootstrap}
     secrets:
       - resend_api_key
     depends_on:
@@ -43,7 +43,7 @@ services:
       RESEND_API_KEY_FILE: /run/secrets/resend_api_key
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Rubrica <no-reply@rubricasignature.com>}
       NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
-      NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: auth_api,core_api,bootstrap
+      NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: ${NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW:-auth_api,core_api,bootstrap}
     secrets:
       - postgres_password
       - resend_api_key

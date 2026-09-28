@@ -30,46 +30,52 @@ def test_stripe_subscription_status_is_mapped(
     assert BillingService._subscription_status(provider_status) == expected
 
 
-def test_checkout_requires_a_configured_currency_price(monkeypatch) -> None:
-    monkeypatch.setattr("core_api.modules.billing.billing_service.settings.STRIPE_PRICE_JPY", None)
-
+def test_checkout_rejects_a_currency_without_a_configured_price(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "STRIPE_PRICE_ESSENTIAL_MONTHLY_JPY",
+        None,
+    )
     with pytest.raises(WorkflowError, match="JPY"):
         BillingService._price_for_currency("JPY")
 
 
-@pytest.mark.parametrize(
-    ("product_code", "currency", "setting_name"),
-    [
-        ("rubrica_base", "BRL", "STRIPE_PRICE_BRL"),
-        ("rubrica_base", "USD", "STRIPE_PRICE_USD"),
-        ("rubrica_base", "EUR", "STRIPE_PRICE_EUR"),
-        ("rubrica_base", "JPY", "STRIPE_PRICE_JPY"),
-        ("rubrica_intermediate", "BRL", "STRIPE_PRICE_INTERMEDIATE_BRL"),
-        ("rubrica_intermediate", "USD", "STRIPE_PRICE_INTERMEDIATE_USD"),
-        ("rubrica_intermediate", "EUR", "STRIPE_PRICE_INTERMEDIATE_EUR"),
-        ("rubrica_intermediate", "JPY", "STRIPE_PRICE_INTERMEDIATE_JPY"),
-        ("rubrica_team", "BRL", "STRIPE_PRICE_TEAM_BRL"),
-        ("rubrica_team", "USD", "STRIPE_PRICE_TEAM_USD"),
-        ("rubrica_team", "EUR", "STRIPE_PRICE_TEAM_EUR"),
-        ("rubrica_team", "JPY", "STRIPE_PRICE_TEAM_JPY"),
-    ],
-)
-def test_checkout_selects_price_for_every_plan_and_currency(
-    monkeypatch, product_code: str, currency: str, setting_name: str
-) -> None:
-    expected = f"price_{product_code}_{currency.lower()}"
+@pytest.mark.parametrize("currency", ["BRL", "USD", "EUR", "JPY"])
+def test_checkout_selects_every_supported_currency(monkeypatch, currency: str) -> None:
+    expected = f"price_essential_monthly_{currency.lower()}"
     monkeypatch.setattr(
-        f"core_api.modules.billing.billing_service.settings.{setting_name}", expected
+        settings,
+        f"STRIPE_PRICE_ESSENTIAL_MONTHLY_{currency}",
+        expected,
     )
 
-    assert BillingService._price_for_currency(currency, product_code) == expected
+    assert BillingService._price_for_currency(currency.lower()) == expected
 
 
 @pytest.mark.parametrize(
     ("product_code", "setting_name"),
     [
-        ("rubrica_base", "STRIPE_PRICE_ANNUAL_BRL"),
-        ("rubrica_intermediate", "STRIPE_PRICE_INTERMEDIATE_ANNUAL_BRL"),
+        ("rubrica_base", "STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL"),
+        ("rubrica_intermediate", "STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL"),
+        ("rubrica_team", "STRIPE_PRICE_TEAM_MONTHLY_BRL"),
+    ],
+)
+def test_checkout_selects_monthly_brl_price_for_every_plan(
+    monkeypatch, product_code: str, setting_name: str
+) -> None:
+    expected = f"price_{product_code}_monthly_brl"
+    monkeypatch.setattr(
+        f"core_api.modules.billing.billing_service.settings.{setting_name}", expected
+    )
+
+    assert BillingService._price_for_currency("BRL", product_code) == expected
+
+
+@pytest.mark.parametrize(
+    ("product_code", "setting_name"),
+    [
+        ("rubrica_base", "STRIPE_PRICE_ESSENTIAL_ANNUAL_BRL"),
+        ("rubrica_intermediate", "STRIPE_PRICE_PROFESSIONAL_ANNUAL_BRL"),
         ("rubrica_team", "STRIPE_PRICE_TEAM_ANNUAL_BRL"),
     ],
 )
@@ -243,6 +249,10 @@ def test_scheduled_cancellation_keeps_access_until_period_end(monkeypatch) -> No
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
     )
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.reconcile_single_member_plan",
+        lambda *_args, **_kwargs: None,
+    )
 
     period_end = 1_800_000_000
     BillingService._apply_event(
@@ -285,6 +295,10 @@ def test_subscription_deleted_ends_paid_access(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.reconcile_single_member_plan",
+        lambda *_args, **_kwargs: None,
     )
 
     BillingService._apply_event(
@@ -437,7 +451,7 @@ def test_subscription_price_takes_precedence_over_old_plan_metadata(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "core_api.modules.billing.billing_service.settings.STRIPE_PRICE_INTERMEDIATE_BRL",
+        "core_api.modules.billing.billing_service.settings.STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL",
         "price_intermediate",
     )
 

@@ -11,6 +11,18 @@ from auth_api.modules.sessions.session_schema import LoginRequest
 from auth_api.modules.sessions.turnstile import verify_login_turnstile, verify_turnstile
 
 
+def test_local_auth_ignores_turnstile_even_when_keys_exist(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "ENVIRONMENT", "development")
+    monkeypatch.setattr(settings, "AUTH_TURNSTILE_SITE_KEY", "site-key")
+    monkeypatch.setattr(settings, "AUTH_TURNSTILE_SECRET_KEY", "secret-key")
+    monkeypatch.setattr(
+        "auth_api.modules.sessions.turnstile.httpx.post",
+        lambda *_args, **_kwargs: pytest.fail("Local auth must not call Turnstile"),
+    )
+
+    verify_login_turnstile(None)
+
+
 def test_production_login_fails_closed_without_turnstile_keys(monkeypatch) -> None:
     monkeypatch.setattr(settings, "ENVIRONMENT", "production")
     monkeypatch.setattr(settings, "AUTH_TURNSTILE_SITE_KEY", "")

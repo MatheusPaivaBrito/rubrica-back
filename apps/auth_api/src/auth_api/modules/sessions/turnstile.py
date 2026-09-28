@@ -9,8 +9,11 @@ from auth_api.infrastructure.settings import settings
 
 
 def login_turnstile_config() -> dict[str, str | bool]:
-    configured = bool(settings.AUTH_TURNSTILE_SITE_KEY and settings.AUTH_TURNSTILE_SECRET_KEY)
-    required = configured or settings.ENVIRONMENT.lower() in {"production", "prod"}
+    production = settings.ENVIRONMENT.lower() in {"production", "prod"}
+    configured = production and bool(
+        settings.AUTH_TURNSTILE_SITE_KEY and settings.AUTH_TURNSTILE_SECRET_KEY
+    )
+    required = production
     return {"site_key": settings.AUTH_TURNSTILE_SITE_KEY if configured else "", "required": required}
 
 

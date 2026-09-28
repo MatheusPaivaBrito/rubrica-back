@@ -43,10 +43,15 @@ signatures and audit events in the project's PostgreSQL database. File bytes use
 the local storage adapter in development. Authenticated identity must still be
 supplied by Auth: Core forwards the request's bearer token (or access cookie) to
 Auth's `/access-control/context` contract. The client cannot choose its actor
-identity. Run `make seed-local-users` to create the local personal account,
-business administrator and business member. Their shared development password
-comes from `LOCAL_TEST_ACCOUNT_PASSWORD`; each account configures MFA on its
-first login. The seed refuses to run when `ENVIRONMENT` is production.
+identity. After `make migrate`, run `make seed-local-users` to create 11 local
+logins: Free, Essential, Professional (3 members), and Team (6 members).
+Administrators count toward those totals. The seed requires an explicit local
+or development environment and opt-in, confirms email and exempts only these
+fixtures from MFA. Passwords use `LOCAL_TEST_ACCOUNT_PASSWORD`. Rerunning it
+preserves billing tests and suspended memberships. See
+[Compose architecture](compose/ARCHITECTURE.md#operações-manuais-alembic-e-seed)
+for logins and manual migration commands. `make bootstrap` runs migrations,
+seeds these accounts and then starts the local application in sequence.
 
 ## Verifying a signed PDF
 

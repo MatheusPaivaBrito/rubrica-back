@@ -1,0 +1,61 @@
+:root {
+  --md-primary-fg-color: #721525;
+  --md-primary-fg-color--light: #a7223a;
+  --md-primary-fg-color--dark: #4b0d18;
+  --md-accent-fg-color: #b91f3b;
+}
+
+body { background: #fbf7f3; }
+.md-header { color: #42121b; background: #fffaf7; border-bottom: 1px solid #ead6d2; box-shadow: none; }
+.md-header__button.md-logo { width: 190px; height: 58px; margin: 0 1rem 0 0; padding: 6px 0; }
+.md-header__button.md-logo img { width: 190px; height: 46px; object-fit: contain; object-position: left center; }
+.md-header__title { color: #42121b; font-weight: 750; }
+.md-tabs { color: #fff; background: #310b14; }
+.md-sidebar { display: none; }
+.md-main__inner { max-width: 1180px; }
+.md-content { max-width: none; }
+.md-content__inner { margin: 0; padding: 2.2rem 1rem 4rem; }
+.md-content__inner::before { display: none; }
+
+.accounts-hero {
+  padding: 2rem;
+  color: #fff8f2;
+  background: linear-gradient(135deg, #310b14, #721525 70%, #a7223a);
+  border-radius: 24px;
+  box-shadow: 0 20px 55px rgba(77, 13, 26, .18);
+}
+.accounts-hero h1 { margin: .35rem 0 .5rem; color: #fff; font-size: clamp(2rem, 4vw, 3.5rem); }
+.accounts-hero p { margin: 0; color: #f4dfe1; font-size: 1.05rem; }
+.eyebrow { color: #f0aab5; font-size: .72rem; font-weight: 800; letter-spacing: .16em; }
+.summary { display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; margin-top: 1.5rem; }
+.summary > * { padding: .42rem .72rem; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; }
+.summary code { color: #310b14; background: #fff8f2; }
+.local-note { margin: 1.2rem 0 1.7rem; padding: .9rem 1rem; color: #5d2630; background: #f7e8e8; border-left: 4px solid #b91f3b; border-radius: 8px; }
+
+.plan-card { margin: 1rem 0; padding: 1.25rem; background: #fff; border: 1px solid #ecd7d4; border-radius: 18px; box-shadow: 0 10px 30px rgba(74, 24, 31, .06); }
+.plan-card h2 { margin: 0 0 .9rem; color: #3b1018; font-family: Georgia, serif; font-size: 1.35rem; }
+.account-list { display: grid; gap: .65rem; }
+.account-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .85rem; background: #fffaf7; border: 1px solid #f0dfdc; border-radius: 12px; }
+.account-identity { min-width: 0; }
+.account-identity strong { display: block; overflow-wrap: anywhere; color: #301118; font-size: .92rem; }
+.account-identity span { color: #8a6670; font-size: .76rem; }
+.account-actions { display: flex; flex: 0 0 auto; gap: .5rem; }
+.account-actions button { padding: .58rem .9rem; border-radius: 9px; font: inherit; font-size: .78rem; font-weight: 750; cursor: pointer; }
+.copy-credentials { color: #fff; background: #b91f3b; border: 1px solid #b91f3b; }
+.copy-credentials:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(72, 12, 24, .15); }
+.copy-feedback { position: fixed; right: 1rem; bottom: 1rem; z-index: 10; padding: .75rem 1rem; color: #fff; background: #310b14; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+.seed-commands p { color: #694c52; line-height: 1.55; }
+.seed-command { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: .75rem 0 1rem; padding: .75rem .85rem; border: 1px solid #ead8d5; border-radius: 11px; background: #310b14; }
+.seed-command code { overflow-x: auto; color: #fff8f2; background: transparent; font-size: .88rem; }
+.seed-command button { flex: 0 0 auto; padding: .58rem .9rem; border: 1px solid #b91f3b; border-radius: 9px; color: #fff; background: #b91f3b; font: inherit; font-size: .78rem; font-weight: 750; cursor: pointer; }
+.seed-command button:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(72, 12, 24, .22); }
+
+@media (max-width: 700px) {
+  .md-content__inner { padding: 1rem .5rem 3rem; }
+  .accounts-hero { padding: 1.35rem; border-radius: 16px; }
+  .account-row { align-items: stretch; flex-direction: column; }
+  .account-actions { display: grid; }
+  .account-actions button { width: 100%; text-align: center; }
+  .seed-command { align-items: stretch; flex-direction: column; }
+  .seed-command button { width: 100%; }
+}

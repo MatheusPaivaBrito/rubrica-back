@@ -60,6 +60,7 @@ class BillingProvider(Protocol):
         return_url: str,
         subscription_id: str | None = None,
         completion_url: str | None = None,
+        price_id: str | None = None,
     ) -> ProviderSession: ...
 
     def retrieve_subscription(self, subscription_id: str) -> Mapping[str, Any]: ...

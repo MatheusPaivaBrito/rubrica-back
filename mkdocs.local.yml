@@ -1,0 +1,21 @@
+site_name: Seeds — Rubrica
+docs_dir: .artifacts/local-docs
+site_dir: .artifacts/local-docs-site
+theme:
+  name: material
+  language: pt-BR
+  logo: assets/rubrica-logo.png
+  favicon: assets/rubrica-favicon.png
+  palette:
+    scheme: default
+    primary: custom
+    accent: custom
+  features:
+    - navigation.tabs
+nav:
+  - Contas de desenvolvimento: index.md
+plugins: []
+extra_css:
+  - assets/local_accounts.css
+extra_javascript:
+  - assets/local_accounts.js

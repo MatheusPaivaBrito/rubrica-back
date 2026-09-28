@@ -68,7 +68,9 @@ def main() -> None:
         if not args.apply:
             continue
         with path.open("rb") as local_object:
-            storage.put_existing(storage_key, stream=local_object)
+            storage.put_existing(
+                storage_key, stream=local_object, sha256=expected_sha256
+            )
         with storage.get(storage_key) as uploaded:
             if sha256(uploaded.read()).hexdigest() != expected_sha256:
                 raise SystemExit(f"SHA-256 mismatch after copy: {storage_key}")

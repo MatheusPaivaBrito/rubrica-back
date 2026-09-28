@@ -59,7 +59,28 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch, produ
     }
     assert captured["line_items"] == [{"price": "price_jpy", "quantity": 1}]
     assert captured["tax_id_collection"] == {"enabled": True}
-    assert captured["customer_update"] == {"name": "auto"}
+    assert captured["customer_update"] == {"name": "auto", "address": "auto"}
+
+
+def test_stripe_provider_translates_checkout_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.checkout.Session.create",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("stripe rejected checkout")),
+    )
+
+    with pytest.raises(BillingProviderError, match="checkout could not be opened"):
+        StripeBillingProvider().create_checkout_session(
+            customer_id="cus_test",
+            price_id="price_professional",
+            product_code="rubrica_intermediate",
+            tenant_id="019c-tenant",
+            success_url="https://rubrica.test/plan?checkout=success",
+            cancel_url="https://rubrica.test/plan?checkout=cancelled",
+        )
 
 
 def test_stripe_provider_does_not_collect_cnpj_for_essential_checkout(
@@ -186,6 +207,37 @@ def test_stripe_portal_opens_subscription_update_flow(monkeypatch) -> None:
             },
         },
     }
+
+
+def test_stripe_portal_confirms_the_selected_price(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
+        lambda _subscription_id: {
+            "cancel_at_period_end": False,
+            "items": {"data": [{"id": "si_test"}]},
+        },
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.billing_portal.Session.create",
+        lambda **kwargs: (captured.update(kwargs) or SimpleNamespace(url="https://billing.stripe.test/confirm")),
+    )
+
+    StripeBillingProvider().create_portal_session(
+        customer_id="cus_test",
+        return_url="https://rubrica.test/plan",
+        subscription_id="sub_test",
+        price_id="price_team_annual",
+    )
+
+    assert captured["flow_data"]["type"] == "subscription_update_confirm"
+    assert captured["flow_data"]["subscription_update_confirm"]["items"] == [
+        {"id": "si_test", "price": "price_team_annual", "quantity": 1}
+    ]
 
 
 def test_stripe_plan_change_reactivates_scheduled_subscription(monkeypatch) -> None:

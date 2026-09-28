@@ -11,7 +11,7 @@ services:
       - auth-api
       - core-api
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      test: ["CMD", "wget", "-qO-", "http://web/"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -32,7 +32,7 @@ services:
       core-api:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gateway/health"]
+      test: ["CMD", "wget", "-qO-", "http://web/"]
       interval: 10s
       timeout: 3s
       retries: 5

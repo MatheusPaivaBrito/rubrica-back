@@ -56,10 +56,13 @@ class StripeBillingProvider:
         }
         if product_code in {"rubrica_intermediate", "rubrica_team"}:
             parameters["tax_id_collection"] = {"enabled": True}
-            parameters["customer_update"] = {"name": "auto"}
-        checkout = stripe.checkout.Session.create(
-            **parameters,
-        )
+            parameters["customer_update"] = {"name": "auto", "address": "auto"}
+        try:
+            checkout = stripe.checkout.Session.create(**parameters)
+        except Exception as exc:
+            raise BillingProviderError(
+                "Stripe checkout could not be opened"
+            ) from exc
         if not checkout.url:
             raise BillingProviderError("Stripe did not return a checkout URL")
         return ProviderSession(url=str(checkout.url))
@@ -71,11 +74,14 @@ class StripeBillingProvider:
         return_url: str,
         subscription_id: str | None = None,
         completion_url: str | None = None,
+        price_id: str | None = None,
     ) -> ProviderSession:
         parameters: dict[str, object] = {
             "customer": customer_id,
             "return_url": return_url,
         }
+        if settings.STRIPE_PORTAL_CONFIGURATION_ID:
+            parameters["configuration"] = settings.STRIPE_PORTAL_CONFIGURATION_ID
         cancellation_was_scheduled = False
         if subscription_id:
             subscription = stripe.Subscription.retrieve(subscription_id)
@@ -87,9 +93,17 @@ class StripeBillingProvider:
                     subscription_id,
                     cancel_at_period_end=False,
                 )
+            items = subscription.get("items", {}).get("data", [])
+            if price_id and not items:
+                raise BillingProviderError("Stripe subscription has no changeable item")
+            flow_type = "subscription_update_confirm" if price_id else "subscription_update"
+            flow_payload = (
+                {"subscription": subscription_id, "items": [{"id": str(items[0].get("id")), "price": price_id, "quantity": 1}]}
+                if price_id else {"subscription": subscription_id}
+            )
             parameters["flow_data"] = {
-                "type": "subscription_update",
-                "subscription_update": {"subscription": subscription_id},
+                "type": flow_type,
+                flow_type: flow_payload,
                 "after_completion": {
                     "type": "redirect",
                     "redirect": {"return_url": completion_url or return_url},

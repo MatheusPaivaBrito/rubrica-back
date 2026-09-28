@@ -98,6 +98,13 @@ class TenantMemberCreate(BaseModel):
     role: str = Field(default="member", pattern=r"^(admin|member|auditor)$")
 
 
+class TenantMemberInvitation(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    document: str = Field(min_length=11, max_length=18)
+    role: str = Field(default="member", pattern=r"^(member|auditor)$")
+
+
 class TenantMemberRead(BaseModel):
     id: UUID
     auth_user_id: str
@@ -126,3 +133,27 @@ class TenantProvision(BaseModel):
     @classmethod
     def normalize_provision_country(cls, value: object) -> str | None:
         return normalize_country_code(value)
+
+
+class TenantTeamUpdate(BaseModel):
+    active_member_ids: list[UUID] = Field(min_length=1, max_length=1000)
+
+    @field_validator("active_member_ids")
+    @classmethod
+    def unique_members(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate members")
+        return value
+
+
+class TenantMemberRoleUpdate(BaseModel):
+    role: Literal["member", "auditor"]
+
+
+class TenantTeamRead(BaseModel):
+    members: list[TenantMemberRead]
+    member_limit: int
+    active_count: int
+    requires_selection: bool
+    can_manage: bool
+    current_member_id: UUID

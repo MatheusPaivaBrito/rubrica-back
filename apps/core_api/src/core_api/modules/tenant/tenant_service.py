@@ -11,13 +11,16 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_identity import InvalidBusinessIdentifierError, protect_cnpj
-from core_api.modules.tenant.user_client import resolve_auth_user
+from core_api.modules.tenant.user_client import invite_auth_user, resolve_auth_user
 from shared_kernel.time.datetime_service import DateTimeService
 from core_api.modules.tenant.tenant_schema import (
     TenantBusinessConversion,
     TenantCreate,
     TenantMemberCreate,
+    TenantMemberInvitation,
     TenantMemberRead,
+    TenantTeamRead,
+    TenantTeamUpdate,
     TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
@@ -104,7 +107,7 @@ class TenantService:
             rows = db.execute(
                 select(TenantEntity, TenantMemberEntity.role)
                 .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
-                .where(self.membership_identity_filter(subject), TenantEntity.deleted_at.is_(None))
+                .where(self.membership_identity_filter(subject), TenantEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active")
                 .order_by(TenantEntity.name)
             ).all()
             return [self._read(tenant, role) for tenant, role in rows]
@@ -133,12 +136,11 @@ class TenantService:
 
     def add_member(self, tenant_id: UUID, payload: TenantMemberCreate, subject: str) -> None:
         with SessionLocal.begin() as db:
-            self.require_role(db, tenant_id, subject, {"admin"})
+            self._lock_team(db, tenant_id)
+            self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
             tenant = db.get(TenantEntity, tenant_id)
             if tenant is None or tenant.deleted_at is not None:
                 raise WorkflowError("Tenant not found", 404)
-            if tenant.kind != "business":
-                raise WorkflowError("Additional members require a business tenant", 409)
             from core_api.modules.billing.billing_service import billing_service
 
             if not billing_service.business_features_enabled(db, tenant_id):
@@ -163,9 +165,45 @@ class TenantService:
                 raise WorkflowError("User is already a tenant member", 409) from exc
             self._audit(db, tenant_id, subject, "tenant.member_added", {"member_role": payload.role, "member_count": active_members + 1})
 
+    def invite_member(self, tenant_id: UUID, payload: TenantMemberInvitation, subject: str) -> None:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            tenant = db.get(TenantEntity, tenant_id)
+            if tenant is None or tenant.deleted_at is not None:
+                raise WorkflowError("Tenant not found", 404)
+            from core_api.modules.billing.billing_service import billing_service
+            if not billing_service.business_features_enabled(db, tenant_id):
+                raise WorkflowError("A Professional or Team plan is required for business members", 403)
+            limit = self.member_limit(db, tenant_id)
+            active_members = db.scalar(select(func.count(TenantMemberEntity.id)).where(
+                TenantMemberEntity.tenant_id == tenant_id,
+                TenantMemberEntity.deleted_at.is_(None),
+                TenantMemberEntity.status == "active",
+            )) or 0
+            if active_members >= limit:
+                raise WorkflowError(f"The current plan allows up to {limit} tenant members", 409)
+            email = payload.email.strip().lower()
+            existing = db.scalar(select(TenantMemberEntity).where(
+                TenantMemberEntity.tenant_id == tenant_id,
+                TenantMemberEntity.auth_user_id == email,
+                TenantMemberEntity.deleted_at.is_(None),
+            ))
+            if existing:
+                raise WorkflowError("User is already a tenant member", 409)
+            user_uuid = invite_auth_user(
+                name=payload.name.strip(), email=email, document=payload.document,
+                locale=tenant.default_locale, country=tenant.country_code or "BR",
+            )
+            db.add(TenantMemberEntity(
+                tenant_id=tenant_id, auth_user_id=email, auth_user_uuid=user_uuid,
+                role=payload.role, status="active", joined_at=DateTimeService.utc_now(),
+            ))
+            self._audit(db, tenant_id, subject, "tenant.member_invited", {"member_role": payload.role, "member_count": active_members + 1})
+
     def list_members(self, tenant_id: UUID, subject: str) -> list[TenantMemberRead]:
         with SessionLocal() as db:
-            self.require_role(db, tenant_id, subject, {"admin", "auditor"})
+            self.require_role(db, tenant_id, subject, {"admin", "auditor"}, allow_over_limit=True)
             members = db.scalars(
                 select(TenantMemberEntity)
                 .where(
@@ -178,6 +216,158 @@ class TenantService:
                 TenantMemberRead.model_validate(member, from_attributes=True)
                 for member in members
             ]
+
+    @staticmethod
+    def _lock_team(db, tenant_id: UUID) -> None:
+        # Same row lock as billing webhooks: plan changes and member changes serialize.
+        account = db.scalar(select(BillingAccountEntity).where(
+            BillingAccountEntity.tenant_id == tenant_id,
+            BillingAccountEntity.deleted_at.is_(None),
+        ).with_for_update())
+        if account is None:
+            raise WorkflowError("Tenant not found", 404)
+
+    @staticmethod
+    def member_limit(db, tenant_id: UUID) -> int:
+        from core_api.modules.billing.billing_service import BillingService
+        account = db.scalar(select(BillingAccountEntity).where(
+            BillingAccountEntity.tenant_id == tenant_id, BillingAccountEntity.deleted_at.is_(None)))
+        if account is None:
+            return 1
+        if account.complimentary_lifetime:
+            return 3
+        if not BillingService._paid_access_enabled(account):
+            return 1
+        return BillingService.PLAN_MEMBER_LIMITS.get(account.current_product_code, 1)
+
+    @staticmethod
+    def team_over_limit(db, tenant_id: UUID) -> bool:
+        count = db.scalar(select(func.count(TenantMemberEntity.id)).where(
+            TenantMemberEntity.tenant_id == tenant_id,
+            TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active")) or 0
+        return count > TenantService.member_limit(db, tenant_id)
+
+    def _team_read(self, db, tenant_id: UUID, member: TenantMemberEntity) -> TenantTeamRead:
+        members = db.scalars(select(TenantMemberEntity).where(
+            TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.deleted_at.is_(None)
+        ).order_by(TenantMemberEntity.role, TenantMemberEntity.auth_user_id, TenantMemberEntity.id)).all()
+        limit = self.member_limit(db, tenant_id)
+        active_count = sum(m.status == "active" for m in members)
+        return TenantTeamRead(
+            members=[TenantMemberRead.model_validate(m, from_attributes=True) for m in members],
+            member_limit=limit, active_count=active_count, requires_selection=active_count > limit,
+            can_manage=member.role == "admin", current_member_id=member.id,
+        )
+
+    def team(self, tenant_id: UUID, subject: str) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            member = self.require_role(
+                db, tenant_id, subject, {"admin"}, allow_over_limit=True
+            )
+            self.reconcile_single_member_plan(db, tenant_id)
+            return self._team_read(db, tenant_id, member)
+
+    def reconcile_single_member_plan(self, db, tenant_id: UUID) -> None:
+        """Keep only the administrator active when the current plan has one seat."""
+        if self.member_limit(db, tenant_id) != 1:
+            return
+        active_members = db.scalars(
+            select(TenantMemberEntity)
+            .where(
+                TenantMemberEntity.tenant_id == tenant_id,
+                TenantMemberEntity.deleted_at.is_(None),
+                TenantMemberEntity.status == "active",
+            )
+            .order_by(
+                TenantMemberEntity.joined_at,
+                TenantMemberEntity.created_at,
+                TenantMemberEntity.id,
+            )
+        ).all()
+        administrator = next(
+            (member for member in active_members if member.role == "admin"),
+            None,
+        )
+        if administrator is None:
+            return
+        suspended = []
+        for member in active_members:
+            if member.id == administrator.id:
+                continue
+            member.status = "suspended"
+            suspended.append(str(member.id))
+        if suspended:
+            self._audit(
+                db,
+                tenant_id,
+                administrator.auth_user_id,
+                "tenant.team_reconciled_after_downgrade",
+                {"active_member_id": str(administrator.id), "suspended_member_ids": suspended},
+            )
+
+    def update_team(self, tenant_id: UUID, payload: TenantTeamUpdate, subject: str) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            actor = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            members = db.scalars(select(TenantMemberEntity).where(
+                TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.deleted_at.is_(None)
+            )).all()
+            selected = set(payload.active_member_ids)
+            if not selected.issubset({m.id for m in members}):
+                raise WorkflowError("Member does not belong to this tenant", 422)
+            if actor.id not in selected:
+                raise WorkflowError("Keep your administrator account active", 409)
+            limit = self.member_limit(db, tenant_id)
+            if len(selected) > limit:
+                raise WorkflowError(f"The current plan allows up to {limit} tenant members", 409)
+            changed = []
+            for member in members:
+                status = "active" if member.id in selected else "suspended"
+                if member.status != status:
+                    changed.append({"member_id": str(member.id), "previous_status": member.status, "status": status})
+                    member.status = status
+            if changed:
+                self._audit(db, tenant_id, subject, "tenant.team_updated", {"changes": changed, "member_limit": limit})
+            db.flush()
+            return self._team_read(db, tenant_id, actor)
+
+    def update_member_role(
+        self, tenant_id: UUID, member_id: UUID, role: str, subject: str
+    ) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            actor = self.require_role(
+                db, tenant_id, subject, {"admin"}, allow_over_limit=True
+            )
+            member = db.scalar(
+                select(TenantMemberEntity)
+                .where(
+                    TenantMemberEntity.id == member_id,
+                    TenantMemberEntity.tenant_id == tenant_id,
+                    TenantMemberEntity.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if member is None:
+                raise WorkflowError("Member does not belong to this tenant", 404)
+            if member.id == actor.id or member.role == "admin":
+                raise WorkflowError("The tenant administrator role cannot be changed", 409)
+            previous_role = member.role
+            member.role = role
+            if previous_role != role:
+                self._audit(
+                    db,
+                    tenant_id,
+                    subject,
+                    "tenant.member_role_updated",
+                    {
+                        "member_id": str(member.id),
+                        "previous_role": previous_role,
+                        "role": role,
+                    },
+                )
+            db.flush()
+            return self._team_read(db, tenant_id, actor)
 
     def convert_to_business(
         self,
@@ -200,17 +390,6 @@ class TenantService:
 
             if not billing_service.business_features_enabled(db, tenant_id):
                 raise WorkflowError("A Professional or Team plan is required for a business tenant", 403)
-            account = db.scalar(
-                select(BillingAccountEntity).where(
-                    BillingAccountEntity.tenant_id == tenant_id,
-                    BillingAccountEntity.deleted_at.is_(None),
-                )
-            )
-            if account is None or not account.complimentary_lifetime:
-                raise WorkflowError(
-                    "Business identity is collected by Stripe during the Professional upgrade",
-                    409,
-                )
             try:
                 encrypted, lookup, masked = protect_cnpj(payload.cnpj)
             except InvalidBusinessIdentifierError as exc:
@@ -341,10 +520,12 @@ class TenantService:
             return self._read(tenant, member.role)
 
     @staticmethod
-    def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None) -> TenantMemberEntity:
+    def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None, *, allow_over_limit: bool = False) -> TenantMemberEntity:
         member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantService.membership_identity_filter(subject), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active"))
         if member is None or (roles is not None and member.role not in roles):
             raise WorkflowError("Tenant access denied", 403)
+        if not allow_over_limit and TenantService.team_over_limit(db, tenant_id):
+            raise WorkflowError("Select the active team members for the current plan", 409)
         return member
 
     @staticmethod
