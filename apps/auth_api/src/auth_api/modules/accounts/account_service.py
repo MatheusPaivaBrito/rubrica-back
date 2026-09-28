@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from auth_api.infrastructure.database.connection import SessionLocal
 from auth_api.infrastructure.settings import settings
 from auth_api.modules.access_control.access_control_entity import UserRoleEntity
-from auth_api.modules.accounts.account_schema import PublicRegistration
+from auth_api.modules.accounts.account_schema import InternalMemberInvitation, InternalMemberInvitationResult, PublicRegistration
 from auth_api.modules.accounts.tenant_client import provision_account_tenant
 from auth_api.modules.accounts.notification_client import request_account_email
 from auth_api.modules.users.passwords import hash_password
@@ -31,6 +31,36 @@ class InvalidAccountTokenError(Exception):
 
 
 class AccountService:
+    def invite_member(self, payload: InternalMemberInvitation) -> InternalMemberInvitationResult:
+        activation_sent = False
+        with SessionLocal.begin() as database:
+            user = self._user_by_email(database, payload.email)
+            if user is None:
+                user = UserEntity(
+                    name=payload.name.strip(), email=payload.email.strip().lower(),
+                    password_hash=hash_password(token_urlsafe(48)),
+                    preferred_locale=payload.preferred_locale,
+                    email_verified=False, is_active=False,
+                )
+                database.add(user)
+                database.flush()
+                database.add(UserRoleEntity(user_id=user.id, role="signature_operator"))
+                add_identifier(
+                    database, user_id=user.id,
+                    issuing_country=payload.identity_document_country,
+                    identifier_type=payload.identity_document_type,
+                    value=payload.identity_document_value,
+                )
+                database.flush()
+            if not user.is_active:
+                token = self._issue_token(database, user, "verify_email", settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS)
+                activation_sent = True
+            else:
+                token = None
+        if token:
+            self._send_verification(user.email, token, name=user.name, locale=user.preferred_locale)
+        return InternalMemberInvitationResult(user_id=str(user.id), email=user.email, activation_sent=activation_sent)
+
     def register(self, payload: PublicRegistration) -> None:
         with SessionLocal.begin() as database:
             user = UserEntity(
@@ -71,7 +101,7 @@ class AccountService:
                 "verify_email",
                 settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS,
             )
-            provision_account_tenant(payload)
+            provision_account_tenant(payload, user.id)
             self._send_verification(
                 user.email,
                 token,

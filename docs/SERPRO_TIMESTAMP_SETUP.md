@@ -42,11 +42,11 @@ Após configurar, aplique as migrações e reinicie o Core:
 sudo make production-migrate
 sudo docker compose --env-file .env.production \
   -f compose/production.yml \
-  -f compose/production.timestamp.yml up -d --build core-api web
+  -f compose/features/serpro-timestamp.yml up -d --build core-api web
 curl -sS https://rubricasignature.com/signing/timestamp/config
 ```
 
-Sem o arquivo complementar `compose/production.timestamp.yml`, a produção não
+Sem o arquivo complementar `compose/features/serpro-timestamp.yml`, a produção não
 monta nem exige o secret do carimbo e o endpoint informa `enabled: false`.
 
 O último comando deve retornar `{"enabled":true}`.

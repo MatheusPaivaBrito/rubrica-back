@@ -30,11 +30,25 @@ class Settings(BaseSettings):
     CONTACT_TURNSTILE_SECRET_KEY: str = ""
     CONTACT_TURNSTILE_SECRET_KEY_FILE: str | None = None
     DOCUMENT_STORAGE_PATH: str = ".rubrica-storage"
+    DOCUMENT_STORAGE_PROVIDER: Literal["local", "r2"] = "local"
+    R2_DOCUMENTS_ENDPOINT: str = ""
+    R2_DOCUMENTS_ENDPOINT_FILE: str | None = None
+    R2_DOCUMENTS_ACCESS_KEY_ID: str = ""
+    R2_DOCUMENTS_ACCESS_KEY_ID_FILE: str | None = None
+    R2_DOCUMENTS_SECRET_ACCESS_KEY: str = ""
+    R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: str | None = None
+    R2_DOCUMENTS_BUCKET: str = ""
+    R2_DOCUMENTS_BUCKET_FILE: str | None = None
+    R2_DOCUMENTS_PREFIX: str = "documents"
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
     EVIDENCE_SECRET_FILE: str | None = None
+    TENANT_IDENTITY_ENCRYPTION_KEY: str = "rubrica-development-tenant-encryption-key-change-me"
+    TENANT_IDENTITY_ENCRYPTION_KEY_FILE: str | None = None
+    TENANT_IDENTITY_HMAC_KEY: str = "rubrica-development-tenant-hmac-key-change-me"
+    TENANT_IDENTITY_HMAC_KEY_FILE: str | None = None
     PUBLIC_WEB_URL: str = "http://localhost:8080"
     SERPROID_CLIENT_ID: str = ""
     SERPROID_CLIENT_SECRET: str = ""
@@ -54,19 +68,36 @@ class Settings(BaseSettings):
     STRIPE_WEBHOOK_SECRET: str | None = None
     STRIPE_WEBHOOK_SECRET_FILE: str | None = None
     STRIPE_RUNTIME_WEBHOOK_SECRET_FILE: str | None = None
-    STRIPE_PRICE_BRL: str | None = None
-    STRIPE_PRICE_USD: str | None = None
-    STRIPE_PRICE_EUR: str | None = None
-    STRIPE_PRICE_JPY: str | None = None
-    STRIPE_PRICE_INTERMEDIATE_BRL: str | None = None
-    STRIPE_PRICE_INTERMEDIATE_USD: str | None = None
-    STRIPE_PRICE_INTERMEDIATE_EUR: str | None = None
-    STRIPE_PRICE_INTERMEDIATE_JPY: str | None = None
+    STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL: str | None = None
+    STRIPE_PRICE_ESSENTIAL_MONTHLY_USD: str | None = None
+    STRIPE_PRICE_ESSENTIAL_MONTHLY_EUR: str | None = None
+    STRIPE_PRICE_ESSENTIAL_MONTHLY_JPY: str | None = None
+    STRIPE_PRICE_ESSENTIAL_ANNUAL_BRL: str | None = None
+    STRIPE_PRICE_ESSENTIAL_ANNUAL_USD: str | None = None
+    STRIPE_PRICE_ESSENTIAL_ANNUAL_EUR: str | None = None
+    STRIPE_PRICE_ESSENTIAL_ANNUAL_JPY: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_MONTHLY_USD: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_MONTHLY_EUR: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_MONTHLY_JPY: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_ANNUAL_BRL: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_ANNUAL_USD: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_ANNUAL_EUR: str | None = None
+    STRIPE_PRICE_PROFESSIONAL_ANNUAL_JPY: str | None = None
+    STRIPE_PRICE_TEAM_MONTHLY_BRL: str | None = None
+    STRIPE_PRICE_TEAM_MONTHLY_USD: str | None = None
+    STRIPE_PRICE_TEAM_MONTHLY_EUR: str | None = None
+    STRIPE_PRICE_TEAM_MONTHLY_JPY: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_BRL: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_USD: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_EUR: str | None = None
+    STRIPE_PRICE_TEAM_ANNUAL_JPY: str | None = None
+    STRIPE_PORTAL_CONFIGURATION_ID: str | None = None
     BILLING_GRACE_PERIOD_DAYS: int = Field(default=10, ge=0, le=30)
 
     @model_validator(mode="after")
     def load_secret_files(self) -> "Settings":
-        return apply_secret_files(
+        apply_secret_files(
             self,
             {
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
@@ -74,12 +105,38 @@ class Settings(BaseSettings):
                 "NOTIFICATION_INTERNAL_SERVICE_KEY": "NOTIFICATION_INTERNAL_SERVICE_KEY_FILE",
                 "CONTACT_TURNSTILE_SECRET_KEY": "CONTACT_TURNSTILE_SECRET_KEY_FILE",
                 "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",
+                "TENANT_IDENTITY_ENCRYPTION_KEY": "TENANT_IDENTITY_ENCRYPTION_KEY_FILE",
+                "TENANT_IDENTITY_HMAC_KEY": "TENANT_IDENTITY_HMAC_KEY_FILE",
                 "STRIPE_SECRET_KEY": "STRIPE_SECRET_KEY_FILE",
                 "STRIPE_WEBHOOK_SECRET": "STRIPE_WEBHOOK_SECRET_FILE",
                 "SERPROID_CLIENT_SECRET": "SERPROID_CLIENT_SECRET_FILE",
                 "SERPRO_TIMESTAMP_CONSUMER_SECRET": "SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE",
+                "R2_DOCUMENTS_ENDPOINT": "R2_DOCUMENTS_ENDPOINT_FILE",
+                "R2_DOCUMENTS_ACCESS_KEY_ID": "R2_DOCUMENTS_ACCESS_KEY_ID_FILE",
+                "R2_DOCUMENTS_SECRET_ACCESS_KEY": "R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE",
+                "R2_DOCUMENTS_BUCKET": "R2_DOCUMENTS_BUCKET_FILE",
             },
         )
+        if self.DOCUMENT_STORAGE_PROVIDER == "r2" and not all(
+            (
+                self.R2_DOCUMENTS_ENDPOINT,
+                self.R2_DOCUMENTS_ACCESS_KEY_ID,
+                self.R2_DOCUMENTS_SECRET_ACCESS_KEY,
+                self.R2_DOCUMENTS_BUCKET,
+            )
+        ):
+            raise ValueError("R2 document storage requires endpoint, credentials and bucket")
+        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+            len(self.TENANT_IDENTITY_ENCRYPTION_KEY) < 32
+            or len(self.TENANT_IDENTITY_HMAC_KEY) < 32
+            or self.TENANT_IDENTITY_ENCRYPTION_KEY.startswith("rubrica-development-")
+            or self.TENANT_IDENTITY_HMAC_KEY.startswith("rubrica-development-")
+            or self.TENANT_IDENTITY_ENCRYPTION_KEY == self.TENANT_IDENTITY_HMAC_KEY
+            or self.TENANT_IDENTITY_ENCRYPTION_KEY == self.EVIDENCE_SECRET
+            or self.TENANT_IDENTITY_HMAC_KEY == self.EVIDENCE_SECRET
+        ):
+            raise ValueError("Secure and distinct tenant identity keys are required in production")
+        return self
 
     @property
     def SQLALCHEMY_DATABASE_URL(self) -> str:

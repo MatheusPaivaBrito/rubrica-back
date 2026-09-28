@@ -43,8 +43,15 @@ signatures and audit events in the project's PostgreSQL database. File bytes use
 the local storage adapter in development. Authenticated identity must still be
 supplied by Auth: Core forwards the request's bearer token (or access cookie) to
 Auth's `/access-control/context` contract. The client cannot choose its actor
-identity. Run `make seed-auth` after setting `AUTH_SEED_ADMIN_PASSWORD` in
-`.env` to create the local `signature_admin` user.
+identity. After `make migrate`, run `make seed-local-users` to create 11 local
+logins: Free, Essential, Professional (3 members), and Team (6 members).
+Administrators count toward those totals. The seed requires an explicit local
+or development environment and opt-in, confirms email and exempts only these
+fixtures from MFA. Passwords use `LOCAL_TEST_ACCOUNT_PASSWORD`. Rerunning it
+preserves billing tests and suspended memberships. See
+[Compose architecture](compose/ARCHITECTURE.md#operações-manuais-alembic-e-seed)
+for logins and manual migration commands. `make bootstrap` runs migrations,
+seeds these accounts and then starts the local application in sequence.
 
 ## Verifying a signed PDF
 
@@ -130,10 +137,23 @@ docker compose --env-file .env.production -f compose/production.yml exec core-ap
 
 ### Production backup and restore verification
 
-Create a consistent backup of every Rubrica PostgreSQL database and the signed
-document volume:
+Cloudflare R2 setup, automatic encrypted backups and private document storage
+are documented in [docs/CLOUDFLARE_R2.md](docs/CLOUDFLARE_R2.md).
 
-    make backup-production
+Create a consistent backup of every Rubrica PostgreSQL database and every
+referenced document from the configured storage provider (local or R2):
+
+    make backup-all environment=production
+
+Back up only databases or one application database:
+
+    make backup-database environment=production database=all
+    make backup-database environment=production database=auth
+
+Valid database aliases are `core`, `auth`, `eventing`, and `notification`.
+Back up only files with:
+
+    make backup-files environment=production
 
 The command writes an ignored, permission-restricted timestamped directory under
 backups. Copy that directory to encrypted storage outside the application host.

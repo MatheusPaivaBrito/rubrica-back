@@ -4,11 +4,17 @@ from uuid import UUID
 from core_api.infrastructure.auth_context import AuthContext, require_permission
 from core_api.infrastructure.settings import settings
 from core_api.modules.tenant.tenant_schema import (
+    TenantBusinessConversion,
     TenantCreate,
     TenantMemberCreate,
+    TenantMemberInvitation,
+    TenantMemberRoleUpdate,
+    TenantMemberRead,
     TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
+    TenantTeamRead,
+    TenantTeamUpdate,
 )
 from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.security.service_tokens import verify_service_token
@@ -55,6 +61,29 @@ async def add_tenant_member(tenant_id: UUID, payload: TenantMemberCreate, contex
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@router.post("/{tenant_id}/member-invitations", status_code=status.HTTP_204_NO_CONTENT)
+async def invite_tenant_member(tenant_id: UUID, payload: TenantMemberInvitation, context: AuthContext = Depends(require_permission("users:write"))) -> Response:
+    tenant_service.invite_member(tenant_id, payload, context.subject)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{tenant_id}/members", response_model=list[TenantMemberRead])
+async def list_tenant_members(
+    tenant_id: UUID,
+    context: AuthContext = Depends(require_permission("users:read")),
+) -> list[TenantMemberRead]:
+    return tenant_service.list_members(tenant_id, context.subject)
+
+
+@router.post("/{tenant_id}/business", response_model=TenantRead)
+async def convert_tenant_to_business(
+    tenant_id: UUID,
+    payload: TenantBusinessConversion,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantRead:
+    return tenant_service.convert_to_business(tenant_id, payload, context.subject)
+
+
 @router.patch("/{tenant_id}/preferences", response_model=TenantRead)
 async def update_tenant_preferences(
     tenant_id: UUID,
@@ -62,3 +91,25 @@ async def update_tenant_preferences(
     context: AuthContext = Depends(require_permission("users:write")),
 ) -> TenantRead:
     return tenant_service.update_preferences(tenant_id, payload, context.subject)
+
+
+@router.get("/{tenant_id}/team", response_model=TenantTeamRead)
+async def read_team(tenant_id: UUID, context: AuthContext = Depends(require_permission("documents:read"))) -> TenantTeamRead:
+    return tenant_service.team(tenant_id, context.subject)
+
+
+@router.patch("/{tenant_id}/team", response_model=TenantTeamRead)
+async def update_team(tenant_id: UUID, payload: TenantTeamUpdate, context: AuthContext = Depends(require_permission("users:write"))) -> TenantTeamRead:
+    return tenant_service.update_team(tenant_id, payload, context.subject)
+
+
+@router.patch("/{tenant_id}/team/{member_id}/role", response_model=TenantTeamRead)
+async def update_team_member_role(
+    tenant_id: UUID,
+    member_id: UUID,
+    payload: TenantMemberRoleUpdate,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantTeamRead:
+    return tenant_service.update_member_role(
+        tenant_id, member_id, payload.role, context.subject
+    )

@@ -1,0 +1,25 @@
+services:
+  production:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # Remote-managed tunnel. Configure its published application origin as:
+    # http://gateway:8080
+    user: "0:0"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflare_tunnel_token
+    secrets:
+      - cloudflare_tunnel_token
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - rubrica_internal
+      - rubrica_external

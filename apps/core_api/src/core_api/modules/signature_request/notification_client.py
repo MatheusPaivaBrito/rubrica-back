@@ -11,6 +11,11 @@ class SignatureInvitationDeliveryError(RuntimeError):
 def send_signature_invitation(
     *, recipient: str, signer_name: str, document_title: str, signing_url: str, locale: str, idempotency_key: str
 ) -> None:
+    if (
+        settings.ENVIRONMENT.lower() not in {"production", "prod"}
+        and recipient.strip().lower().endswith(".local")
+    ):
+        return
     email = signature_invitation_email(
         signer_name=signer_name,
         document_title=document_title,

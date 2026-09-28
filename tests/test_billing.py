@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from core_api.modules.billing.billing_service import BillingService
 from core_api.modules.billing.providers.stripe_provider import StripeBillingProvider
+from core_api.modules.billing.providers.protocol import ProviderBusinessIdentity, ProviderTaxId
 from core_api.infrastructure.settings import settings
 from core_api.modules.signature_request.workflow_service import WorkflowError
 
@@ -29,35 +30,65 @@ def test_stripe_subscription_status_is_mapped(
     assert BillingService._subscription_status(provider_status) == expected
 
 
-def test_checkout_requires_a_configured_currency_price(monkeypatch) -> None:
-    monkeypatch.setattr("core_api.modules.billing.billing_service.settings.STRIPE_PRICE_JPY", None)
-
+def test_checkout_rejects_a_currency_without_a_configured_price(monkeypatch) -> None:
+    monkeypatch.setattr(
+        settings,
+        "STRIPE_PRICE_ESSENTIAL_MONTHLY_JPY",
+        None,
+    )
     with pytest.raises(WorkflowError, match="JPY"):
         BillingService._price_for_currency("JPY")
 
 
+@pytest.mark.parametrize("currency", ["BRL", "USD", "EUR", "JPY"])
+def test_checkout_selects_every_supported_currency(monkeypatch, currency: str) -> None:
+    expected = f"price_essential_monthly_{currency.lower()}"
+    monkeypatch.setattr(
+        settings,
+        f"STRIPE_PRICE_ESSENTIAL_MONTHLY_{currency}",
+        expected,
+    )
+
+    assert BillingService._price_for_currency(currency.lower()) == expected
+
+
 @pytest.mark.parametrize(
-    ("product_code", "currency", "setting_name"),
+    ("product_code", "setting_name"),
     [
-        ("rubrica_base", "BRL", "STRIPE_PRICE_BRL"),
-        ("rubrica_base", "USD", "STRIPE_PRICE_USD"),
-        ("rubrica_base", "EUR", "STRIPE_PRICE_EUR"),
-        ("rubrica_base", "JPY", "STRIPE_PRICE_JPY"),
-        ("rubrica_intermediate", "BRL", "STRIPE_PRICE_INTERMEDIATE_BRL"),
-        ("rubrica_intermediate", "USD", "STRIPE_PRICE_INTERMEDIATE_USD"),
-        ("rubrica_intermediate", "EUR", "STRIPE_PRICE_INTERMEDIATE_EUR"),
-        ("rubrica_intermediate", "JPY", "STRIPE_PRICE_INTERMEDIATE_JPY"),
+        ("rubrica_base", "STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL"),
+        ("rubrica_intermediate", "STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL"),
+        ("rubrica_team", "STRIPE_PRICE_TEAM_MONTHLY_BRL"),
     ],
 )
-def test_checkout_selects_price_for_every_plan_and_currency(
-    monkeypatch, product_code: str, currency: str, setting_name: str
+def test_checkout_selects_monthly_brl_price_for_every_plan(
+    monkeypatch, product_code: str, setting_name: str
 ) -> None:
-    expected = f"price_{product_code}_{currency.lower()}"
+    expected = f"price_{product_code}_monthly_brl"
     monkeypatch.setattr(
         f"core_api.modules.billing.billing_service.settings.{setting_name}", expected
     )
 
-    assert BillingService._price_for_currency(currency, product_code) == expected
+    assert BillingService._price_for_currency("BRL", product_code) == expected
+
+
+@pytest.mark.parametrize(
+    ("product_code", "setting_name"),
+    [
+        ("rubrica_base", "STRIPE_PRICE_ESSENTIAL_ANNUAL_BRL"),
+        ("rubrica_intermediate", "STRIPE_PRICE_PROFESSIONAL_ANNUAL_BRL"),
+        ("rubrica_team", "STRIPE_PRICE_TEAM_ANNUAL_BRL"),
+    ],
+)
+def test_checkout_selects_annual_price(monkeypatch, product_code: str, setting_name: str) -> None:
+    expected = f"price_{product_code}_annual_brl"
+    monkeypatch.setattr(f"core_api.modules.billing.billing_service.settings.{setting_name}", expected)
+    assert BillingService._price_for_currency("BRL", product_code, "year") == expected
+
+
+def test_team_plan_limits() -> None:
+    assert BillingService.PLAN_MEMBER_LIMITS["rubrica_intermediate"] == 3
+    assert BillingService.PLAN_MEMBER_LIMITS["rubrica_team"] == 10
+    assert BillingService.PLAN_FILE_LIMITS["rubrica_team"] == 200
 
 
 @pytest.mark.parametrize(
@@ -112,6 +143,38 @@ def test_completed_checkout_does_not_unlock_unlimited_signatures(monkeypatch) ->
 
     assert account.status == "pending"
     assert account.provider_subscription_id == "sub_test"
+
+
+def test_professional_event_applies_stripe_cnpj_to_tenant(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.apply_billing_business_identity",
+        lambda _database, tenant_id, **values: captured.update(
+            {"tenant_id": tenant_id, **values}
+        ),
+    )
+    tenant_id = uuid4()
+    identity = ProviderBusinessIdentity(
+        name="Empresa Teste Ltda.",
+        tax_ids=(
+            ProviderTaxId(
+                id="txi_cnpj",
+                type="br_cnpj",
+                value="11222333000181",
+            ),
+        ),
+    )
+
+    BillingService._apply_business_identity(
+        object(), tenant_id, "rubrica_intermediate", identity
+    )
+
+    assert captured == {
+        "tenant_id": tenant_id,
+        "legal_name": "Empresa Teste Ltda.",
+        "cnpj": "11222333000181",
+        "provider_reference": "txi_cnpj",
+    }
 
 
 def test_free_account_consumes_each_completed_signer_signature() -> None:
@@ -186,6 +249,10 @@ def test_scheduled_cancellation_keeps_access_until_period_end(monkeypatch) -> No
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
     )
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.reconcile_single_member_plan",
+        lambda *_args, **_kwargs: None,
+    )
 
     period_end = 1_800_000_000
     BillingService._apply_event(
@@ -228,6 +295,10 @@ def test_subscription_deleted_ends_paid_access(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.reconcile_single_member_plan",
+        lambda *_args, **_kwargs: None,
     )
 
     BillingService._apply_event(
@@ -380,7 +451,7 @@ def test_subscription_price_takes_precedence_over_old_plan_metadata(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(
-        "core_api.modules.billing.billing_service.settings.STRIPE_PRICE_INTERMEDIATE_BRL",
+        "core_api.modules.billing.billing_service.settings.STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL",
         "price_intermediate",
     )
 
@@ -627,3 +698,32 @@ def test_invoice_service_period_prefers_subscription_line_period() -> None:
 
     assert start == datetime.fromtimestamp(10, tz=UTC)
     assert end == datetime.fromtimestamp(20, tz=UTC)
+
+
+def test_only_professional_or_complimentary_accounts_enable_business_features() -> None:
+    tenant_id = uuid4()
+    professional = SimpleNamespace(
+        deleted_at=None,
+        complimentary_lifetime=False,
+        current_product_code="rubrica_intermediate",
+        status="active",
+        grace_period_ends_at=None,
+    )
+    essential = SimpleNamespace(
+        deleted_at=None,
+        complimentary_lifetime=False,
+        current_product_code="rubrica_base",
+        status="active",
+        grace_period_ends_at=None,
+    )
+    complimentary = SimpleNamespace(
+        deleted_at=None,
+        complimentary_lifetime=True,
+        current_product_code=None,
+        status="not_configured",
+        grace_period_ends_at=None,
+    )
+
+    assert BillingService.business_features_enabled(BillingDatabaseStub(professional), tenant_id)
+    assert not BillingService.business_features_enabled(BillingDatabaseStub(essential), tenant_id)
+    assert BillingService.business_features_enabled(BillingDatabaseStub(complimentary), tenant_id)

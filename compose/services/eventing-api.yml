@@ -1,0 +1,40 @@
+services:
+  local:
+    build:
+      context: ../..
+      dockerfile: apps/eventing_api/dockerfile
+    ports:
+      - "127.0.0.1:${EVENTING_API_HOST_PORT:-7103}:8000"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
+      EVENTING_DEFAULT_EVENT_TOPIC: ${EVENTING_DEFAULT_EVENT_TOPIC:-rubrica.events}
+      EVENTING_DEAD_LETTER_TOPIC: ${EVENTING_DEAD_LETTER_TOPIC:-rubrica.events.dead_letter}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  production:
+    build:
+      context: ../..
+      dockerfile: apps/eventing_api/dockerfile
+    restart: unless-stopped
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
+      EVENTING_DEFAULT_EVENT_TOPIC: rubrica.events
+      EVENTING_DEAD_LETTER_TOPIC: rubrica.events.dead_letter
+    secrets:
+      - postgres_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - rubrica_internal

@@ -3,10 +3,11 @@ import asyncio
 import pytest
 from fastapi import HTTPException
 from fastapi import Response
-from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from core_api.infrastructure.auth_context import authenticated_context
+from core_api.modules.tenant.tenant_router import provision_tenant
+from core_api.modules.tenant.tenant_schema import TenantProvision
 from core_api.main import app as core_app
 from auth_api.main import app as auth_app
 from auth_api.modules.sessions.session_router import _set_auth_cookies
@@ -43,16 +44,9 @@ def test_core_routes_are_registered() -> None:
 
 
 def test_internal_tenant_provisioning_requires_service_authentication() -> None:
-    response = TestClient(core_app).post(
-        "/internal/tenants/provision",
-        json={
-            "owner_email": "owner@example.com",
-            "name": "Owner",
-            "default_locale": "en",
-        },
-    )
-
-    assert response.status_code == 403
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(provision_tenant(TenantProvision(owner_email="owner@example.com", name="Owner", default_locale="en")))
+    assert error.value.status_code == 403
 
 
 def test_auth_routes_are_registered() -> None:

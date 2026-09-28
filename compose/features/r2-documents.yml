@@ -1,0 +1,24 @@
+services:
+  core-api:
+    environment:
+      DOCUMENT_STORAGE_PROVIDER: r2
+      R2_DOCUMENTS_ENDPOINT_FILE: /run/secrets/r2_documents_endpoint
+      R2_DOCUMENTS_ACCESS_KEY_ID_FILE: /run/secrets/r2_documents_access_key_id
+      R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_documents_secret_access_key
+      R2_DOCUMENTS_BUCKET_FILE: /run/secrets/r2_documents_bucket
+      R2_DOCUMENTS_PREFIX: ${R2_DOCUMENTS_PREFIX:-documents}
+    secrets:
+      - r2_documents_endpoint
+      - r2_documents_access_key_id
+      - r2_documents_secret_access_key
+      - r2_documents_bucket
+
+secrets:
+  r2_documents_endpoint:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/r2_documents_endpoint
+  r2_documents_access_key_id:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/r2_documents_access_key_id
+  r2_documents_secret_access_key:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/r2_documents_secret_access_key
+  r2_documents_bucket:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/r2_documents_bucket

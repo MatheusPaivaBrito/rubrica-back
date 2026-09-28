@@ -123,20 +123,17 @@ gratuitas antes da cobrança e tolerância padrão de 10 dias após falha de
 pagamento. O vencimento é controlado pelo período informado pelo Stripe.
 
 1. Ative o modo de teste ou crie uma Sandbox.
-2. Crie os produtos `Rubrica Essencial` por R$ 29,90/mês e
-   `Rubrica Profissional` por R$ 69,90/mês.
-3. Em cada produto, crie preços recorrentes mensais separados em BRL, USD, EUR e JPY. JPY não usa casas decimais.
+2. Crie os produtos `Rubrica Essencial`, `Rubrica Profissional` e `Rubrica Equipe`.
+3. Em cada produto, crie um preço mensal e outro anual em BRL.
 4. Copie cada ID iniciado por `price_`.
-5. Preencha no `.env.production`. Uma moeda sem ID retorna indisponibilidade no checkout em vez de cobrar em outra moeda:
+5. Preencha os seis IDs no `.env.production`:
 
-    STRIPE_PRICE_BRL=price_BASE_BRL
-    STRIPE_PRICE_USD=price_BASE_USD
-    STRIPE_PRICE_EUR=price_BASE_EUR
-    STRIPE_PRICE_JPY=price_BASE_JPY
-    STRIPE_PRICE_INTERMEDIATE_BRL=price_INTERMEDIATE_BRL
-    STRIPE_PRICE_INTERMEDIATE_USD=price_INTERMEDIATE_USD
-    STRIPE_PRICE_INTERMEDIATE_EUR=price_INTERMEDIATE_EUR
-    STRIPE_PRICE_INTERMEDIATE_JPY=price_INTERMEDIATE_JPY
+    STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL=price_ESSENTIAL_MONTHLY_BRL
+    STRIPE_PRICE_ESSENTIAL_ANNUAL_BRL=price_ESSENTIAL_ANNUAL_BRL
+    STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL=price_PROFESSIONAL_MONTHLY_BRL
+    STRIPE_PRICE_PROFESSIONAL_ANNUAL_BRL=price_PROFESSIONAL_ANNUAL_BRL
+    STRIPE_PRICE_TEAM_MONTHLY_BRL=price_TEAM_MONTHLY_BRL
+    STRIPE_PRICE_TEAM_ANNUAL_BRL=price_TEAM_ANNUAL_BRL
 
 6. Em Developers > API Keys, copie a secret key de teste iniciada por sk_test_.
 7. Salve-a somente neste arquivo:
@@ -183,6 +180,8 @@ Execute no servidor. Cada valor deve ser independente:
     openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/notification_internal_service_key >/dev/null
     openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/core_internal_service_key >/dev/null
     openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/evidence_secret >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/tenant_identity_encryption_key >/dev/null
+    openssl rand -base64 48 | sudo tee /etc/rubrica/secrets/tenant_identity_hmac_key >/dev/null
 
 Crie a senha inicial do administrador no gerenciador de senhas e grave-a em:
 
@@ -204,6 +203,8 @@ Arquivos esperados:
 - core_internal_service_key
 - resend_api_key
 - evidence_secret
+- tenant_identity_encryption_key
+- tenant_identity_hmac_key
 - stripe_secret_key
 - stripe_webhook_secret
 - contact_turnstile_secret_key
@@ -225,7 +226,7 @@ Preencha:
 - RUBRICA_DOMAIN;
 - e-mail administrativo;
 - remetente Resend;
-- ID do preço Stripe BRL e, quando disponíveis, os preços USD e JPY;
+- IDs dos preços Stripe BRL e, quando disponíveis, os preços USD, EUR e JPY;
 - quantidades de workers, se necessário.
 
 Não coloque senhas ou tokens no .env.production.

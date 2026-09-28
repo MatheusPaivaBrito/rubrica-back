@@ -95,6 +95,39 @@ class AccountActionAccepted(BaseModel):
     accepted: bool = True
 
 
+class InternalMemberInvitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    identity_document_type: IdentityDocumentType
+    identity_document_country: str
+    identity_document_value: str = Field(min_length=4, max_length=80)
+    preferred_locale: SupportedLocale = "pt-BR"
+
+    @field_validator("preferred_locale", mode="before")
+    @classmethod
+    def normalize_invitation_locale(cls, value: object) -> SupportedLocale:
+        return normalize_locale(value)
+
+    @field_validator("identity_document_country", mode="before")
+    @classmethod
+    def normalize_invitation_country(cls, value: object) -> str:
+        return normalize_country_code(value) or "BR"
+
+    @model_validator(mode="after")
+    def validate_invitation_identity(self) -> "InternalMemberInvitation":
+        self.identity_document_type = normalize_identifier_type(self.identity_document_type)
+        validate_identifier(self.identity_document_type, self.identity_document_value)
+        return self
+
+
+class InternalMemberInvitationResult(BaseModel):
+    user_id: str
+    email: str
+    activation_sent: bool
+
+
 class EmailVerification(BaseModel):
     token: str = Field(min_length=32, max_length=255)
     new_password: str = Field(min_length=8, max_length=128)

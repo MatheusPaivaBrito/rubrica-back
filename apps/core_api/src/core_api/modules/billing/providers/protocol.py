@@ -20,6 +20,19 @@ class ProviderSession:
     url: str
 
 
+@dataclass(frozen=True)
+class ProviderTaxId:
+    id: str
+    type: str
+    value: str
+
+
+@dataclass(frozen=True)
+class ProviderBusinessIdentity:
+    name: str | None
+    tax_ids: tuple[ProviderTaxId, ...]
+
+
 class BillingProvider(Protocol):
     def create_customer(
         self,
@@ -47,9 +60,14 @@ class BillingProvider(Protocol):
         return_url: str,
         subscription_id: str | None = None,
         completion_url: str | None = None,
+        price_id: str | None = None,
     ) -> ProviderSession: ...
 
     def retrieve_subscription(self, subscription_id: str) -> Mapping[str, Any]: ...
+
+    def retrieve_customer_business_identity(
+        self, customer_id: str
+    ) -> ProviderBusinessIdentity: ...
 
     def construct_webhook_event(
         self,

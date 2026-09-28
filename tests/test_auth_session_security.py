@@ -7,14 +7,13 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.testclient import TestClient
+from fastapi import Response
 from redis import Redis
 from starlette.requests import Request
 
 from auth_api.infrastructure.settings import settings
-from auth_api.main import app
-from auth_api.modules.sessions.session_schema import LoginRequest, LoginResponse
-from auth_api.modules.sessions.session_router import require_mfa_session
+from auth_api.modules.sessions.session_schema import BrowserLoginResponse, LoginRequest, LoginResponse, RefreshRequest
+from auth_api.modules.sessions.session_router import login, refresh, require_mfa_session
 from auth_api.modules.sessions.session_service import SessionService, session_service
 from core_api.infrastructure.auth_context import authenticated_context
 from core_api.infrastructure.auth_context import _resolve_context
@@ -28,23 +27,30 @@ def test_browser_auth_responses_keep_refresh_token_in_httponly_cookie(monkeypatc
     monkeypatch.setattr(session_service, "login", lambda payload: tokens)
     monkeypatch.setattr(session_service, "refresh", lambda token: tokens)
     monkeypatch.setattr("auth_api.modules.sessions.session_router.verify_login_turnstile", lambda *_args: None)
-    client = TestClient(app, base_url="https://rubricasignature.com")
+    request = Request({"type": "http", "method": "POST", "path": "/auth/login", "headers": []})
+    response = Response()
+    authenticated = asyncio.run(login(LoginRequest(email="person@example.com", password="password123"), response, request))
+    browser_payload = BrowserLoginResponse.model_validate(authenticated.model_dump()).model_dump()
+    assert browser_payload["access_token"] == "access-secret"
+    assert "refresh_token" not in browser_payload
+    cookies = "; ".join(response.headers.getlist("set-cookie"))
+    assert "refresh_token=refresh-secret" in cookies
+    assert "HttpOnly" in cookies and "Secure" in cookies
 
-    login = client.post("/auth/login", json={"email": "person@example.com", "password": "password123"})
-    assert login.status_code == 200
-    assert login.json()["access_token"] == "access-secret"
-    assert "refresh_token" not in login.json()
-    assert "refresh_token=refresh-secret" in "; ".join(login.headers.get_list("set-cookie"))
+    evil_request = Request({"type": "http", "method": "POST", "path": "/auth/refresh", "headers": [(b"origin", b"https://evil.example"), (b"cookie", b"refresh_token=refresh-secret")]})
+    with pytest.raises(HTTPException) as forbidden:
+        asyncio.run(refresh(RefreshRequest(), evil_request, Response()))
+    assert forbidden.value.status_code == 403
 
-    assert client.post("/auth/refresh", json={}, headers={"Origin": "https://evil.example"}).status_code == 403
-    refresh = client.post("/auth/refresh", json={}, headers={"Origin": "https://rubricasignature.com"})
-    assert refresh.status_code == 200
-    assert "refresh_token" not in refresh.json()
+    refresh_request = Request({"type": "http", "method": "POST", "path": "/auth/refresh", "headers": [(b"origin", b"https://rubricasignature.com"), (b"cookie", b"refresh_token=refresh-secret")]})
+    refresh_response = Response()
+    refreshed = asyncio.run(refresh(RefreshRequest(), refresh_request, refresh_response))
+    assert "refresh_token" not in BrowserLoginResponse.model_validate(refreshed.model_dump()).model_dump()
 
     monkeypatch.setattr(session_service, "refresh", lambda token: None)
-    rejected = client.post("/auth/refresh", json={}, headers={"Origin": "https://rubricasignature.com"})
+    rejected = asyncio.run(refresh(RefreshRequest(), refresh_request, Response()))
     assert rejected.status_code == 401
-    assert "Max-Age=0" in "; ".join(rejected.headers.get_list("set-cookie"))
+    assert "Max-Age=0" in "; ".join(rejected.headers.getlist("set-cookie"))
 
 
 def test_session_checks_password_token_version(monkeypatch) -> None:
@@ -75,7 +81,7 @@ def test_access_lookup_rejects_stale_mapping_during_rotation(monkeypatch) -> Non
 
 @pytest.mark.parametrize("role", ["signature_admin", "signature_operator", "signature_signer"])
 def test_account_context_requires_mfa_before_granting_roles(monkeypatch, role: str) -> None:
-    user = SimpleNamespace(id=uuid4(), preferred_locale="pt-BR", mfa_enabled=False)
+    user = SimpleNamespace(id=uuid4(), public_slug="account-public", preferred_locale="pt-BR", mfa_enabled=False, mfa_exempt=False)
 
     class Database:
         def __enter__(self):
@@ -94,6 +100,8 @@ def test_account_context_requires_mfa_before_granting_roles(monkeypatch, role: s
     monkeypatch.setattr("auth_api.modules.sessions.session_service.access_control_service.context_for_user", lambda _id: ([role], ["*"]))
 
     context = service.ui_context("access-token")
+
+    assert context.account_public_slug == "account-public"
     assert context is not None
     assert context.mfa_setup_required
     assert context.roles == []
@@ -105,6 +113,14 @@ def test_account_context_requires_mfa_before_granting_roles(monkeypatch, role: s
     assert not enabled_context.mfa_setup_required
     assert enabled_context.roles == [role]
     assert enabled_context.permission_keys == ["*"]
+
+    user.mfa_enabled = False
+    user.mfa_exempt = True
+    exempt_context = service.ui_context("access-token")
+    assert exempt_context is not None
+    assert not exempt_context.mfa_setup_required
+    assert exempt_context.roles == [role]
+    assert exempt_context.permission_keys == ["*"]
 
 
 def test_core_rejects_account_without_mfa(monkeypatch) -> None:

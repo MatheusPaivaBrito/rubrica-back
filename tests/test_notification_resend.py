@@ -2,7 +2,7 @@ from urllib.error import HTTPError
 
 import orjson
 import pytest
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
 from auth_api.modules.accounts.notification_client import (
     AccountEmailDeliveryError,
@@ -11,7 +11,8 @@ from auth_api.modules.accounts.notification_client import (
 from auth_api.modules.accounts.tenant_client import provision_account_tenant
 from auth_api.modules.accounts.account_schema import PublicRegistration
 from notification_api.infrastructure.settings import settings as notification_settings
-from notification_api.main import app
+from notification_api.modules.messaging.domains.resend.resend_router import send_resend_email
+from notification_api.modules.messaging.domains.resend.resend_schema import ResendEmailRequest
 from notification_api.modules.messaging.contracts.provider import ProviderDelivery
 from notification_api.modules.messaging.domains.resend.resend_service import (
     ResendEmailProvider,
@@ -23,17 +24,14 @@ from shared_kernel.email_templates import branded_message_email
 
 
 def test_resend_internal_endpoint_requires_service_authentication() -> None:
-    response = TestClient(app).post(
-        "/internal/providers/resend/emails",
-        json={
+    with pytest.raises(HTTPException) as error:
+        send_resend_email(ResendEmailRequest(**{
             "recipient": "person@example.com",
             "subject": "Verify",
             "content": "Body",
             "idempotency_key": "verification-123",
-        },
-    )
-
-    assert response.status_code == 403
+        }))
+    assert error.value.status_code == 403
 
 
 def test_resend_internal_endpoint_delivers_with_valid_service_key(monkeypatch) -> None:
@@ -47,23 +45,18 @@ def test_resend_internal_endpoint_delivers_with_valid_service_key(monkeypatch) -
         ),
     )
 
-    response = TestClient(app).post(
-        "/internal/providers/resend/emails",
-        headers={
-            "X-Rubrica-Service": "auth_api",
-            "X-Rubrica-Service-Key": "test-key",
-        },
-        json={
+    response = send_resend_email(
+        ResendEmailRequest(**{
             "recipient": "person@example.com",
             "subject": "Verify",
             "content": "Body",
             "idempotency_key": "verification-123",
-        },
+        }),
+        x_rubrica_service="auth_api",
+        x_rubrica_service_key="test-key",
     )
-
-    assert response.status_code == 202
-    assert response.json()["provider"] == "resend"
-    assert response.json()["delivery_id"] == "email_123"
+    assert response.provider == "resend"
+    assert response.delivery_id == "email_123"
 
 
 def test_auth_client_uses_internal_resend_contract(monkeypatch) -> None:

@@ -8,7 +8,9 @@ from core_api.modules.billing.providers.protocol import (
     BillingProviderError,
     InvalidWebhookSignatureError,
     ProviderCustomer,
+    ProviderBusinessIdentity,
     ProviderSession,
+    ProviderTaxId,
 )
 
 
@@ -40,18 +42,27 @@ class StripeBillingProvider:
         success_url: str,
         cancel_url: str,
     ) -> ProviderSession:
-        checkout = stripe.checkout.Session.create(
-            mode="subscription",
-            customer=customer_id,
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=success_url,
-            cancel_url=cancel_url,
-            client_reference_id=tenant_id,
-            subscription_data={
+        parameters: dict[str, object] = {
+            "mode": "subscription",
+            "customer": customer_id,
+            "line_items": [{"price": price_id, "quantity": 1}],
+            "success_url": success_url,
+            "cancel_url": cancel_url,
+            "client_reference_id": tenant_id,
+            "subscription_data": {
                 "metadata": {"tenant_id": tenant_id, "product_code": product_code}
             },
-            metadata={"tenant_id": tenant_id, "product_code": product_code},
-        )
+            "metadata": {"tenant_id": tenant_id, "product_code": product_code},
+        }
+        if product_code in {"rubrica_intermediate", "rubrica_team"}:
+            parameters["tax_id_collection"] = {"enabled": True}
+            parameters["customer_update"] = {"name": "auto", "address": "auto"}
+        try:
+            checkout = stripe.checkout.Session.create(**parameters)
+        except Exception as exc:
+            raise BillingProviderError(
+                "Stripe checkout could not be opened"
+            ) from exc
         if not checkout.url:
             raise BillingProviderError("Stripe did not return a checkout URL")
         return ProviderSession(url=str(checkout.url))
@@ -63,11 +74,14 @@ class StripeBillingProvider:
         return_url: str,
         subscription_id: str | None = None,
         completion_url: str | None = None,
+        price_id: str | None = None,
     ) -> ProviderSession:
         parameters: dict[str, object] = {
             "customer": customer_id,
             "return_url": return_url,
         }
+        if settings.STRIPE_PORTAL_CONFIGURATION_ID:
+            parameters["configuration"] = settings.STRIPE_PORTAL_CONFIGURATION_ID
         cancellation_was_scheduled = False
         if subscription_id:
             subscription = stripe.Subscription.retrieve(subscription_id)
@@ -79,9 +93,17 @@ class StripeBillingProvider:
                     subscription_id,
                     cancel_at_period_end=False,
                 )
+            items = subscription.get("items", {}).get("data", [])
+            if price_id and not items:
+                raise BillingProviderError("Stripe subscription has no changeable item")
+            flow_type = "subscription_update_confirm" if price_id else "subscription_update"
+            flow_payload = (
+                {"subscription": subscription_id, "items": [{"id": str(items[0].get("id")), "price": price_id, "quantity": 1}]}
+                if price_id else {"subscription": subscription_id}
+            )
             parameters["flow_data"] = {
-                "type": "subscription_update",
-                "subscription_update": {"subscription": subscription_id},
+                "type": flow_type,
+                flow_type: flow_payload,
                 "after_completion": {
                     "type": "redirect",
                     "redirect": {"return_url": completion_url or return_url},
@@ -109,6 +131,28 @@ class StripeBillingProvider:
             raise BillingProviderError(
                 "Stripe subscription could not be synchronized"
             ) from exc
+
+    def retrieve_customer_business_identity(
+        self, customer_id: str
+    ) -> ProviderBusinessIdentity:
+        try:
+            customer = stripe.Customer.retrieve(customer_id)
+            tax_ids = stripe.Customer.list_tax_ids(customer_id, limit=100)
+        except Exception as exc:
+            raise BillingProviderError(
+                "Stripe customer business identity could not be retrieved"
+            ) from exc
+        return ProviderBusinessIdentity(
+            name=str(customer.get("name") or "").strip() or None,
+            tax_ids=tuple(
+                ProviderTaxId(
+                    id=str(item.get("id") or ""),
+                    type=str(item.get("type") or ""),
+                    value=str(item.get("value") or ""),
+                )
+                for item in tax_ids.get("data", [])
+            ),
+        )
 
     def construct_webhook_event(
         self,

@@ -1,3 +1,5 @@
+from uuid import UUID
+
 import httpx
 
 from auth_api.infrastructure.settings import settings
@@ -8,16 +10,19 @@ class TenantProvisioningError(RuntimeError):
     pass
 
 
-def provision_account_tenant(payload: PublicRegistration) -> None:
+def provision_account_tenant(payload: PublicRegistration, user_id: UUID | None = None) -> None:
     try:
+        body = {
+            "owner_email": payload.email.strip().lower(),
+            "name": payload.name.strip(),
+            "default_locale": payload.preferred_locale,
+            "country_code": payload.identity_document_country,
+        }
+        if user_id is not None:
+            body["owner_user_id"] = str(user_id)
         response = httpx.post(
             f"{settings.CORE_API_URL.rstrip('/')}/internal/tenants/provision",
-            json={
-                "owner_email": payload.email.strip().lower(),
-                "name": payload.name.strip(),
-                "default_locale": payload.preferred_locale,
-                "country_code": payload.identity_document_country,
-            },
+            json=body,
             headers={
                 "X-Rubrica-Service": "auth_api",
                 "X-Rubrica-Service-Key": settings.CORE_INTERNAL_SERVICE_KEY,

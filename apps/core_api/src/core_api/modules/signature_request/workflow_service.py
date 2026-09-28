@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import sha256
 from io import BytesIO
-from pathlib import Path
 from secrets import token_urlsafe
 from threading import RLock
 from uuid import UUID, uuid4
@@ -16,7 +15,7 @@ from core_api.modules.document.document_schema import (
     DocumentStatus,
     DocumentVersionRead,
 )
-from core_api.modules.document.storage import DocumentStorage, LocalDocumentStorage
+from core_api.modules.document.storage import DocumentStorage, configured_document_storage
 from core_api.modules.signature_request.workflow_schema import (
     AuditEventRead,
     RequestStatus,
@@ -338,4 +337,4 @@ class SignatureWorkflowService:
         return f"{settings.SIGNING_APP_URL.rstrip('/')}/{token}"
 
 
-workflow_service = SignatureWorkflowService(LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH)))
+workflow_service = SignatureWorkflowService(configured_document_storage(settings))

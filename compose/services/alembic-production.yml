@@ -1,0 +1,23 @@
+# Applied after alembic.yml and production.yml; production secrets stay explicit.
+services:
+  alembic:
+    environment:
+      ENVIRONMENT: production
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      AUTH_MFA_ENCRYPTION_KEY_FILE: /run/secrets/auth_mfa_encryption_key
+      AUTH_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/auth_identity_encryption_key
+      AUTH_IDENTITY_HMAC_KEY_FILE: /run/secrets/auth_identity_hmac_key
+      TENANT_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/tenant_identity_encryption_key
+      TENANT_IDENTITY_HMAC_KEY_FILE: /run/secrets/tenant_identity_hmac_key
+      EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
+    secrets:
+      - postgres_password
+      - auth_mfa_encryption_key
+      - auth_identity_encryption_key
+      - auth_identity_hmac_key
+      - tenant_identity_encryption_key
+      - tenant_identity_hmac_key
+      - evidence_secret
+    networks:
+      - rubrica_internal

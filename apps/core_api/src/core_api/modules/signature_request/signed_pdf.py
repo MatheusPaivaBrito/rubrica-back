@@ -50,8 +50,13 @@ def generate_signed_pdf(
 
 def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO:
     stamp = item["stamp"]
+    representation = item.get("representation_snapshot")
+    company_representation = (
+        item.get("participant_role") == "company_representative"
+        and isinstance(representation, dict)
+    )
     box_width = min(255.0, width * 0.48)
-    box_height = 72.0
+    box_height = 96.0 if company_representation else 72.0
     center_x = float(stamp["x"]) * width
     center_y = (1 - float(stamp["y"])) * height
     left = min(max(4.0, center_x - box_width / 2), width - box_width - 4.0)
@@ -85,9 +90,10 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     regular_font = "HeiseiMin-W3" if japanese else "Helvetica"
     text_width = box_width - flag_width - 16
     canvas.setFont(bold_font, 7 if japanese else 6)
-    canvas.drawString(left + 7, bottom + 58, _fit_text(label, bold_font, 7 if japanese else 6, text_width))
+    content_offset = 24.0 if company_representation else 0.0
+    canvas.drawString(left + 7, bottom + 58 + content_offset, _fit_text(label, bold_font, 7 if japanese else 6, text_width))
     canvas.setFont(bold_font, 9)
-    canvas.drawString(left + 7, bottom + 43, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
+    canvas.drawString(left + 7, bottom + 43 + content_offset, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
     identity_type = str(item.get("identity_document_type") or "").replace("BR_", "").replace("PT_", "")
     identity_masked = str(item.get("identity_document_masked") or "")
     identity_prefix = _alpha3_country_code(identity_country)
@@ -95,7 +101,21 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     identity_text = " · ".join(value for value in (identity_prefix, identity_value) if value)
     canvas.setFont(regular_font, 7)
     if identity_text:
-        canvas.drawString(left + 7, bottom + 30, _fit_text(identity_text, regular_font, 7, box_width - 14))
+        canvas.drawString(left + 7, bottom + 30 + content_offset, _fit_text(identity_text, regular_font, 7, box_width - 14))
+    if company_representation:
+        legal_name = str(
+            representation.get("legal_name")
+            or representation.get("display_name")
+            or ""
+        )
+        registration_type = str(representation.get("registration_type") or "").replace("BR_", "")
+        registration_masked = str(representation.get("registration_masked") or "")
+        canvas.setFont(bold_font, 7)
+        canvas.drawString(left + 7, bottom + 41, _fit_text(legal_name, bold_font, 7, box_width - 14))
+        canvas.setFont(regular_font, 7)
+        registration_text = f"{registration_type}: {registration_masked}" if registration_type and registration_masked else registration_masked
+        if registration_text:
+            canvas.drawString(left + 7, bottom + 30, _fit_text(registration_text, regular_font, 7, box_width - 14))
     evidence_label = {"pt-BR": "evidência", "en": "evidence", "es": "evidencia", "ja-JP": "証拠"}.get(locale, "evidence")
     timezone = str(stamp.get("timezone", "UTC"))[:32]
     canvas.setFont(regular_font, 6.5)

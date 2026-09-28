@@ -20,6 +20,7 @@ class SignatureRequestEntity(BaseEntity):
     signing_token_hash: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     signing_token_nonce: Mapped[str | None] = mapped_column(String(64), unique=True)
     signature_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="evidence", server_default="evidence")
+    issuer_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
 class SignerEntity(BaseEntity):
@@ -38,6 +39,9 @@ class SignerEntity(BaseEntity):
     link_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     status: Mapped[str] = mapped_column(String(20), index=True)
     signed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    participant_role: Mapped[str] = mapped_column(String(32), nullable=False, default="external_signer", server_default="external_signer", index=True)
+    represented_tenant_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True)
+    representation_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
 class SignatureEntity(BaseEntity):

@@ -1,6 +1,8 @@
 from datetime import datetime
 from uuid import UUID
 
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from shared_kernel.localization import (
@@ -14,7 +16,6 @@ from shared_kernel.localization import (
 
 class TenantCreate(BaseModel):
     name: str = Field(min_length=1, max_length=160)
-    slug: str = Field(min_length=2, max_length=120, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     default_locale: SupportedLocale = "en"
     country_code: str | None = None
     timezone: str = "UTC"
@@ -52,6 +53,17 @@ class TenantRead(BaseModel):
     country_code: str | None
     timezone: str
     currency: str
+    kind: Literal["personal", "business"] = "personal"
+    legal_name: str | None = None
+    registration_country: str | None = None
+    registration_type: str | None = None
+    registration_masked: str | None = None
+    registration_verification_status: str | None = None
+
+
+class TenantBusinessConversion(BaseModel):
+    legal_name: str = Field(min_length=2, max_length=240)
+    cnpj: str = Field(min_length=14, max_length=18)
 
 
 class TenantPreferencesUpdate(BaseModel):
@@ -86,7 +98,23 @@ class TenantMemberCreate(BaseModel):
     role: str = Field(default="member", pattern=r"^(admin|member|auditor)$")
 
 
+class TenantMemberInvitation(BaseModel):
+    name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    document: str = Field(min_length=11, max_length=18)
+    role: str = Field(default="member", pattern=r"^(member|auditor)$")
+
+
+class TenantMemberRead(BaseModel):
+    id: UUID
+    auth_user_id: str
+    role: Literal["admin", "member", "auditor"]
+    status: str
+    joined_at: datetime | None = None
+
+
 class TenantProvision(BaseModel):
+    owner_user_id: UUID | None = None
     owner_email: str = Field(
         min_length=5,
         max_length=255,
@@ -105,3 +133,27 @@ class TenantProvision(BaseModel):
     @classmethod
     def normalize_provision_country(cls, value: object) -> str | None:
         return normalize_country_code(value)
+
+
+class TenantTeamUpdate(BaseModel):
+    active_member_ids: list[UUID] = Field(min_length=1, max_length=1000)
+
+    @field_validator("active_member_ids")
+    @classmethod
+    def unique_members(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate members")
+        return value
+
+
+class TenantMemberRoleUpdate(BaseModel):
+    role: Literal["member", "auditor"]
+
+
+class TenantTeamRead(BaseModel):
+    members: list[TenantMemberRead]
+    member_limit: int
+    active_count: int
+    requires_selection: bool
+    can_manage: bool
+    current_member_id: UUID
