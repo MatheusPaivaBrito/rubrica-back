@@ -13,6 +13,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
+    TenantAccessState,
     TenantTeamRead,
     TenantTeamUpdate,
 )
@@ -48,6 +49,27 @@ async def provision_tenant(
 @router.get("", response_model=list[TenantRead])
 async def list_tenants(context: AuthContext = Depends(require_permission("documents:read"))) -> list[TenantRead]:
     return tenant_service.list_for(context.subject)
+
+
+@router.get("/access-state", response_model=TenantAccessState)
+async def tenant_access_state(
+    context: AuthContext = Depends(require_permission("documents:read")),
+) -> TenantAccessState:
+    return tenant_service.access_state(context.subject)
+
+
+@router.post(
+    "/personal-after-suspension",
+    response_model=TenantRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_personal_tenant_after_suspension(
+    payload: TenantCreate,
+    context: AuthContext = Depends(require_permission("documents:write")),
+) -> TenantRead:
+    return tenant_service.create_personal_after_suspension(
+        payload, context.subject, context.user_id
+    )
 
 
 @router.post("", response_model=TenantRead, status_code=status.HTTP_201_CREATED)
