@@ -24,6 +24,8 @@ from core_api.modules.tenant.tenant_schema import (
     TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
+    SuspendedTenantAccess,
+    TenantAccessState,
 )
 
 EURO_COUNTRY_CODES = frozenset(
@@ -111,6 +113,93 @@ class TenantService:
                 .order_by(TenantEntity.name)
             ).all()
             return [self._read(tenant, role) for tenant, role in rows]
+
+    def access_state(self, subject: str) -> TenantAccessState:
+        with SessionLocal() as db:
+            memberships = db.execute(
+                select(TenantEntity, TenantMemberEntity)
+                .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
+                .where(
+                    self.membership_identity_filter(subject),
+                    TenantEntity.deleted_at.is_(None),
+                    TenantMemberEntity.deleted_at.is_(None),
+                )
+                .order_by(TenantEntity.name)
+            ).all()
+            active_count = sum(member.status == "active" for _, member in memberships)
+            suspended = [
+                SuspendedTenantAccess(
+                    tenant_id=tenant.id,
+                    tenant_name=tenant.name,
+                    tenant_kind=tenant.kind,
+                    role=member.role,
+                    default_locale=tenant.default_locale,
+                    country_code=tenant.country_code,
+                    currency=tenant.currency,
+                )
+                for tenant, member in memberships
+                if member.status == "suspended"
+            ]
+            return TenantAccessState(
+                active_tenant_count=active_count,
+                suspended_tenants=suspended,
+                can_create_personal_tenant=active_count == 0 and bool(suspended),
+            )
+
+    def create_personal_after_suspension(
+        self,
+        payload: TenantCreate,
+        subject: str,
+        user_id: str | None,
+    ) -> TenantRead:
+        with SessionLocal.begin() as db:
+            memberships = db.scalars(
+                select(TenantMemberEntity)
+                .where(
+                    self.membership_identity_filter(subject),
+                    TenantMemberEntity.deleted_at.is_(None),
+                )
+                .with_for_update()
+            ).all()
+            if any(member.status == "active" for member in memberships):
+                raise WorkflowError("An active workspace already exists", 409)
+            if not any(member.status == "suspended" for member in memberships):
+                raise WorkflowError("No suspended workspace access was found", 409)
+            try:
+                auth_user_uuid = UUID(user_id) if user_id else None
+            except ValueError:
+                auth_user_uuid = None
+            tenant = TenantEntity(
+                name=payload.name.strip(),
+                slug=_public_slug(),
+                status="active",
+                default_locale=payload.default_locale,
+                country_code=payload.country_code,
+                timezone=payload.timezone,
+                currency=payload.currency,
+                kind="personal",
+            )
+            db.add(tenant)
+            db.flush()
+            member = TenantMemberEntity(
+                tenant_id=tenant.id,
+                auth_user_id=subject.lower(),
+                auth_user_uuid=auth_user_uuid,
+                role="admin",
+                status="active",
+                joined_at=DateTimeService.utc_now(),
+            )
+            db.add(member)
+            db.add(BillingAccountEntity(tenant_id=tenant.id, status="not_configured"))
+            self._audit(
+                db,
+                tenant.id,
+                subject,
+                "tenant.personal_created_after_suspension",
+                {"suspended_membership_count": len(memberships)},
+            )
+            db.flush()
+            return self._read(tenant, member.role)
 
     def create(self, payload: TenantCreate, subject: str) -> TenantRead:
         with SessionLocal.begin() as db:

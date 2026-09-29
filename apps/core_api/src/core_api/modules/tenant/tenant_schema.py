@@ -61,6 +61,22 @@ class TenantRead(BaseModel):
     registration_verification_status: str | None = None
 
 
+class SuspendedTenantAccess(BaseModel):
+    tenant_id: UUID
+    tenant_name: str
+    tenant_kind: Literal["personal", "business"]
+    role: Literal["admin", "member", "auditor"]
+    default_locale: SupportedLocale
+    country_code: str | None
+    currency: str
+
+
+class TenantAccessState(BaseModel):
+    active_tenant_count: int
+    suspended_tenants: list[SuspendedTenantAccess]
+    can_create_personal_tenant: bool
+
+
 class TenantBusinessConversion(BaseModel):
     legal_name: str = Field(min_length=2, max_length=240)
     cnpj: str = Field(min_length=14, max_length=18)

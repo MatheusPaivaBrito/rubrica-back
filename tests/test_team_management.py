@@ -10,7 +10,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant import tenant_service as module
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
-from core_api.modules.tenant.tenant_schema import TenantMemberInvitation, TenantTeamUpdate
+from core_api.modules.tenant.tenant_schema import TenantCreate, TenantMemberInvitation, TenantTeamUpdate
 
 
 @pytest.fixture
@@ -79,6 +79,44 @@ def test_downgrade_to_essential_automatically_keeps_only_administrator(team_db):
             )
         )
         assert audit is not None
+
+
+def test_suspended_member_can_create_personal_workspace_without_restoring_business_access(team_db):
+    factory, tenant_id, _ = team_db
+    with factory.begin() as db:
+        db.scalar(select(BillingAccountEntity)).current_product_code = 'rubrica_base'
+    module.tenant_service.team(tenant_id, 'member0@example.local')
+
+    state = module.tenant_service.access_state('member1@example.local')
+    assert state.active_tenant_count == 0
+    assert state.can_create_personal_tenant
+    assert [item.tenant_id for item in state.suspended_tenants] == [tenant_id]
+
+    personal = module.tenant_service.create_personal_after_suspension(
+        TenantCreate(name='Member 1', default_locale='pt-BR', country_code='BR', currency='BRL'),
+        'member1@example.local',
+        None,
+    )
+
+    assert personal.kind == 'personal'
+    assert [tenant.id for tenant in module.tenant_service.list_for('member1@example.local')] == [personal.id]
+    with factory() as db:
+        old_membership = db.scalar(select(TenantMemberEntity).where(
+            TenantMemberEntity.tenant_id == tenant_id,
+            TenantMemberEntity.auth_user_id == 'member1@example.local',
+        ))
+        assert old_membership.status == 'suspended'
+
+
+def test_personal_reactivation_requires_suspended_access_and_no_active_workspace(team_db):
+    with pytest.raises(WorkflowError):
+        module.tenant_service.create_personal_after_suspension(
+            TenantCreate(name='Duplicate'), 'member0@example.local', None
+        )
+    with pytest.raises(WorkflowError):
+        module.tenant_service.create_personal_after_suspension(
+            TenantCreate(name='Outsider'), 'outsider@example.local', None
+        )
 
 
 @pytest.mark.parametrize('selection', ['over_limit', 'without_admin', 'foreign'])
