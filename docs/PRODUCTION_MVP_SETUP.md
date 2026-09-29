@@ -72,7 +72,7 @@ No arquivo .env.production, RUBRICA_DOMAIN deve conter somente o hostname, sem
 https e sem barra:
 
     RUBRICA_DOMAIN=app.seudominio.com
-    RUBRICA_WEB_CONTEXT=../../rubrica-front
+    RUBRICA_WEB_CONTEXT=../../../rubrica-front
 
 ## 3. Criar o Cloudflare Tunnel
 

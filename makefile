@@ -214,7 +214,7 @@ production-config:
 	python3 toolbox/checks/production_readiness.py $(PRODUCTION_ENV_FILE)
 	$(PRODUCTION_COMPOSE) config --quiet
 	@web_context="$$( $(PRODUCTION_COMPOSE) config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["web"]["build"]["context"])' )"; \
-		test -f "$$web_context/Dockerfile.prod" || (echo "[error] Frontend not found at $$web_context; set RUBRICA_WEB_CONTEXT=../../rubrica-front in $(PRODUCTION_ENV_FILE)"; exit 1)
+		test -f "$$web_context/Dockerfile.prod" || (echo "[error] Frontend not found at $$web_context; set RUBRICA_WEB_CONTEXT=../../../rubrica-front in $(PRODUCTION_ENV_FILE)"; exit 1)
 
 production-up: production-config
 	$(PRODUCTION_COMPOSE) up -d --build --wait
