@@ -23,4 +23,7 @@ export BACKUP_INCLUDE_DOCUMENTS=0
 export DELETE_LOCAL_AFTER_UPLOAD="${DELETE_LOCAL_AFTER_UPLOAD:-1}"
 
 cd "$RUBRICA_PROJECT_DIR"
-exec toolbox/operations/offsite_backup.sh "${1:-create}"
+if [[ "$#" -eq 0 ]]; then
+  set -- create
+fi
+exec toolbox/operations/offsite_backup.sh "$@"
