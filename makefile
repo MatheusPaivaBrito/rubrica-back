@@ -192,6 +192,7 @@ invite-lifetime: migrate
 
 create-lifetime-tenant: migrate
 	@test -n "$(owner_email)" -a -n "$(member_email)" -a -n "$(legal_name)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make create-lifetime-tenant owner_email=EMAIL member_email=EMAIL legal_name='Legal name' actor=EMAIL reason='business reason'"; exit 2)
+	$(LOCAL_COMPOSE) up -d --build auth-api
 	$(LOCAL_COMPOSE) run --rm --build core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(owner_email)" --actor "$(actor)" --reason "$(reason)"
 	$(LOCAL_COMPOSE) run --rm --build core-api python toolbox/seeds/business_tenant.py --owner-email "$(owner_email)" --member-email "$(member_email)" --legal-name "$(legal_name)" --actor "$(actor)"
 
@@ -245,6 +246,7 @@ production-invite-lifetime: production-migrate
 
 production-create-lifetime-tenant: production-migrate
 	@test -n "$(owner_email)" -a -n "$(member_email)" -a -n "$(legal_name)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: sudo make production-create-lifetime-tenant owner_email=EMAIL member_email=EMAIL legal_name='Legal name' actor=EMAIL reason='business reason'"; exit 2)
+	$(PRODUCTION_COMPOSE) up -d --build auth-api
 	$(PRODUCTION_COMPOSE) run --rm --build core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(owner_email)" --actor "$(actor)" --reason "$(reason)"
 	$(PRODUCTION_COMPOSE) run --rm --build core-api python toolbox/seeds/business_tenant.py --owner-email "$(owner_email)" --member-email "$(member_email)" --legal-name "$(legal_name)" --actor "$(actor)"
 
