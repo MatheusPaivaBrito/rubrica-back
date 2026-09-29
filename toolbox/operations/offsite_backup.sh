@@ -34,7 +34,7 @@ fi
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
 AWS_ACCESS_KEY_ID="$(cat "$AWS_ACCESS_KEY_ID_FILE")"
 AWS_SECRET_ACCESS_KEY="$(cat "$AWS_SECRET_ACCESS_KEY_FILE")"
-restic_cmd=(restic --repository "$RESTIC_REPOSITORY" --password-file "$RESTIC_PASSWORD_FILE")
+restic_cmd=(restic --repo "$RESTIC_REPOSITORY" --password-file "$RESTIC_PASSWORD_FILE")
 
 case "$action" in
   init)
