@@ -24,7 +24,7 @@ LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -63,7 +63,10 @@ help:
 	@echo "  make backup-database database=all|core|auth|eventing|notification [environment=production]"
 	@echo "  make backup-files [environment=production]"
 	@echo "  make backup-production  Alias for backup-all environment=production"
-	@echo "  make backup-production-offsite  Back up and upload encrypted copy to B2"
+	@echo "  sudo make backup-r2       Back up production databases and upload encrypted copy to R2"
+	@echo "  sudo make backup-r2-init  Initialize the encrypted R2 backup repository once"
+	@echo "  sudo make backup-r2-check Check the encrypted R2 backup repository"
+	@echo "  make backup-production-offsite  Alias for backup-r2"
 	@echo "  make verify-backup path=backups/TIMESTAMP"
 
 
@@ -259,7 +262,16 @@ backup-production:
 	@$(MAKE) --no-print-directory backup-all environment=production BACKUP_ROOT=$(BACKUP_ROOT)
 
 backup-production-offsite:
-	COMPOSE_FILE=$(PRODUCTION_COMPOSE_FILE) ENV_FILE=$(PRODUCTION_ENV_FILE) COMPOSE_PROJECT_NAME=rubrica-prod BACKUP_ROOT=$(BACKUP_ROOT) toolbox/operations/offsite_backup.sh create
+	@$(MAKE) --no-print-directory backup-r2
+
+backup-r2:
+	toolbox/operations/r2_backup.sh create
+
+backup-r2-init:
+	toolbox/operations/r2_backup.sh init
+
+backup-r2-check:
+	toolbox/operations/r2_backup.sh check
 
 verify-backup:
 	@test -n "$(path)" || (echo "Usage: make verify-backup path=backups/TIMESTAMP"; exit 2)

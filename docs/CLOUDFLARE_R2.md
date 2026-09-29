@@ -83,7 +83,7 @@ Crie `/etc/rubrica/backup-r2.env` com modo `0600`:
 RUBRICA_PROJECT_DIR=/home/ubuntu/projects/rubrica/rubrica-back
 COMPOSE_FILE=compose/production.yml
 ENV_FILE=.env.production
-COMPOSE_PROJECT_NAME=rubrica
+COMPOSE_PROJECT_NAME=rubrica-prod
 BACKUP_ROOT=/var/backups/rubrica
 R2_ENDPOINT_FILE=/etc/rubrica/secrets/r2_endpoint
 R2_BACKUP_BUCKET_FILE=/etc/rubrica/secrets/r2_backup_bucket
@@ -101,9 +101,9 @@ Instale o Restic, inicialize o repositório e teste um backup manual:
 ```bash
 sudo apt-get update && sudo apt-get install -y restic
 sudo install -m 0755 toolbox/operations/r2_backup.sh /usr/local/bin/rubrica-r2-backup
-sudo /usr/local/bin/rubrica-r2-backup init
-sudo /usr/local/bin/rubrica-r2-backup create
-sudo /usr/local/bin/rubrica-r2-backup check
+sudo make backup-r2-init
+sudo make backup-r2
+sudo make backup-r2-check
 ```
 
 Depois instale e habilite o timer diário:
