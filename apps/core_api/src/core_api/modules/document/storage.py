@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+import re
 from typing import BinaryIO
 from uuid import uuid4
 
@@ -12,7 +13,8 @@ from botocore.exceptions import ClientError
 class DocumentStorage(ABC):
     @abstractmethod
     def put(
-        self, stream: BinaryIO, *, filename: str, sha256: str | None = None
+        self, stream: BinaryIO, *, filename: str, sha256: str | None = None,
+        scope: str | None = None,
     ) -> tuple[str, int]: ...
 
     @abstractmethod
@@ -33,11 +35,14 @@ class LocalDocumentStorage(DocumentStorage):
         self.root.chmod(0o700)
 
     def put(
-        self, stream: BinaryIO, *, filename: str, sha256: str | None = None
+        self, stream: BinaryIO, *, filename: str, sha256: str | None = None,
+        scope: str | None = None,
     ) -> tuple[str, int]:
         del filename, sha256
-        key = uuid4().hex
+        key = f"{scope.strip('/')}/{uuid4().hex}" if scope else uuid4().hex
+        validate_storage_key(key)
         destination = self.root / key
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         size = 0
         destination.touch(mode=0o600, exist_ok=False)
         with destination.open("wb") as output:
@@ -48,16 +53,15 @@ class LocalDocumentStorage(DocumentStorage):
         return key, size
 
     def get(self, storage_key: str) -> BinaryIO:
-        if not storage_key.isalnum():
-            raise FileNotFoundError(storage_key)
+        validate_storage_key(storage_key)
         return (self.root / storage_key).open("rb")
 
     def discard_uncommitted(self, storage_key: str) -> None:
-        if storage_key.isalnum():
-            destination = self.root / storage_key
-            if destination.exists():
-                destination.chmod(0o600)
-                destination.unlink()
+        validate_storage_key(storage_key)
+        destination = self.root / storage_key
+        if destination.exists():
+            destination.chmod(0o600)
+            destination.unlink()
 
 
 class R2DocumentStorage(DocumentStorage):
@@ -84,10 +88,11 @@ class R2DocumentStorage(DocumentStorage):
         )
 
     def put(
-        self, stream: BinaryIO, *, filename: str, sha256: str | None = None
+        self, stream: BinaryIO, *, filename: str, sha256: str | None = None,
+        scope: str | None = None,
     ) -> tuple[str, int]:
         del filename
-        storage_key = uuid4().hex
+        storage_key = f"{scope.strip('/')}/{uuid4().hex}" if scope else uuid4().hex
         return storage_key, self.put_existing(storage_key, stream, sha256=sha256)
 
     def put_existing(
@@ -148,8 +153,19 @@ class R2DocumentStorage(DocumentStorage):
 
     @staticmethod
     def _validate_key(storage_key: str) -> None:
-        if not storage_key.isalnum():
-            raise FileNotFoundError(storage_key)
+        validate_storage_key(storage_key)
+
+
+_STORAGE_KEY = re.compile(r"^[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*$")
+
+
+def validate_storage_key(storage_key: str) -> None:
+    if len(storage_key) > 240 or not _STORAGE_KEY.fullmatch(storage_key):
+        raise FileNotFoundError(storage_key)
+
+
+def document_storage_scope(tenant_id, account_id) -> str:
+    return f"tenants/{tenant_id}/accounts/{account_id}/files"
 
 
 def configured_document_storage(settings) -> DocumentStorage:

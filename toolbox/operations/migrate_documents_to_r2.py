@@ -9,7 +9,7 @@ from sqlalchemy import select
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_entity import DocumentVersionEntity
-from core_api.modules.document.storage import R2DocumentStorage, configured_document_storage
+from core_api.modules.document.storage import R2DocumentStorage, configured_document_storage, validate_storage_key
 from core_api.modules.signature_request.signature_request_entity import SignatureEntity
 
 
@@ -47,8 +47,10 @@ def main() -> None:
     checked = 0
     copied = 0
     for storage_key, expected_sha256 in sorted(objects.items()):
-        if not storage_key.isalnum():
-            raise SystemExit(f"Invalid storage key in database: {storage_key!r}")
+        try:
+            validate_storage_key(storage_key)
+        except FileNotFoundError as exc:
+            raise SystemExit(f"Invalid storage key in database: {storage_key!r}") from exc
         path = source / storage_key
         if not path.is_file():
             try:

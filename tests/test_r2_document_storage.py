@@ -76,9 +76,23 @@ def test_r2_storage_round_trip_and_discard_uncommitted() -> None:
         target.get(key)
 
 
+def test_r2_storage_uses_tenant_and_account_scope() -> None:
+    target = storage()
+    scope = "tenants/tenant123/accounts/account456/files"
+
+    key, _ = target.put(BytesIO(b"pdf"), filename="contract.pdf", scope=scope)
+
+    assert key.startswith(f"{scope}/")
+    assert target.get(key).read() == b"pdf"
+    assert (target.bucket, f"documents/{key}") in target.client.objects
+
+
 def test_r2_storage_rejects_non_opaque_key() -> None:
     with pytest.raises(FileNotFoundError):
         storage().get("../document")
+
+    with pytest.raises(FileNotFoundError):
+        storage().get("tenants//accounts/account/files/file")
 
 
 def test_r2_storage_can_preserve_key_during_migration() -> None:

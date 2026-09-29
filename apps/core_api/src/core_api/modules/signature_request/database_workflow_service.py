@@ -6,7 +6,7 @@ from hmac import new as hmac_new
 from io import BytesIO
 from secrets import token_urlsafe
 from typing import Callable
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -17,7 +17,7 @@ from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.pdf_validation import validate_pdf_upload
-from core_api.modules.document.storage import DocumentStorage, configured_document_storage
+from core_api.modules.document.storage import DocumentStorage, configured_document_storage, document_storage_scope
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
@@ -37,9 +37,7 @@ class DatabaseSignatureWorkflowService:
         if not content:
             raise WorkflowError("Document content cannot be empty")
         digest = sha256(content).hexdigest()
-        key, size = self.storage.put(
-            BytesIO(content), filename=payload.original_filename, sha256=digest
-        )
+        key: str | None = None
         try:
             with SessionLocal.begin() as db:
                 tenant = db.scalar(
@@ -50,10 +48,18 @@ class DatabaseSignatureWorkflowService:
                 )
                 if tenant is None:
                     raise WorkflowError("Tenant not found", 404)
-                tenant_service.require_role(
+                member = tenant_service.require_role(
                     db, tenant.id, payload.created_by, {"admin", "member"}
                 )
                 billing_service.consume_document(db, tenant.id)
+                key, size = self.storage.put(
+                    BytesIO(content),
+                    filename=payload.original_filename,
+                    sha256=digest,
+                    scope=document_storage_scope(
+                        tenant.id, self._account_storage_id(member, payload.created_by)
+                    ),
+                )
                 item = DocumentEntity(**payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
                 db.add(item)
                 db.flush()
@@ -63,7 +69,8 @@ class DatabaseSignatureWorkflowService:
                 result = self._document_read(db, item)
             return result
         except Exception:
-            self.storage.discard_uncommitted(key)
+            if key:
+                self.storage.discard_uncommitted(key)
             raise
 
     def add_version(self, document_id: str, *, filename: str, content_type: str, actor_id: str, content: bytes) -> DocumentRead:
@@ -73,13 +80,16 @@ class DatabaseSignatureWorkflowService:
         try:
             with SessionLocal.begin() as db:
                 item = self._document(db, document_id, lock=True)
-                tenant_service.require_role(db, item.tenant_id, actor_id, {"admin", "member"})
+                member = tenant_service.require_role(db, item.tenant_id, actor_id, {"admin", "member"})
                 frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
                 if frozen is not None:
                     raise WorkflowError("A frozen document cannot receive a new version", 409)
                 digest = sha256(content).hexdigest()
                 key, size = self.storage.put(
-                    BytesIO(content), filename=filename, sha256=digest
+                    BytesIO(content), filename=filename, sha256=digest,
+                    scope=document_storage_scope(
+                        item.tenant_id, self._account_storage_id(member, actor_id)
+                    ),
                 )
                 item.version += 1
                 item.original_filename = filename
@@ -511,6 +521,10 @@ class DatabaseSignatureWorkflowService:
                     BytesIO(artifact),
                     filename=f"rubrica-{request.id}-signed.pdf",
                     sha256=artifact_hash,
+                    scope=document_storage_scope(
+                        document.tenant_id,
+                        self._document_owner_storage_id(db, document),
+                    ),
                 )
                 signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash, trusted_timestamp_json=trusted_timestamp)
                 db.add(signature)
@@ -664,6 +678,22 @@ class DatabaseSignatureWorkflowService:
         if item is None:
             raise WorkflowError("Signer not found", 404)
         return item
+
+    @staticmethod
+    def _account_storage_id(member: TenantMemberEntity | None, subject: str) -> UUID:
+        if member is not None and member.auth_user_uuid is not None:
+            return member.auth_user_uuid
+        return uuid5(NAMESPACE_URL, f"rubrica-account:{subject.strip().lower()}")
+
+    def _document_owner_storage_id(self, db, document: DocumentEntity) -> UUID:
+        owner = db.scalar(
+            select(TenantMemberEntity).where(
+                TenantMemberEntity.tenant_id == document.tenant_id,
+                func.lower(TenantMemberEntity.auth_user_id) == document.created_by.lower(),
+                TenantMemberEntity.deleted_at.is_(None),
+            )
+        )
+        return self._account_storage_id(owner, document.created_by)
 
     def _document(self, db, identifier: str, lock: bool = False) -> DocumentEntity:
         try:
