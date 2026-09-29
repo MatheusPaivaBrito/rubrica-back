@@ -18,6 +18,7 @@ from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_identity import InvalidBusinessIdentifierError, protect_cnpj
 from core_api.modules.tenant.tenant_service import tenant_service
+from core_api.modules.tenant.user_client import resolve_auth_user
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -113,6 +114,7 @@ def migrate_business_tenant(
             )
             .with_for_update()
         )
+        member_user_uuid = resolve_auth_user(member_email)
         member_changed = False
         if membership is None:
             active_members = database.scalars(
@@ -122,11 +124,26 @@ def migrate_business_tenant(
                     TenantMemberEntity.deleted_at.is_(None),
                 )
             ).all()
-            if len(active_members) >= 3:
-                raise ValueError("The tenant already has the Professional limit of 3 active members")
-            database.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id=member_email, role="admin", status="active", joined_at=DateTimeService.utc_now()))
+            member_limit = tenant_service.member_limit(database, tenant.id)
+            if member_limit is not None and len(active_members) >= member_limit:
+                raise ValueError(
+                    f"The tenant already has its limit of {member_limit} active members"
+                )
+            database.add(TenantMemberEntity(
+                tenant_id=tenant.id,
+                auth_user_id=member_email,
+                auth_user_uuid=member_user_uuid,
+                role="admin",
+                status="active",
+                joined_at=DateTimeService.utc_now(),
+            ))
             member_changed = True
-        elif membership.role != "admin" or membership.status != "active":
+        elif (
+            membership.auth_user_uuid != member_user_uuid
+            or membership.role != "admin"
+            or membership.status != "active"
+        ):
+            membership.auth_user_uuid = member_user_uuid
             membership.role = "admin"
             membership.status = "active"
             membership.joined_at = membership.joined_at or DateTimeService.utc_now()

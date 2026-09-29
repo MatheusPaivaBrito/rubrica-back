@@ -163,6 +163,24 @@ def test_team_limit_uses_current_entitlement(team_db, product, status, expected)
     assert module.tenant_service.team(tenant_id, 'member0@example.local').member_limit == expected
 
 
+def test_complimentary_lifetime_tenant_has_unlimited_members(team_db):
+    factory, tenant_id, ids = team_db
+    with factory.begin() as db:
+        db.scalar(select(BillingAccountEntity)).complimentary_lifetime = True
+
+    state = module.tenant_service.team(tenant_id, 'member0@example.local')
+
+    assert state.member_limit is None
+    assert state.active_count == 6
+    assert not state.requires_selection
+    updated = module.tenant_service.update_team(
+        tenant_id,
+        TenantTeamUpdate(active_member_ids=ids),
+        'member0@example.local',
+    )
+    assert updated.active_count == 6
+
+
 def test_professional_personal_tenant_can_invite_member(team_db, monkeypatch):
     factory, tenant_id, _ = team_db
     invited_user_id = uuid4()

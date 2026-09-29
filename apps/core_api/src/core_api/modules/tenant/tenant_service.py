@@ -234,9 +234,7 @@ class TenantService:
 
             if not billing_service.business_features_enabled(db, tenant_id):
                 raise WorkflowError("A Professional or Team plan is required for business members", 403)
-            billing_account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id, BillingAccountEntity.deleted_at.is_(None)))
-            product_code = billing_service._normalize_product_code(billing_account.current_product_code if billing_account else None)
-            member_limit = billing_service.PLAN_MEMBER_LIMITS.get(product_code, 3)
+            member_limit = self.member_limit(db, tenant_id)
             active_members = db.scalar(
                 select(func.count(TenantMemberEntity.id)).where(
                     TenantMemberEntity.tenant_id == tenant_id,
@@ -244,7 +242,7 @@ class TenantService:
                     TenantMemberEntity.status == "active",
                 )
             ) or 0
-            if active_members >= member_limit:
+            if member_limit is not None and active_members >= member_limit:
                 raise WorkflowError(f"The current plan allows up to {member_limit} tenant members", 409)
             member_user_uuid = resolve_auth_user(payload.auth_user_id.lower())
             db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), auth_user_uuid=member_user_uuid, role=payload.role, status="active", joined_at=DateTimeService.utc_now()))
@@ -270,7 +268,7 @@ class TenantService:
                 TenantMemberEntity.deleted_at.is_(None),
                 TenantMemberEntity.status == "active",
             )) or 0
-            if active_members >= limit:
+            if limit is not None and active_members >= limit:
                 raise WorkflowError(f"The current plan allows up to {limit} tenant members", 409)
             email = payload.email.strip().lower()
             existing = db.scalar(select(TenantMemberEntity).where(
@@ -317,14 +315,14 @@ class TenantService:
             raise WorkflowError("Tenant not found", 404)
 
     @staticmethod
-    def member_limit(db, tenant_id: UUID) -> int:
+    def member_limit(db, tenant_id: UUID) -> int | None:
         from core_api.modules.billing.billing_service import BillingService
         account = db.scalar(select(BillingAccountEntity).where(
             BillingAccountEntity.tenant_id == tenant_id, BillingAccountEntity.deleted_at.is_(None)))
         if account is None:
             return 1
         if account.complimentary_lifetime:
-            return 3
+            return None
         if not BillingService._paid_access_enabled(account):
             return 1
         return BillingService.PLAN_MEMBER_LIMITS.get(account.current_product_code, 1)
@@ -334,7 +332,8 @@ class TenantService:
         count = db.scalar(select(func.count(TenantMemberEntity.id)).where(
             TenantMemberEntity.tenant_id == tenant_id,
             TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active")) or 0
-        return count > TenantService.member_limit(db, tenant_id)
+        limit = TenantService.member_limit(db, tenant_id)
+        return limit is not None and count > limit
 
     def _team_read(self, db, tenant_id: UUID, member: TenantMemberEntity) -> TenantTeamRead:
         members = db.scalars(select(TenantMemberEntity).where(
@@ -344,7 +343,9 @@ class TenantService:
         active_count = sum(m.status == "active" for m in members)
         return TenantTeamRead(
             members=[TenantMemberRead.model_validate(m, from_attributes=True) for m in members],
-            member_limit=limit, active_count=active_count, requires_selection=active_count > limit,
+            member_limit=limit,
+            active_count=active_count,
+            requires_selection=limit is not None and active_count > limit,
             can_manage=member.role == "admin", current_member_id=member.id,
         )
 
@@ -407,7 +408,7 @@ class TenantService:
             if actor.id not in selected:
                 raise WorkflowError("Keep your administrator account active", 409)
             limit = self.member_limit(db, tenant_id)
-            if len(selected) > limit:
+            if limit is not None and len(selected) > limit:
                 raise WorkflowError(f"The current plan allows up to {limit} tenant members", 409)
             changed = []
             for member in members:

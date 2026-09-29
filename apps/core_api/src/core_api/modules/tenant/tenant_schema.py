@@ -168,7 +168,7 @@ class TenantMemberRoleUpdate(BaseModel):
 
 class TenantTeamRead(BaseModel):
     members: list[TenantMemberRead]
-    member_limit: int
+    member_limit: int | None
     active_count: int
     requires_selection: bool
     can_manage: bool

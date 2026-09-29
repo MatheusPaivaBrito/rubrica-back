@@ -25,7 +25,7 @@ LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -58,6 +58,7 @@ help:
 	@echo "  make production-up      Build and start the production stack"
 	@echo "  make production-migrate Apply every production migration"
 	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
+	@echo "  sudo make production-create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
 	@echo "  sudo make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  sudo make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make backup-all [environment=production]"
@@ -85,6 +86,7 @@ help:
 	@echo "  make seed-auth              Create the local signature administrator"
 	@echo "  make seed-local-users       Create 14 local test accounts across all implemented plans"
 	@echo "  make invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
+	@echo "  make create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
 	@echo "  make grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revision-auth msg=create_users"
@@ -188,6 +190,11 @@ invite-lifetime: migrate
 	$(LOCAL_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
 	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(email)" --actor "$(actor)" --reason "$(reason)"
 
+create-lifetime-tenant: migrate
+	@test -n "$(owner_email)" -a -n "$(member_email)" -a -n "$(legal_name)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make create-lifetime-tenant owner_email=EMAIL member_email=EMAIL legal_name='Legal name' actor=EMAIL reason='business reason'"; exit 2)
+	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(owner_email)" --actor "$(actor)" --reason "$(reason)"
+	$(LOCAL_COMPOSE) exec core-api python toolbox/seeds/business_tenant.py --owner-email "$(owner_email)" --member-email "$(member_email)" --legal-name "$(legal_name)" --actor "$(actor)"
+
 grant-lifetime: migrate-core
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make grant-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
 	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --tenant-id "$(tenant_id)" --actor "$(actor)" --reason "$(reason)"
@@ -235,6 +242,11 @@ production-invite-lifetime: production-migrate
 	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: sudo make production-invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
 	$(PRODUCTION_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
 	$(PRODUCTION_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(email)" --actor "$(actor)" --reason "$(reason)"
+
+production-create-lifetime-tenant: production-migrate
+	@test -n "$(owner_email)" -a -n "$(member_email)" -a -n "$(legal_name)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: sudo make production-create-lifetime-tenant owner_email=EMAIL member_email=EMAIL legal_name='Legal name' actor=EMAIL reason='business reason'"; exit 2)
+	$(PRODUCTION_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(owner_email)" --actor "$(actor)" --reason "$(reason)"
+	$(PRODUCTION_COMPOSE) exec core-api python toolbox/seeds/business_tenant.py --owner-email "$(owner_email)" --member-email "$(member_email)" --legal-name "$(legal_name)" --actor "$(actor)"
 
 production-grant-lifetime: production-migrate
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
