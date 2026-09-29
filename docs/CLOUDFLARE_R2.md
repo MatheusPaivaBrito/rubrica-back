@@ -26,6 +26,10 @@ docker compose --env-file .env.production \
   up -d --build core-api gateway
 ```
 
+Os alvos `make production-config`, `make production-migrate` e
+`make production-up` incluem esse overlay. Assim, a produção não volta
+acidentalmente ao volume local.
+
 O banco continua guardando somente a chave opaca do objeto. Upload, leitura,
 exclusão e backup passam pelo Core; o navegador não recebe credenciais nem URL pública.
 Antes de habilitar isso no servidor, os objetos do volume atual devem ser

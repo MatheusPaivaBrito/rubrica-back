@@ -30,6 +30,10 @@ REQUIRED_SECRETS = (
     "contact_turnstile_secret_key",
     "serproid_client_secret",
     "cloudflare_tunnel_token",
+    "r2_documents_endpoint",
+    "r2_documents_access_key_id",
+    "r2_documents_secret_access_key",
+    "r2_documents_bucket",
 )
 
 
