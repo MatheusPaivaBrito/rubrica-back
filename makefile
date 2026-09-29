@@ -25,7 +25,7 @@ LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 BACKUP_ROOT ?= backups
 
-.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -61,6 +61,7 @@ help:
 	@echo "  sudo make production-create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
 	@echo "  sudo make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  sudo make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
+	@echo "  sudo make production-reset-mfa email=EMAIL actor=EMAIL reason='...'"
 	@echo "  make backup-all [environment=production]"
 	@echo "  make backup-database database=all|core|auth|eventing|notification [environment=production]"
 	@echo "  make backup-files [environment=production]"
@@ -89,6 +90,7 @@ help:
 	@echo "  make create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
 	@echo "  make grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
 	@echo "  make revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
+	@echo "  make reset-mfa email=EMAIL actor=EMAIL reason='...'"
 	@echo "  make revision-auth msg=create_users"
 
 
@@ -204,6 +206,10 @@ revoke-lifetime: migrate-core
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make revoke-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
 	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py revoke --tenant-id "$(tenant_id)" --actor "$(actor)" --reason "$(reason)"
 
+reset-mfa: migrate-auth
+	@test -n "$(email)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make reset-mfa email=EMAIL actor=EMAIL reason='business reason'"; exit 2)
+	$(LOCAL_COMPOSE) run --rm --build auth-api python toolbox/seeds/reset_mfa.py --email "$(email)" --actor "$(actor)" --reason "$(reason)"
+
 
 
 
@@ -257,6 +263,10 @@ production-grant-lifetime: production-migrate
 production-revoke-lifetime: production-migrate
 	@test -n "$(tenant_id)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make production-revoke-lifetime tenant_id=UUID actor=EMAIL reason='business reason'"; exit 2)
 	$(PRODUCTION_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py revoke --tenant-id "$(tenant_id)" --actor "$(actor)" --reason "$(reason)"
+
+production-reset-mfa: production-migrate
+	@test -n "$(email)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: sudo make production-reset-mfa email=EMAIL actor=EMAIL reason='business reason'"; exit 2)
+	$(PRODUCTION_COMPOSE) run --rm --build auth-api python toolbox/seeds/reset_mfa.py --email "$(email)" --actor "$(actor)" --reason "$(reason)"
 
 BACKUP_COMPOSE_FILE = $(if $(filter production,$(environment)),$(PRODUCTION_COMPOSE_FILE),$(LOCAL_COMPOSE_FILE))
 BACKUP_ENV_FILE = $(if $(filter production,$(environment)),$(PRODUCTION_ENV_FILE),$(LOCAL_ENV_FILE))

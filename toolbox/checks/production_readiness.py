@@ -60,6 +60,11 @@ def main() -> int:
     domain = values.get("RUBRICA_DOMAIN", "")
     if not domain or "://" in domain or "/" in domain:
         errors.append("RUBRICA_DOMAIN must be a hostname without scheme or path")
+    turnstile_site_key = values.get("CONTACT_TURNSTILE_SITE_KEY", "")
+    if not turnstile_site_key or turnstile_site_key in {"replace_me", "site_key_replace_me"}:
+        errors.append(
+            "CONTACT_TURNSTILE_SITE_KEY must contain the production Turnstile site key"
+        )
     for key in REQUIRED_PRICE_IDS:
         value = values.get(key, "")
         if not value.startswith("price_") or value == "price_replace_me":
