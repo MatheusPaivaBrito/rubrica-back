@@ -10,7 +10,7 @@ from hashlib import sha256
 from io import BytesIO
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
@@ -155,6 +155,26 @@ def main() -> None:
                     raise RuntimeError(f"SHA-256 mismatch at destination: {target}")
             copied.append((source, target))
 
+        changing_versions = any(
+            isinstance(entity, DocumentVersionEntity) and getattr(entity, field) != target
+            for entity, field, _digest, target in references
+        )
+        changing_signatures = any(
+            isinstance(entity, SignatureEntity) and getattr(entity, field) != target
+            for entity, field, _digest, target in references
+        )
+        if changing_versions:
+            database.execute(
+                text(
+                    "ALTER TABLE document_versions "
+                    "DISABLE TRIGGER document_versions_append_only"
+                )
+            )
+        if changing_signatures:
+            database.execute(
+                text("ALTER TABLE signatures DISABLE TRIGGER signatures_append_only")
+            )
+
         for entity, field, _digest, target in references:
             old_key = getattr(entity, field)
             if old_key != target:
@@ -163,6 +183,19 @@ def main() -> None:
                     document = documents[entity.document_id]
                     if document.storage_key == old_key:
                         document.storage_key = target
+        database.flush()
+
+        if changing_versions:
+            database.execute(
+                text(
+                    "ALTER TABLE document_versions "
+                    "ENABLE TRIGGER document_versions_append_only"
+                )
+            )
+        if changing_signatures:
+            database.execute(
+                text("ALTER TABLE signatures ENABLE TRIGGER signatures_append_only")
+            )
 
     if args.delete_source:
         for source, (target, expected_digest) in sorted(cleanup_candidates.items()):
