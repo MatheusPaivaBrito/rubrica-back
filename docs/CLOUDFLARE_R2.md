@@ -94,9 +94,7 @@ R2_BACKUP_BUCKET_FILE=/etc/rubrica/secrets/r2_backup_bucket
 AWS_ACCESS_KEY_ID_FILE=/etc/rubrica/secrets/r2_access_key_id
 AWS_SECRET_ACCESS_KEY_FILE=/etc/rubrica/secrets/r2_secret_access_key
 RESTIC_PASSWORD_FILE=/etc/rubrica/secrets/r2_backup_restic_password
-RESTIC_KEEP_DAILY=7
-RESTIC_KEEP_WEEKLY=4
-RESTIC_KEEP_MONTHLY=6
+RESTIC_KEEP_WITHIN=7d
 DELETE_LOCAL_AFTER_UPLOAD=1
 ```
 
@@ -120,6 +118,13 @@ sudo systemctl enable --now rubrica-r2-backup.timer
 systemctl list-timers rubrica-r2-backup.timer
 ```
 
-O timer roda às 03:15 de São Paulo, recupera execuções perdidas após reinício e
-aplica retenção de 7 diários, 4 semanais e 6 mensais. Depois que o envio e a
-retenção remota terminam com sucesso, o diretório temporário local é removido.
+O timer roda todos os dias às 04:00 UTC e recupera execuções perdidas após
+reinício. Cada execução mantém os snapshots dos últimos 7 dias e executa
+`prune` para liberar no R2 os blocos que deixaram de ser utilizados. Depois que
+o envio e a retenção remota terminam com sucesso, o diretório temporário local
+é removido.
+
+Não configure uma regra de expiração de 7 dias diretamente nos objetos do
+bucket `rubrica-backups`: o Restic deduplica blocos entre snapshots, então a
+remoção isolada pelo R2 pode corromper backups ainda válidos. A retenção deve
+ser aplicada somente por `restic forget --keep-within 7d --prune`.

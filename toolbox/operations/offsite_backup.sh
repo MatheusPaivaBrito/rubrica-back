@@ -53,9 +53,7 @@ case "$action" in
     (cd "$backup_dir" && sha256sum --check SHA256SUMS)
     "${restic_cmd[@]}" backup --tag rubrica-production "$backup_dir"
     "${restic_cmd[@]}" forget --tag rubrica-production \
-      --keep-daily "${RESTIC_KEEP_DAILY:-7}" \
-      --keep-weekly "${RESTIC_KEEP_WEEKLY:-4}" \
-      --keep-monthly "${RESTIC_KEEP_MONTHLY:-6}" --prune
+      --keep-within "${RESTIC_KEEP_WITHIN:-7d}" --prune
     if [[ "${DELETE_LOCAL_AFTER_UPLOAD:-0}" == "1" ]]; then
       backup_root="$(cd "${BACKUP_ROOT:-backups}" && pwd)"
       [[ "$backup_dir" == "$backup_root"/* ]] || {
