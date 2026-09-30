@@ -17,7 +17,12 @@ from core_api.modules.billing.billing_service import billing_service
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead, DocumentStatus, DocumentVersionRead
 from core_api.modules.document.pdf_validation import validate_pdf_upload
-from core_api.modules.document.storage import DocumentStorage, configured_document_storage, document_storage_scope
+from core_api.modules.document.storage import (
+    DocumentStorage,
+    configured_document_storage,
+    document_version_storage_scope,
+    signed_artifact_storage_scope,
+)
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
@@ -37,6 +42,7 @@ class DatabaseSignatureWorkflowService:
         if not content:
             raise WorkflowError("Document content cannot be empty")
         digest = sha256(content).hexdigest()
+        document_id = uuid4()
         key: str | None = None
         try:
             with SessionLocal.begin() as db:
@@ -56,11 +62,13 @@ class DatabaseSignatureWorkflowService:
                     BytesIO(content),
                     filename=payload.original_filename,
                     sha256=digest,
-                    scope=document_storage_scope(
-                        tenant.id, self._account_storage_id(member, payload.created_by)
+                    scope=document_version_storage_scope(
+                        tenant.id,
+                        self._account_storage_id(member, payload.created_by),
+                        document_id,
                     ),
                 )
-                item = DocumentEntity(**payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
+                item = DocumentEntity(id=document_id, **payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
                 db.add(item)
                 db.flush()
                 db.add(DocumentVersionEntity(document_id=item.id, version=1, original_filename=item.original_filename, content_type=item.content_type, storage_key=key, sha256=digest, size_bytes=size, created_by=item.created_by))
@@ -87,8 +95,10 @@ class DatabaseSignatureWorkflowService:
                 digest = sha256(content).hexdigest()
                 key, size = self.storage.put(
                     BytesIO(content), filename=filename, sha256=digest,
-                    scope=document_storage_scope(
-                        item.tenant_id, self._account_storage_id(member, actor_id)
+                    scope=document_version_storage_scope(
+                        item.tenant_id,
+                        self._account_storage_id(member, actor_id),
+                        item.id,
                     ),
                 )
                 item.version += 1
@@ -521,9 +531,10 @@ class DatabaseSignatureWorkflowService:
                     BytesIO(artifact),
                     filename=f"rubrica-{request.id}-signed.pdf",
                     sha256=artifact_hash,
-                    scope=document_storage_scope(
+                    scope=signed_artifact_storage_scope(
                         document.tenant_id,
                         self._document_owner_storage_id(db, document),
+                        document.id,
                     ),
                 )
                 signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash, trusted_timestamp_json=trusted_timestamp)

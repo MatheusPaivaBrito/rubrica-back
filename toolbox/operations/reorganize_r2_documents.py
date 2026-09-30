@@ -15,7 +15,12 @@ from sqlalchemy import select
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
-from core_api.modules.document.storage import R2DocumentStorage, configured_document_storage, document_storage_scope
+from core_api.modules.document.storage import (
+    R2DocumentStorage,
+    configured_document_storage,
+    document_version_storage_scope,
+    signed_artifact_storage_scope,
+)
 from core_api.modules.signature_request.signature_request_entity import SignatureEntity, SignatureRequestEntity
 from core_api.modules.tenant.tenant_entity import TenantMemberEntity
 
@@ -27,23 +32,42 @@ def _account_id(members, tenant_id, email):
     return uuid5(NAMESPACE_URL, f"rubrica-account:{email.strip().lower()}")
 
 
-def _target_key(*, old_key: str, tenant_id, account_id) -> str:
-    if old_key.startswith("tenants/"):
+def _target_key(*, old_key: str, scope: str) -> str:
+    if old_key.startswith(f"{scope}/"):
         return old_key
-    return f"{document_storage_scope(tenant_id, account_id)}/{old_key.rsplit('/', 1)[-1]}"
+    return f"{scope}/{old_key.rsplit('/', 1)[-1]}"
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reorganize R2 documents by tenant and account.")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--delete-source", action="store_true")
+    parser.add_argument(
+        "--source-prefix",
+        default="documents",
+        help="Current object prefix in the bucket (default: documents)",
+    )
     args = parser.parse_args()
     if args.delete_source and not args.apply:
         parser.error("--delete-source requires --apply")
 
-    storage = configured_document_storage(settings)
-    if not isinstance(storage, R2DocumentStorage):
+    configured_storage = configured_document_storage(settings)
+    if not isinstance(configured_storage, R2DocumentStorage):
         raise SystemExit("DOCUMENT_STORAGE_PROVIDER must be r2")
+    source_storage = R2DocumentStorage(
+        endpoint=settings.R2_DOCUMENTS_ENDPOINT,
+        access_key_id=settings.R2_DOCUMENTS_ACCESS_KEY_ID,
+        secret_access_key=settings.R2_DOCUMENTS_SECRET_ACCESS_KEY,
+        bucket=settings.R2_DOCUMENTS_BUCKET,
+        prefix=args.source_prefix,
+    )
+    target_storage = R2DocumentStorage(
+        endpoint=settings.R2_DOCUMENTS_ENDPOINT,
+        access_key_id=settings.R2_DOCUMENTS_ACCESS_KEY_ID,
+        secret_access_key=settings.R2_DOCUMENTS_SECRET_ACCESS_KEY,
+        bucket=settings.R2_DOCUMENTS_BUCKET,
+        prefix="",
+    )
 
     copied: list[tuple[str, str]] = []
     cleanup_candidates: dict[str, tuple[str, str]] = {}
@@ -70,9 +94,12 @@ def main() -> None:
             document = documents[version.document_id]
             target = _target_key(
                 old_key=version.storage_key,
-                tenant_id=document.tenant_id,
-                account_id=_account_id(
-                    members, document.tenant_id, version.created_by or document.created_by
+                scope=document_version_storage_scope(
+                    document.tenant_id,
+                    _account_id(
+                        members, document.tenant_id, version.created_by or document.created_by
+                    ),
+                    document.id,
                 ),
             )
             references.append((version, "storage_key", version.sha256, target))
@@ -81,18 +108,23 @@ def main() -> None:
             document = documents[request.document_id]
             target = _target_key(
                 old_key=signature.artifact_storage_key,
-                tenant_id=document.tenant_id,
-                account_id=_account_id(members, document.tenant_id, document.created_by),
+                scope=signed_artifact_storage_scope(
+                    document.tenant_id,
+                    _account_id(members, document.tenant_id, document.created_by),
+                    document.id,
+                ),
             )
             references.append((signature, "artifact_storage_key", signature.artifact_sha256, target))
 
-        current_keys = {getattr(entity, field) for entity, field, _digest, _target in references}
         for _entity, _field, digest, target in references:
             if not target.startswith("tenants/"):
                 continue
             legacy_key = target.rsplit("/", 1)[-1]
-            if legacy_key not in current_keys:
-                cleanup_candidates[legacy_key] = (target, digest)
+            # Production originally used flat keys below ``documents/``. An
+            # earlier rollout may already have copied the structured key below
+            # that prefix, so the explicit cleanup phase safely covers both.
+            cleanup_candidates[legacy_key] = (target, digest)
+            cleanup_candidates[target] = (target, digest)
 
         moves: dict[str, tuple[str, str]] = {}
         for entity, field, expected_digest, target in references:
@@ -110,15 +142,15 @@ def main() -> None:
             return
 
         for source, (target, expected_digest) in sorted(moves.items()):
-            with storage.get(source) as current:
+            with source_storage.get(source) as current:
                 content = current.read()
             if sha256(content).hexdigest() != expected_digest:
                 raise RuntimeError(f"SHA-256 mismatch at source: {source}")
             try:
-                storage.put_existing(target, BytesIO(content), sha256=expected_digest)
+                target_storage.put_existing(target, BytesIO(content), sha256=expected_digest)
             except FileExistsError:
                 pass
-            with storage.get(target) as destination:
+            with target_storage.get(target) as destination:
                 if sha256(destination.read()).hexdigest() != expected_digest:
                     raise RuntimeError(f"SHA-256 mismatch at destination: {target}")
             copied.append((source, target))
@@ -134,10 +166,10 @@ def main() -> None:
 
     if args.delete_source:
         for source, (target, expected_digest) in sorted(cleanup_candidates.items()):
-            with storage.get(target) as destination:
+            with target_storage.get(target) as destination:
                 if sha256(destination.read()).hexdigest() != expected_digest:
                     raise RuntimeError(f"SHA-256 mismatch before source cleanup: {target}")
-            storage.discard_uncommitted(source)
+            source_storage.discard_uncommitted(source)
     print(
         f"[ok] copied={len(copied)} database_updated=True "
         f"sources_deleted={len(cleanup_candidates) if args.delete_source else 0}"

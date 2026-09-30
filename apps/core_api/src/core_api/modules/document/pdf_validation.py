@@ -43,7 +43,9 @@ def validate_pdf_upload(content: bytes, *, filename: str, content_type: str) -> 
     try:
         reader = PdfReader(BytesIO(content), strict=False)
         if reader.is_encrypted:
-            raise WorkflowError("Encrypted PDFs are not supported")
+            raise WorkflowError(
+                "Encrypted PDFs are not supported", code="pdf_encrypted"
+            )
         page_count = len(reader.pages)
         if page_count < 1 or page_count > settings.DOCUMENT_MAX_PAGES:
             raise WorkflowError("PDF page count is outside the allowed range")
@@ -54,7 +56,9 @@ def validate_pdf_upload(content: bytes, *, filename: str, content_type: str) -> 
     except WorkflowError:
         raise
     except (PdfReadError, ValueError, TypeError, RecursionError, KeyError, AssertionError) as exc:
-        raise WorkflowError("PDF is malformed or unsupported") from exc
+        raise WorkflowError(
+            "PDF is malformed or unsupported", code="pdf_requires_flattening"
+        ) from exc
 
 
 def _reject_active_content(root: Any) -> None:
@@ -65,7 +69,9 @@ def _reject_active_content(root: Any) -> None:
         value = pending.pop()
         inspected += 1
         if inspected > 100_000:
-            raise WorkflowError("PDF structure is too complex")
+            raise WorkflowError(
+                "PDF structure is too complex", code="pdf_requires_flattening"
+            )
         if isinstance(value, IndirectObject):
             identity: tuple[int, int] | int = (value.idnum, value.generation)
             if identity in visited:
@@ -74,11 +80,16 @@ def _reject_active_content(root: Any) -> None:
             try:
                 pending.append(value.get_object())
             except Exception as exc:
-                raise WorkflowError("PDF contains an invalid object") from exc
+                raise WorkflowError(
+                    "PDF contains an invalid object", code="pdf_requires_flattening"
+                ) from exc
         elif isinstance(value, DictionaryObject):
             for key, child in value.items():
                 if str(key) in _ACTIVE_PDF_KEYS:
-                    raise WorkflowError("PDF contains active or embedded content")
+                    raise WorkflowError(
+                        "PDF contains active or embedded content",
+                        code="pdf_requires_flattening",
+                    )
                 pending.append(child)
         elif isinstance(value, ArrayObject):
             pending.extend(value)

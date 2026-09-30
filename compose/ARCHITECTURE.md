@@ -96,8 +96,9 @@ Stripe é diferente de R2/SERPRO em uma coisa importante: **Stripe é o billing 
 
 Ele deve continuar utilizável sobre local ou produção com um segundo `-f`.
 
-Os documentos usam o prefixo `${R2_DOCUMENTS_PREFIX:-documents}`. Em produção,
-configure no bucket `rubrica-documents` uma regra **Bucket Lock** para esse prefixo.
+Os documentos usam a hierarquia `tenants/{tenant}/accounts/{account}/documents/{document}`
+diretamente na raiz do bucket. Em produção, configure no bucket `rubrica-documents`
+uma regra **Bucket Lock** para o prefixo `tenants/`.
 A aplicação cria cada chave uma única vez, grava o SHA-256 nos metadados do objeto
 e nunca remove um objeto já confirmado no banco. Defina o período de retenção com
 a política jurídica do produto antes de ativar a regra; uma retenção indefinida não

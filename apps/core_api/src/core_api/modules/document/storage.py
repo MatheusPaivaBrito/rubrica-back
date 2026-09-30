@@ -74,7 +74,7 @@ class R2DocumentStorage(DocumentStorage):
         access_key_id: str,
         secret_access_key: str,
         bucket: str,
-        prefix: str = "documents",
+        prefix: str = "",
         client=None,
     ) -> None:
         self.bucket = bucket
@@ -164,8 +164,18 @@ def validate_storage_key(storage_key: str) -> None:
         raise FileNotFoundError(storage_key)
 
 
-def document_storage_scope(tenant_id, account_id) -> str:
-    return f"tenants/{tenant_id}/accounts/{account_id}/files"
+def document_version_storage_scope(tenant_id, account_id, document_id) -> str:
+    return (
+        f"tenants/{tenant_id}/accounts/{account_id}/documents/"
+        f"{document_id}/versions"
+    )
+
+
+def signed_artifact_storage_scope(tenant_id, account_id, document_id) -> str:
+    return (
+        f"tenants/{tenant_id}/accounts/{account_id}/documents/"
+        f"{document_id}/signed-artifacts"
+    )
 
 
 def configured_document_storage(settings) -> DocumentStorage:

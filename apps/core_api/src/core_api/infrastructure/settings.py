@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: str | None = None
     R2_DOCUMENTS_BUCKET: str = ""
     R2_DOCUMENTS_BUCKET_FILE: str | None = None
-    R2_DOCUMENTS_PREFIX: str = "documents"
+    R2_DOCUMENTS_PREFIX: str = ""
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"

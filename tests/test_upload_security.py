@@ -62,8 +62,9 @@ def test_rejects_disguised_files(content: bytes, filename: str, content_type: st
 
 @pytest.mark.parametrize("content", [pdf_bytes(javascript=True), pdf_bytes(encrypted=True)])
 def test_rejects_active_or_encrypted_pdfs(content: bytes) -> None:
-    with pytest.raises(WorkflowError):
+    with pytest.raises(WorkflowError) as error:
         validate_pdf_upload(content, filename="contract.pdf", content_type="application/pdf")
+    assert error.value.code in {"pdf_requires_flattening", "pdf_encrypted"}
 
 
 def test_streaming_reader_stops_above_the_limit(monkeypatch) -> None:

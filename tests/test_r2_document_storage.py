@@ -67,7 +67,7 @@ def test_r2_storage_round_trip_and_discard_uncommitted() -> None:
 
     assert size == 12
     assert target.get(key).read() == b"%PDF-content"
-    assert target.client.metadata[(target.bucket, f"documents/{key}")] == {
+    assert target.client.metadata[(target.bucket, key)] == {
         "rubrica-sha256": digest
     }
 
@@ -78,13 +78,13 @@ def test_r2_storage_round_trip_and_discard_uncommitted() -> None:
 
 def test_r2_storage_uses_tenant_and_account_scope() -> None:
     target = storage()
-    scope = "tenants/tenant123/accounts/account456/files"
+    scope = "tenants/tenant123/accounts/account456/documents/document789/versions"
 
     key, _ = target.put(BytesIO(b"pdf"), filename="contract.pdf", scope=scope)
 
     assert key.startswith(f"{scope}/")
     assert target.get(key).read() == b"pdf"
-    assert (target.bucket, f"documents/{key}") in target.client.objects
+    assert (target.bucket, key) in target.client.objects
 
 
 def test_r2_storage_rejects_non_opaque_key() -> None:
