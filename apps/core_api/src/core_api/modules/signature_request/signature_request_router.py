@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from ipaddress import ip_address
 from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from starlette.concurrency import run_in_threadpool
 
 from core_api.infrastructure.auth_context import AuthContext, authenticated_context, require_permission
 from core_api.infrastructure.content_disposition import pdf_content_disposition
@@ -168,7 +170,18 @@ async def view_document(token: str, context: AuthContext = Depends(authenticated
 
 @router.post("/signing/links/{token}/sign", response_model=SignerRead, tags=["signing - command"])
 async def sign_document(token: str, payload: SignCommand, request: Request, context: AuthContext = Depends(authenticated_context)) -> SignerRead:
-    return workflow_service.sign(token, context.subject, payload.consent, payload.stamp, consent_version=payload.consent_version, client=payload.client, geolocation=payload.geolocation, ip_address=_client_ip(request), user_agent=request.headers.get("user-agent", "unknown"))
+    return await run_in_threadpool(
+        workflow_service.sign,
+        token,
+        context.subject,
+        payload.consent,
+        payload.stamp,
+        consent_version=payload.consent_version,
+        client=payload.client,
+        geolocation=payload.geolocation,
+        ip_address=_client_ip(request),
+        user_agent=request.headers.get("user-agent", "unknown"),
+    )
 
 
 def _client_ip(request: Request) -> str:
