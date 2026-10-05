@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 from hashlib import sha256
 from io import BytesIO
@@ -89,11 +90,13 @@ def apply_serpro_timestamp(pdf: bytes) -> tuple[bytes, dict[str, object] | None]
     timestamper = SerproTimeStamper()
     output = BytesIO()
     try:
-        PdfTimeStamper(timestamper).timestamp_pdf(
-            IncrementalPdfFileWriter(BytesIO(pdf)),
-            md_algorithm="sha256",
-            bytes_reserved=32768,
-            output=output,
+        asyncio.run(
+            PdfTimeStamper(timestamper).async_timestamp_pdf(
+                IncrementalPdfFileWriter(BytesIO(pdf)),
+                md_algorithm="sha256",
+                bytes_reserved=32768,
+                output=output,
+            )
         )
     except WorkflowError:
         raise
