@@ -270,7 +270,7 @@ def execute(config: CliConfig) -> dict[str, object]:
     try:
         stamped, timestamp_metadata = apply_serpro_timestamp(signed)
     except Exception as exc:
-        raise SigningError("SERPRO document timestamp failed") from exc
+        raise SigningError(f"SERPRO document timestamp failed: {exc}") from exc
     if not timestamp_metadata:
         raise SigningError("SERPRO did not produce a document timestamp")
 
