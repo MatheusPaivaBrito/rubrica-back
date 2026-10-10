@@ -67,6 +67,12 @@ class SignatureRequestRead(BaseModel):
 class OpenSignatureRequest(BaseModel):
     signature_mode: SignatureMode
 
+    @model_validator(mode="after")
+    def require_trusted_timestamp(self) -> "OpenSignatureRequest":
+        if self.signature_mode == SignatureMode.EVIDENCE:
+            raise ValueError("New signature requests require a SERPRO trusted timestamp")
+        return self
+
 
 class SignerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)

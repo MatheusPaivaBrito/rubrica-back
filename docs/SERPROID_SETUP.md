@@ -5,9 +5,10 @@ A URI de retorno cadastrada no Serpro ID é:
 `https://rubricasignature.com/api/auth/serproid/callback`
 
 O Nginx encaminha o callback ao Core API. A opção de assinatura com certificado
-aparece ao signatário quando a integração está configurada, a identidade do
-Rubrica contém CPF ou CNPJ e ele é o último signatário pendente. A assinatura
-comum por evidências continua disponível.
+aparece ao signatário quando Serpro ID e API Timestamp estão configurados, a
+identidade do Rubrica contém CPF ou CNPJ e ele é o último signatário pendente.
+O PDF recebe primeiro a assinatura PAdES/CMS do Serpro ID e depois o carimbo
+RFC 3161 da ACT SERPRO. Novas solicitações sem carimbo do tempo não são aceitas.
 
 ## Credenciais
 

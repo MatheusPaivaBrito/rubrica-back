@@ -369,7 +369,7 @@ class DatabaseSignatureWorkflowService:
             signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id)) or 0
             if not signer_count:
                 raise WorkflowError("At least one signer is required", 409)
-            if signature_mode == SignatureMode.SERPRO_TIMESTAMP:
+            if signature_mode in {SignatureMode.SERPRO_TIMESTAMP, SignatureMode.SERPROID}:
                 from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled
                 if not timestamp_enabled():
                     raise WorkflowError("SERPRO timestamp is not configured", 409)
@@ -522,10 +522,10 @@ class DatabaseSignatureWorkflowService:
                 artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat(), "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8")})
                 if certificate_signer is not None:
                     artifact = certificate_signer(artifact)
-                trusted_timestamp = None
-                if request.signature_mode == SignatureMode.SERPRO_TIMESTAMP.value:
-                    from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
-                    artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
+                from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
+                artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
+                if trusted_timestamp is None:
+                    raise WorkflowError("SERPRO timestamp is required for every signature", 503)
                 artifact_hash = sha256(artifact).hexdigest()
                 artifact_key, _ = self.storage.put(
                     BytesIO(artifact),
