@@ -59,7 +59,10 @@ def _validate_tsa_response(req: tsp.TimeStampReq, response: tsp.TimeStampResp) -
         raise WorkflowError("SERPRO timestamp nonce does not match the request", 502)
     policy = str(info["policy"].native)
     if policy not in _accepted_policy_oids():
-        raise WorkflowError("SERPRO timestamp policy is not accepted", 502)
+        raise WorkflowError(
+            f"SERPRO timestamp policy is not accepted (returned policy: {policy})",
+            502,
+        )
 
 
 class SerproTimeStamper(TimeStamper):
