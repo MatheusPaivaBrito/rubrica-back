@@ -18,14 +18,20 @@ TEST_ENV = env -u DEBUG
 LOCAL_COMPOSE_FILE ?= compose/local.yml
 PRODUCTION_COMPOSE_FILE ?= compose/production.yml
 PRODUCTION_R2_COMPOSE_FILE ?= compose/features/r2-documents.yml
+PRODUCTION_TIMESTAMP_COMPOSE_FILE ?= compose/features/serpro-timestamp.yml
 LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_FILE)
-PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE)
+PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
 LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
 LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 BACKUP_ROOT ?= backups
+ECNPJ_DOCUMENT_DIR ?= /srv/rubrica-ecnpj
+ECNPJ_PFX_FILE ?= /etc/rubrica/secrets/empresa-ecnpj-a1.pfx
+ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
+ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
+ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -57,6 +63,7 @@ help:
 	@echo "  make production-config  Validate the production Compose and secrets"
 	@echo "  make production-up      Build and start the production stack"
 	@echo "  make production-migrate Apply every production migration"
+	@echo "  make production-sign-ecnpj input=documento.pdf output=documento_assinado.pdf"
 	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  sudo make production-create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
 	@echo "  sudo make production-grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
@@ -271,6 +278,25 @@ production-reset-mfa: production-migrate
 
 production-organize-r2-documents: production-migrate
 	$(PRODUCTION_COMPOSE) run --rm --build core-api python toolbox/operations/reorganize_r2_documents.py $(if $(filter 1,$(apply)),--apply) $(if $(filter 1,$(delete_source)),--delete-source)
+
+production-sign-ecnpj: production-config
+	@test -n "$(input)" -a -n "$(output)" || (echo "Usage: make production-sign-ecnpj input=documento.pdf output=documento_assinado.pdf"; exit 2)
+	@case "$(input)$(output)" in */*) echo "[error] input and output must be file names inside $(ECNPJ_DOCUMENT_DIR)"; exit 2;; esac
+	@test -f "$(ECNPJ_DOCUMENT_DIR)/$(input)" || (echo "[error] Input PDF not found: $(ECNPJ_DOCUMENT_DIR)/$(input)"; exit 2)
+	@test -f "$(ECNPJ_PFX_FILE)" || (echo "[error] PKCS#12 not found: $(ECNPJ_PFX_FILE)"; exit 2)
+	@test -f "$(ECNPJ_ICP_TRUST_ROOTS_FILE)" || (echo "[error] ICP-Brasil trust roots not found: $(ECNPJ_ICP_TRUST_ROOTS_FILE)"; exit 2)
+	@test -f "$(ECNPJ_SIGNATURE_POLICY_FILE)" || (echo "[error] Signature policy not found: $(ECNPJ_SIGNATURE_POLICY_FILE)"; exit 2)
+	$(PRODUCTION_COMPOSE) run --rm --no-deps \
+		-v "$(ECNPJ_DOCUMENT_DIR):/operator/documents" \
+		-v "$(ECNPJ_PFX_FILE):/operator/secrets/ecnpj.pfx:ro" \
+		-v "$(ECNPJ_ICP_TRUST_ROOTS_FILE):/operator/secrets/icp-brasil-roots.pem:ro" \
+		-v "$(ECNPJ_SIGNATURE_POLICY_FILE):/operator/policies/signature-policy.der:ro" \
+		core-api python toolbox/sign_pdf_ecnpj.py \
+			"/operator/documents/$(input)" "/operator/documents/$(output)" \
+			--pfx /operator/secrets/ecnpj.pfx \
+			--signer-trust-roots /operator/secrets/icp-brasil-roots.pem \
+			--policy-file /operator/policies/signature-policy.der \
+			--policy-url "$(ECNPJ_SIGNATURE_POLICY_URL)"
 
 BACKUP_COMPOSE_FILE = $(if $(filter production,$(environment)),$(PRODUCTION_COMPOSE_FILE),$(LOCAL_COMPOSE_FILE))
 BACKUP_ENV_FILE = $(if $(filter production,$(environment)),$(PRODUCTION_ENV_FILE),$(LOCAL_ENV_FILE))

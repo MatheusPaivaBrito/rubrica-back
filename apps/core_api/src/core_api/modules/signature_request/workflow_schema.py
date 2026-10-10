@@ -161,7 +161,7 @@ class SigningRead(BaseModel):
 
 class SignCommand(BaseModel):
     consent: bool
-    consent_version: str = Field(pattern=r"^rubrica-evidence-v1$")
+    consent_version: str = Field(pattern=r"^rubrica-evidence-v(?:1|2)$")
     stamp: StampPosition
     client: ClientEvidence
     geolocation: GeolocationEvidence

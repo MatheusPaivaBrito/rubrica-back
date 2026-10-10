@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     SERPRO_TIMESTAMP_PROVIDER: Literal["fake", "serpro"] = "fake"
     SERPRO_TIMESTAMP_API_URL: str = "https://gateway.apiserpro.serpro.gov.br/apitimestamp/v1"
     SERPRO_TIMESTAMP_TOKEN_URL: str = "https://gateway.apiserpro.serpro.gov.br/token"
+    SERPRO_TIMESTAMP_TRUST_ROOTS_FILE: str | None = None
+    SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS: str = ""
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     BILLING_PROVIDER: Literal["fake", "stripe"] = "stripe"

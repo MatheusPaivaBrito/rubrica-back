@@ -26,4 +26,7 @@ secrets/production/*
 !secrets/*.example
 !secrets/production/*.example
 !secrets/production/README.md
+*.p12
+*.pfx
+*.key
 backups/

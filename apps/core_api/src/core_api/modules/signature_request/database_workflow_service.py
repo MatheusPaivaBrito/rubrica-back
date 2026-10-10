@@ -457,7 +457,7 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v1", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown", certificate_signer: Callable[[bytes], bytes] | None = None, certificate_info: dict[str, str] | None = None) -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v2", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown", certificate_signer: Callable[[bytes], bytes] | None = None, certificate_info: dict[str, str] | None = None) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         signer_identity = identity_summary(auth_user_id)
