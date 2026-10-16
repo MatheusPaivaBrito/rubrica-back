@@ -128,7 +128,7 @@ class DatabaseSignatureWorkflowService:
                 DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None),
                 TenantMemberEntity.status == "active", tenant_service.membership_identity_filter(actor_id),
                 or_(TenantMemberEntity.role == "admin", func.lower(DocumentEntity.created_by) == normalized_actor, invited),
-            ).order_by(DocumentEntity.id)
+            ).order_by(DocumentEntity.created_at.desc(), DocumentEntity.id.desc())
             return [self._document_read(db, item) for item in db.scalars(statement).all() if not tenant_service.team_over_limit(db, item.tenant_id)]
 
     def get_document(self, document_id: str, actor_id: str) -> DocumentRead:
@@ -208,7 +208,7 @@ class DatabaseSignatureWorkflowService:
                 TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active",
                 tenant_service.membership_identity_filter(actor_id),
                 or_(TenantMemberEntity.role == "admin", func.lower(SignatureRequestEntity.created_by) == normalized_actor, invited),
-            ).order_by(SignatureRequestEntity.id)
+            ).order_by(SignatureRequestEntity.created_at.desc(), SignatureRequestEntity.id.desc())
             return [self._request_read(db, item) for item in db.scalars(statement).all() if not tenant_service.team_over_limit(db, self._document(db, item.document_id).tenant_id)]
 
     def get_request(self, request_id: str, actor_id: str) -> SignatureRequestRead:
