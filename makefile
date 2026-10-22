@@ -1,4 +1,6 @@
 LOCAL_ENV_FILE ?= .env
+DEV_ENV_FILE ?= $(LOCAL_ENV_FILE)
+STAGING_ENV_FILE ?= .env.staging
 PRODUCTION_ENV_FILE ?= .env.production
 -include $(LOCAL_ENV_FILE)
 export
@@ -15,15 +17,23 @@ K8S_NAMESPACE ?= rubrica
 
 TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/observability_api/src:apps/worker/src:packages/shared_kernel/src
 TEST_ENV = env -u DEBUG
-LOCAL_COMPOSE_FILE ?= compose/local.yml
+comma := ,
+LOCAL_COMPOSE_FILE ?= compose/dev-dependencies.yml
+DEV_COMPOSE_FILE ?= compose/dev-dependencies.yml
+STAGING_COMPOSE_FILE ?= compose/staging.yml
 PRODUCTION_COMPOSE_FILE ?= compose/production.yml
 PRODUCTION_R2_COMPOSE_FILE ?= compose/features/r2-documents.yml
 PRODUCTION_TIMESTAMP_COMPOSE_FILE ?= compose/features/serpro-timestamp.yml
 LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_FILE)
+DEV_COMPOSE = docker compose --env-file $(DEV_ENV_FILE) -f $(DEV_COMPOSE_FILE)
+STAGING_COMPOSE = docker compose --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE)
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
 LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
 LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
+DEV_MAINTENANCE = $(DEV_COMPOSE) -f compose/services/alembic.yml
+DEV_SEED = $(DEV_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
+STAGING_MAINTENANCE = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 BACKUP_ROOT ?= backups
 ECNPJ_DOCUMENT_DIR ?= /srv/rubrica-ecnpj
 ECNPJ_PFX_FILE ?= /etc/rubrica/secrets/empresa-ecnpj-a1.pfx
@@ -31,40 +41,29 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help doctor test test-unit test-integration lint docs docs-build ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-migrate staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
-	@echo "Rubrica"
+	@echo "Rubrica environment commands"
 	@echo "============================================================"
-	@echo "Local Docker"
-	@echo "  make local-up            Build and start the local stack"
-	@echo "  make local-up-stripe     Build local stack and start Stripe webhook forwarding"
-	@echo "  make local-down          Stop the local stack"
-	@echo "  make local-reset         Delete local database volumes, migrate, seed and start again"
-	@echo "  make local-logs          Follow local service logs"
-	@echo "  make local-rebuild       Rebuild and recreate the local stack"
-	@echo "  make stripe-up           Start the optional local Stripe listener"
+	@echo "Development (applications bare metal, hot reload)"
+	@echo "  make dev                              Start no infrastructure"
+	@echo "  make dev-docker                       Start PostgreSQL/Redis, then apps"
+	@echo "  make dev-docker services=postgres,loki"
+	@echo "  make dev-bootstrap                    First-time migrate, seed and start"
+	@echo "  make dev-migrate|dev-seed             Explicit data operations"
+	@echo "  make docs|stripe-up|quick-tunnel-up|telemetry-up"
+	@echo ""
+	@echo "Staging (full Docker, staging-only secrets)"
+	@echo "  make staging-secrets-init"
+	@echo "  make staging-ensure|staging-bootstrap|staging-up|staging-smoke"
 	@echo ""
 	@echo "Checks"
-
-	@echo "  make doctor              Validate local project prerequisites"
-	@echo "  make test                Run tests"
-	@echo "  make test-unit           Run tests that do not require PostgreSQL/Redis"
-	@echo "  make test-integration    Run required tests against isolated PostgreSQL/Redis"
-	@echo "  make lint                Run Ruff"
+	@echo "  make doctor|lint|test-unit|test-integration"
 	@echo ""
-	@echo "Smoke scripts"
-	@echo "  make smoke-core-generator Verify the empty Core manifest before adding a domain"
-	@echo "  make smoke-all            Run every generated smoke script"
-
-	@echo ""
-	@echo "Runtime"
-	@echo "  make compose-up          Alias for local-up"
-	@echo "  make compose-down        Alias for local-down"
-	@echo "  make bootstrap           Migrate, seed local plan accounts, then start the stack"
-	@echo "  make production-config  Validate the production Compose and secrets"
-	@echo "  make production-up      Build and start the production stack"
-	@echo "  make production-migrate Apply every production migration"
+	@echo "Production (server-only)"
+	@echo "  make production-ensure|production-migrate|production-up"
+	@echo "  make production-bootstrap|production-provider-check"
 	@echo "  make production-sign-ecnpj input=documento.pdf output=documento_assinado.pdf"
 	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  sudo make production-create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
@@ -82,29 +81,72 @@ help:
 	@echo "  make backup-production-offsite  Alias for backup-r2"
 	@echo "  make verify-backup path=backups/TIMESTAMP"
 
+dev:
+	@test -f "$(DEV_ENV_FILE)" || (echo "[error] $(DEV_ENV_FILE) is missing; copy .env.example to $(DEV_ENV_FILE)"; exit 2)
+	DEV_ENV_FILE=$(DEV_ENV_FILE) poetry run python toolbox/dev/run.py
 
-	@echo ""
-	@echo "Project host endpoints"
-	@echo "  Gateway    http://localhost:$(GATEWAY_HOST_PORT)"
-	@echo ""
-	@echo "Database"
-	@echo "  Postgres and Redis are available only inside the Compose network"
-	@echo "  make migrate             Run all five databases in a one-shot container"
-	@echo "  make migrate-all         Alias for make migrate"
-	@echo "  make migrate-core           Run Core Alembic migrations"
-	@echo "  make revision-core msg=create_domain"
-	@echo "  make migrate-auth           Run Auth Alembic migrations"
-	@echo "  make migrate-observability  Run Observability Alembic migrations"
-	@echo "  make seed-auth              Create the local signature administrator"
-	@echo "  make seed-local-users       Create 14 local test accounts across all implemented plans"
-	@echo "  make invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
-	@echo "  make create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
-	@echo "  make grant-lifetime tenant_id=UUID actor=EMAIL reason='...'"
-	@echo "  make revoke-lifetime tenant_id=UUID actor=EMAIL reason='...'"
-	@echo "  make reset-mfa email=EMAIL actor=EMAIL reason='...'"
-	@echo "  make revision-auth msg=create_users"
+dev-docker:
+	@test -f "$(DEV_ENV_FILE)" || (echo "[error] $(DEV_ENV_FILE) is missing; run 'make dev-bootstrap'"; exit 2)
+	DEV_ENV_FILE=$(DEV_ENV_FILE) poetry run python toolbox/dev/dependencies.py "$(services)"
+	$(MAKE) --no-print-directory dev DEV_ENV_FILE=$(DEV_ENV_FILE)
 
+dev-docker-down:
+	$(DEV_COMPOSE) --profile "*" down --remove-orphans
 
+dev-docker-status:
+	$(DEV_COMPOSE) --profile "*" ps -a
+
+dev-docker-logs:
+	$(DEV_COMPOSE) --profile "*" logs -f --tail=100 $(if $(services),$(subst $(comma), ,$(services)),)
+
+dev-migrate:
+	DEV_ENV_FILE=$(DEV_ENV_FILE) poetry run python toolbox/dev/dependencies.py postgres
+	$(DEV_MAINTENANCE) run --rm --build alembic
+
+dev-seed:
+	DEV_ENV_FILE=$(DEV_ENV_FILE) poetry run python toolbox/dev/dependencies.py postgres,redis
+	$(DEV_SEED) run --rm --build seed
+
+dev-bootstrap:
+	@test -f "$(DEV_ENV_FILE)" || cp .env.example "$(DEV_ENV_FILE)"
+	$(MAKE) --no-print-directory dev-migrate DEV_ENV_FILE=$(DEV_ENV_FILE) LOCAL_ENV_FILE=$(DEV_ENV_FILE)
+	$(MAKE) --no-print-directory dev-seed DEV_ENV_FILE=$(DEV_ENV_FILE) LOCAL_ENV_FILE=$(DEV_ENV_FILE)
+	$(MAKE) --no-print-directory dev-docker DEV_ENV_FILE=$(DEV_ENV_FILE) services="$(services)"
+
+staging-secrets-init:
+	@test -f "$(STAGING_ENV_FILE)" || cp .env.staging.example "$(STAGING_ENV_FILE)"
+	STAGING_ENV_FILE=$(STAGING_ENV_FILE) poetry run python -m toolbox.dev.init_staging_secrets
+
+staging-ensure: ensure-observability-network
+	poetry run python -m toolbox.checks.staging_readiness "$(STAGING_ENV_FILE)"
+	$(STAGING_COMPOSE) config --quiet
+	@$(STAGING_COMPOSE) config --format json | poetry run python toolbox/checks/compose_contract.py staging
+
+staging-up: staging-ensure
+	$(STAGING_COMPOSE) up -d --build --wait
+
+staging-down:
+	$(STAGING_COMPOSE) down --remove-orphans
+
+staging-status:
+	$(STAGING_COMPOSE) ps -a
+
+staging-logs:
+	$(STAGING_COMPOSE) logs -f --tail=100
+
+staging-migrate: staging-ensure
+	$(STAGING_COMPOSE) up -d --wait postgres
+	$(STAGING_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
+	$(STAGING_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py all
+
+staging-smoke: staging-ensure
+	$(STAGING_COMPOSE) ps --status running
+	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
+	@echo "[ok] staging gateway and containers are operational"
+
+staging-bootstrap: staging-migrate
+	$(MAKE) --no-print-directory staging-up STAGING_ENV_FILE=$(STAGING_ENV_FILE)
+	$(MAKE) --no-print-directory staging-smoke STAGING_ENV_FILE=$(STAGING_ENV_FILE)
 
 test:
 	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest
@@ -124,8 +166,35 @@ lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
 docs:
-	$(LOCAL_COMPOSE) up -d --build --wait docs
+	$(DEV_COMPOSE) up -d --build --wait docs
 	@echo "[ok] Development docs available at http://127.0.0.1:$${DOCS_HOST_PORT:-7190}"
+
+docs-up: docs
+
+docs-logs:
+	$(DEV_COMPOSE) logs -f --tail=100 docs
+
+telemetry-up:
+	DEV_ENV_FILE=$(DEV_ENV_FILE) poetry run python toolbox/dev/dependencies.py loki
+
+telemetry-down:
+	$(DEV_COMPOSE) stop loki
+
+telemetry-status:
+	$(DEV_COMPOSE) ps -a loki
+
+telemetry-smoke:
+	@curl -fsS "http://127.0.0.1:$${LOKI_HOST_PORT:-3100}/ready" >/dev/null
+	@echo "[ok] local Loki is ready; full Platform Infra ingestion remains an integrated platform smoke"
+
+quick-tunnel-up:
+	$(DEV_COMPOSE) --profile quick-tunnel up -d quick-tunnel
+
+quick-tunnel-down:
+	$(DEV_COMPOSE) --profile quick-tunnel stop quick-tunnel
+
+quick-tunnel-logs:
+	$(DEV_COMPOSE) --profile quick-tunnel logs -f --tail=100 quick-tunnel
 
 docs-build:
 	poetry run python -m toolbox.docs.local_accounts
@@ -154,37 +223,38 @@ ensure-local-databases: local-config
 ensure-integration-services: ensure-local-databases
 	$(LOCAL_COMPOSE) up -d --wait redis
 
-local-config: ensure-observability-network
+local-config:
 	$(LOCAL_COMPOSE) config --quiet
 
-local-start: local-config
-	$(LOCAL_COMPOSE) up -d --wait
+local-start:
+	@echo "[deprecated] use 'make dev-docker'"; exit 2
 
-local-up: local-config
-	$(LOCAL_COMPOSE) up -d --build --wait
+local-up:
+	@echo "[deprecated] use 'make dev-docker' or 'make staging-up'"; exit 2
 
-local-up-stripe: local-config
-	$(LOCAL_COMPOSE) --profile stripe up -d --build --wait
+local-up-stripe:
+	$(MAKE) --no-print-directory stripe-up
 
 local-down:
-	$(LOCAL_COMPOSE) --profile "*" down --remove-orphans
+	$(MAKE) --no-print-directory dev-docker-down
 
 local-reset:
-	@test "$(environment)" != "production" || (echo "[error] Local reset cannot run in production"; exit 2)
-	$(LOCAL_COMPOSE) --profile "*" down --volumes --remove-orphans
-	$(MAKE) bootstrap
+	@echo "[error] destructive local reset was removed; use explicit Docker volume commands after inspecting targets"; exit 2
 
 local-logs:
-	$(LOCAL_COMPOSE) logs -f --tail=100
+	$(MAKE) --no-print-directory dev-docker-logs
 
 local-rebuild:
-	$(LOCAL_COMPOSE) up -d --build --force-recreate --wait
+	@echo "[deprecated] application code runs bare metal; use 'make staging-up' to rebuild containers"; exit 2
 
 stripe-up:
-	$(LOCAL_COMPOSE) --profile stripe up -d stripe-cli
+	$(DEV_COMPOSE) --profile stripe up -d stripe-cli
+
+stripe-down:
+	$(DEV_COMPOSE) --profile stripe stop stripe-cli
 
 stripe-logs:
-	$(LOCAL_COMPOSE) logs -f --tail=100 stripe-cli
+	$(DEV_COMPOSE) --profile stripe logs -f --tail=100 stripe-cli
 
 migrate-core:
 	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py core
@@ -252,25 +322,40 @@ reset-mfa: migrate-auth
 compose-up: local-up
 
 bootstrap:
-	$(MAKE) migrate
-	$(MAKE) seed-local-users
-	$(MAKE) local-up
-	@echo "[ok] Rubrica is ready at http://localhost:7171"
+	@echo "[deprecated] use 'make dev-bootstrap'"; exit 2
 
 compose-down: local-down
 
-production-config: ensure-observability-network
+production-ensure: ensure-observability-network
 	python3 toolbox/checks/production_readiness.py $(PRODUCTION_ENV_FILE)
 	$(PRODUCTION_COMPOSE) config --quiet
 	@web_context="$$( $(PRODUCTION_COMPOSE) config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["web"]["build"]["context"])' )"; \
 		test -f "$$web_context/Dockerfile.prod" || (echo "[error] Frontend not found at $$web_context; set RUBRICA_WEB_CONTEXT=../../../rubrica-front in $(PRODUCTION_ENV_FILE)"; exit 1)
+	@$(PRODUCTION_COMPOSE) config --format json | python3 toolbox/checks/compose_contract.py production
+
+production-config: production-ensure
+
+production-status:
+	$(PRODUCTION_COMPOSE) ps -a
+
+production-provider-check: production-ensure
+	$(PRODUCTION_COMPOSE) exec -T postgres pg_isready -U "$${POSTGRES_USER:-rubrica}" -d "$${POSTGRES_DB:-rubrica}"
+	$(PRODUCTION_COMPOSE) exec -T redis redis-cli ping
+	@echo "[ok] PostgreSQL and Redis operational; external providers are configured but paid/mutating operations were not executed"
+
+production-provider-check-paid:
+	@echo "[error] paid or externally mutating provider probes require a provider-specific, explicitly authorized command"; exit 2
 
 ensure-production-databases: production-config
 	$(PRODUCTION_COMPOSE) up -d --wait postgres
 	$(PRODUCTION_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
 
-production-up: production-config
+production-up: production-ensure
 	$(PRODUCTION_COMPOSE) up -d --build --wait
+
+production-bootstrap: production-migrate
+	$(MAKE) --no-print-directory production-up PRODUCTION_ENV_FILE=$(PRODUCTION_ENV_FILE)
+	$(MAKE) --no-print-directory production-provider-check PRODUCTION_ENV_FILE=$(PRODUCTION_ENV_FILE)
 
 production-down:
 	$(PRODUCTION_COMPOSE) down

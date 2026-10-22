@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
     command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
     environment:
-      ENVIRONMENT: production
+      ENVIRONMENT: ${RUNTIME_ENVIRONMENT:-production}
       APP_DEBUG: "false"
       PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
       POSTGRES_USER: ${POSTGRES_USER:-rubrica}

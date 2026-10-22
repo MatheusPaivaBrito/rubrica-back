@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
     environment:
       APP_NAME: Rubrica Observability API
-      ENVIRONMENT: production
+      ENVIRONMENT: ${RUNTIME_ENVIRONMENT:-production}
       PLATFORM_GRAFANA_URL: ${PLATFORM_GRAFANA_URL:-http://grafana:3000}
       PLATFORM_GRAFANA_TIMEOUT_SECONDS: ${PLATFORM_GRAFANA_TIMEOUT_SECONDS:-3}
       PLATFORM_GRAFANA_SERVICE_TOKEN_FILE: /run/secrets/platform_grafana_service_token

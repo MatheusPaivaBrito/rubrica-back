@@ -29,7 +29,7 @@ services:
       dockerfile: apps/eventing_api/dockerfile
     restart: unless-stopped
     environment:
-      ENVIRONMENT: production
+      ENVIRONMENT: ${RUNTIME_ENVIRONMENT:-production}
       POSTGRES_USER: ${POSTGRES_USER:-rubrica}
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_HOST: postgres

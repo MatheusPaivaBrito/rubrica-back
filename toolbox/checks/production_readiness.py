@@ -59,6 +59,8 @@ def main() -> int:
     errors: list[str] = []
     if values.get("ENVIRONMENT") != "production":
         errors.append("ENVIRONMENT must be production")
+    if values.get("DOCUMENT_STORAGE_PROVIDER") != "r2":
+        errors.append("DOCUMENT_STORAGE_PROVIDER must be r2 in production")
     domain = values.get("RUBRICA_DOMAIN", "")
     if not domain or "://" in domain or "/" in domain:
         errors.append("RUBRICA_DOMAIN must be a hostname without scheme or path")

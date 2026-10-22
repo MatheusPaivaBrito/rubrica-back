@@ -43,15 +43,15 @@ signatures and audit events in the project's PostgreSQL database. File bytes use
 the local storage adapter in development. Authenticated identity must still be
 supplied by Auth: Core forwards the request's bearer token (or access cookie) to
 Auth's `/access-control/context` contract. The client cannot choose its actor
-identity. After `make migrate`, run `make seed-local-users` to create 11 local
+identity. After `make dev-migrate`, run `make dev-seed` to create the local
 logins: Free, Essential, Professional (3 members), and Team (6 members).
 Administrators count toward those totals. The seed requires an explicit local
 or development environment and opt-in, confirms email and exempts only these
 fixtures from MFA. Passwords use `LOCAL_TEST_ACCOUNT_PASSWORD`. Rerunning it
 preserves billing tests and suspended memberships. See
 [Compose architecture](compose/ARCHITECTURE.md#operações-manuais-alembic-e-seed)
-for logins and manual migration commands. `make bootstrap` runs migrations,
-seeds these accounts and then starts the local application in sequence.
+for logins and manual migration commands. `make dev-bootstrap` prepares the
+dependencies, migrates, seeds these accounts and starts the applications bare metal.
 
 ## Verifying a signed PDF
 
@@ -68,31 +68,50 @@ evidence manifest and the evidence captured for each signer. Artifacts created
 before this metadata was introduced retain their original hashes and expose the
 summary metadata only; they are not rewritten retroactively.
 
-## Local Development
+## Environments
 
-Prerequisites: Python 3.13 or 3.14, Poetry, and a Docker-compatible
-daemon with Compose available. The scaffold does not install host tools
-unless the optional bootstrap capability was explicitly selected.
+The normal editing loop runs the Angular frontend and internal APIs bare metal
+with hot reload. Docker is used only for dependencies such as PostgreSQL,
+Redis, Kafka or Loki. Python 3.13/3.14, Poetry, Node/npm and the project
+dependencies must already be installed.
 
 ```bash
 cp .env.example .env
 poetry install
+npm --prefix ../rubrica-front ci
 make doctor
-make migrate-all
-make dev-all
+make dev-docker
 ```
 
-`make dev-all` starts only the APIs selected for this project. Their
-required local dependencies are started on demand by their matching
-`ensure-*` target. Use `make compose-up` when you prefer every selected
-container to be started together.
-
-Run individual migrations when needed:
+`make dev` starts no infrastructure and uses exactly the endpoints in `.env`.
+`make dev-docker` starts the default PostgreSQL and Redis containers, waits for
+readiness, and then starts the same bare-metal applications. Dependencies and
+optional tools can be selected explicitly:
 
 ```bash
-make migrate-core
-make migrate-auth
+make dev-docker services=postgres,redis,loki
+make docs
+make telemetry-up
 ```
+
+First-time initialization and data changes remain explicit:
+
+```bash
+make dev-bootstrap
+make dev-migrate
+make dev-seed
+```
+
+Staging is the first fully containerized environment. It uses separate config,
+Docker Secrets and named volumes, never development or production data:
+
+```bash
+make staging-secrets-init
+make staging-bootstrap
+make staging-smoke
+```
+
+See [AGENTS.md](AGENTS.md) and `make help` for the complete contract.
 
 
 
@@ -117,9 +136,9 @@ sudo install -d -m 700 -o root -g root /etc/rubrica/secrets
 # cloudflare_tunnel_token.
 sudo chmod 600 /etc/rubrica/secrets/*
 
-make production-up
+make production-ensure
 make production-migrate
-make production-seed
+make production-up
 ```
 
 Create a dedicated remotely managed tunnel for Rubrica, configure the public
@@ -130,9 +149,9 @@ and database unexposed; the tunnel makes outbound connections to Cloudflare.
 For subsequent deployments, keep the existing named volumes and run:
 
 ```bash
-docker compose --env-file .env.production -f compose/production.yml up -d --build
-docker compose --env-file .env.production -f compose/production.yml exec auth-api alembic -c apps/auth_api/alembic.ini upgrade head
-docker compose --env-file .env.production -f compose/production.yml exec core-api alembic -c apps/core_api/alembic.ini upgrade head
+make production-ensure
+make production-migrate
+make production-up
 ```
 
 ### Production backup and restore verification

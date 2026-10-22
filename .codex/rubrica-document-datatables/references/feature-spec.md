@@ -3,8 +3,8 @@
 ## Estado
 
 - Especificação em construção.
-- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 e 11.
-- Partes 1, 2, 3, 5, 6, 7 e 9 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas e Parte 10 reservada para revisão posterior.
+- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 e 12.
+- Partes 1, 2, 3, 5, 6, 7, 9, 11 e 12 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas e Parte 10 reservada para revisão posterior. A validação integral da Parte 12 ainda depende do runtime Docker de staging e do servidor de produção.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
 
@@ -157,6 +157,24 @@ Regras:
 | 11D | Interface de reabertura e histórico agrupado | frontend | 11B, 11C | `VERIFICADO` | Dashboard oferece reabertura somente para solicitação expirada, modal de prazo/motivo/pendentes, abre o novo rascunho e agrupa o histórico de rodadas | Nenhum. |
 | 11E | Links, notificações e auditoria da nova rodada | ambos | 11B–11D | `VERIFICADO` | Solicitação expirada não gera novo link; a rodada reaberta usa novo nonce e o fluxo existente envia convites idempotentes aos pendentes quando o emissor gerar o link | Nenhum. |
 | 11F | Testes de integridade, permissões e múltiplas rodadas | ambos | 11B–11E | `IMPLEMENTADO` | Integração real PostgreSQL valida imutabilidade, idempotência, hash do artefato-base, preservação de duas evidências e bloqueio de link vencido; 303 testes unitários, 5 integrações e 61 testes frontend passaram | Acrescentar E2E visual da jornada completa quando houver navegador Playwright compatível; não bloqueia a implementação funcional. |
+
+### Parte 12 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 12A | Inventariar e classificar comandos, Compose, arquivos de ambiente e profiles atuais | backend/infra | nenhuma | `VERIFICADO` | Makefile, overlays, serviços, portas, profiles, secrets e aliases foram confrontados; comandos locais ambíguos foram descontinuados com erro explícito | Nenhum. |
+| 12B | Separar configuração e secrets entre dev, staging e produção | backend/infra | 12A | `VERIFICADO` | `.env.example`, `.env.staging.example` e `.env.production.example` possuem contratos distintos; staging cria secrets exclusivos sem sobrescrever e readiness validou conteúdo/permissão | Nenhum. |
+| 12C | Implementar `make dev` com aplicações 100% bare metal | ambos/devex | 12A, 12B | `IMPLEMENTADO` | `toolbox/dev/run.py` inicia cinco APIs Uvicorn e Angular com hot reload, carrega o env escolhido e coordena falha/encerramento sem Docker | Executar smoke interativo completo após corrigir a propriedade do diretório local legado `.rubrica-storage`; testes usaram storage temporário seguro. |
+| 12D | Implementar `make dev-docker` para dependências conteinerizadas | backend/infra/devex | 12A–12C | `IMPLEMENTADO` | Catálogo allowlist de PostgreSQL, Redis, Kafka, Loki, docs, Stripe CLI e Quick Tunnel; parser testado rejeita APIs internas e ativa profiles opcionais; portas somente em loopback | Executar smoke dos contêineres após estabilizar o Docker Desktop/WSL; nenhuma API interna está no Compose de dev. |
+| 12E | Implementar staging totalmente conteinerizado e próximo de produção | ambos/infra | 12B–12D | `IMPLEMENTADO` | `compose/staging.yml`, Docker Secrets próprios, volume de documentos, gateway único em loopback e `staging-*`; readiness e contrato renderizado passaram | `staging-up` foi bloqueado pelo credential helper do Docker/WSL ao obter `python:3.14-slim` (`UtilAcceptVsock`); repetir build e smoke após corrigir o daemon. |
+| 12F | Consolidar `production-ensure`, `production-bootstrap` e deploy recorrente | backend/infra | 12A, 12B, 12E | `IMPLEMENTADO` | Ensure exige R2, valida Compose/isolation; bootstrap separa migration, subida e provider check; produção renderizada não publica portas e exclui ferramentas de dev | Revalidar no servidor com secrets e providers reais; nenhuma chamada paga foi feita localmente. |
+| 12G | Reorganizar Makefile e preservar aliases seguros durante a transição | backend/infra/devex | 12C–12F | `VERIFICADO` | Interface canônica aparece em `make help`; aliases perigosos/ambíguos falham ou encaminham para operações seguras e operações de dados são explícitas | Nenhum. |
+| 12H | Fechar topologia, redes e exposição de portas por nível | backend/infra/segurança | 12C–12F | `VERIFICADO` | Teste de contrato e Compose renderizado comprovam dependências dev em loopback, somente gateway de staging em loopback e zero host ports em produção | Runtime de staging continua pendente em 12E, sem alterar a validação estrutural da topologia. |
+| 12I | Separar observabilidade de desenvolvimento, staging e produção | backend/infra/platform_infra | 12C–12H, Parte 9 | `IMPLEMENTADO` | Loki local é opcional por catálogo e comandos `telemetry-*`; observability_api integra staging/produção pela rede externa existente e preserva degradação segura da Parte 9 | Repetir smoke integrado de staging após correção do Docker; Platform Infra completa continua fora do Compose do produto. |
+| 12J | Implementar readiness e probes operacionais dos providers | backend/infra | 12E, 12F, 12I | `IMPLEMENTADO` | Staging readiness valida ambiente/secrets; produção diferencia ensure estrutural, check operacional seguro de PostgreSQL/Redis e comando pago que recusa execução automática | Probes reais dos providers externos dependem do servidor e permanecem `não testados`; ampliar somente com operação segura específica e autorização quando houver efeito/custo. |
+| 12K | Separar apenas o destino do armazenamento entre não produção e produção | backend/infra | 12B–12H, contrato da Parte 10 | `VERIFICADO` | Dev usa `.runtime/documents`, staging volume `document_storage`, produção é recusada sem `DOCUMENT_STORAGE_PROVIDER=r2`; abstração de negócio não foi duplicada | A auditoria aprofundada do ciclo de vida continua reservada à Parte 10. |
+| 12L | Testar os três níveis, seleção de serviços e proteções cruzadas | backend/infra/CI | 12C–12K | `IMPLEMENTADO` | Ruff; 307 testes backend; 61 frontend; lint/build; 4 novos testes de seleção/isolation; contratos dev/staging/produção renderizados e staging readiness aprovado | Smoke runtime dev-docker/staging pendente pelo Docker/WSL; produção somente pode ser comprovada no servidor. |
+| 12M | Atualizar os `AGENTS.md` com o fluxo operacional definitivo do Rúbrica | ambos/documentação | 12C–12L verificados | `VERIFICADO` | `AGENTS.md` backend contém contrato canônico; frontend possui instrução mínima autônoma e referência ao orquestrador; README e Make help alinhados | Nenhum. |
 
 ## Parte 1 — tabelas e ordenação
 
@@ -1087,6 +1105,404 @@ O modal contém novo prazo, motivo obrigatório, seleção de pendentes, inclus�
 - A listagem não duplica o documento como se cada rodada fosse outro upload.
 - Histórico e auditoria permitem reconstruir quem reabriu, por quê, quando e o que foi preservado.
 - Testes demonstram autorização, idempotência, concorrência, integridade e preservação das evidências.
+
+## Parte 12 — fluxos de desenvolvimento, staging e produção
+
+### Objetivo e princípio
+
+Reorganizar Makefile, processos bare metal, Compose, configuração, secrets, inicialização e verificações operacionais em três níveis explícitos: desenvolvimento, staging e produção. Desenvolvimento prioriza hot reload e permite escolher onde cada dependência está; staging é o primeiro fluxo 100% Docker e reproduz a forma operacional de produção; produção mantém isolamento e providers reais.
+
+A regra central é: **dev executa o código do produto bare metal; staging comprova a composição Docker; produção aplica a mesma disciplina com isolamento e providers reais**.
+
+Este modelo definitivo substitui as propostas anteriores da Parte 12 que colocavam frontend e APIs internas no Compose local diário. Docker no desenvolvimento é suporte para dependências, não requisito para editar e recarregar o código do Rúbrica.
+
+A implementação da Parte 12 foi autorizada em 2026-10-22. O quadro de acompanhamento acima é a fonte do estado efetivamente comprovado; critérios que dependem do Docker/WSL ou do servidor não devem ser promovidos para `VERIFICADO` sem o respectivo smoke.
+
+### Ordem de conclusão desta entrega
+
+1. Implementar e verificar integralmente a Parte 12.
+2. Executar a auditoria da Parte 10 sobre arquivos, R2, integridade, retenção, backup e migração.
+3. Aplicar somente as adequações realmente demonstradas pela Parte 10 e realizar o fechamento final da entrega.
+
+A Parte 12 define a separação operacional dos providers. A Parte 10 continua sendo a autoridade para auditar o ciclo de vida e a segurança dos arquivos; não se deve duplicar ou antecipar nessa reorganização uma reimplementação das proteções já existentes.
+
+### Matriz dos ambientes
+
+| Aspecto | Dev bare metal | Dev + Docker | Staging | Produção |
+|---|---|---|---|---|
+| Comando principal | `make dev` | `make dev-docker` | `make staging-up` | `make production-up` |
+| Código do Rúbrica | Frontend e APIs bare metal com hot reload | Frontend e APIs bare metal com hot reload | Frontend, gateway e APIs em contêineres | Frontend, gateway e APIs em contêineres |
+| Dependências | Nada é iniciado; usa endpoints de `.env` | Infraestrutura externa em contêineres | Toda a topologia em Docker | Toda a topologia em Docker |
+| Seleção | Configuração manual em `.env` | Catálogo padrão ou `services=...` | Composição fechada | Composição fechada e estrita |
+| Ensure | Não executa ensure; somente preflight mínimo da configuração | Assegura somente os contêineres selecionados | Ensure completo de staging | Ensure estrito de produção |
+| Configuração | `.env` | `.env` | `.env.staging` ou nome equivalente definitivo | `.env.production` |
+| Secrets | Valores exclusivamente locais conforme providers fake | Secrets locais quando algum contêiner exigir | Docker Secrets de staging | Docker Secrets reais em `/etc/rubrica/secrets` |
+| Providers | Fake ou endpoint escolhido pelo desenvolvedor | Fake por padrão | Fake/sandbox, nunca produção | Providers reais |
+| Arquivos | Filesystem local fora do Git | Mesmo filesystem local usado pelas APIs bare metal | Volume Docker persistente | R2 privado operacional |
+| Telemetria | Exporter falso/desligado ou endpoint indicado | Loki/coletores selecionáveis | Integração completa de teste | Integração contínua com Platform Infra |
+| Exposição | Processos e dependências em loopback | Contêineres somente em loopback | Gateway/portas de diagnóstico controladas | Somente Cloudflare Tunnel → gateway |
+| Seed | Explícito e idempotente | Explícito e idempotente | Seed próprio de staging, se aprovado; nunca dados locais implícitos | Proibido |
+| MkDocs | Processo bare metal ou comando próprio | Pode ser dependência auxiliar selecionada | Ausente da composição semelhante à produção | Ausente |
+| Stripe CLI | Opcional | Contêiner opcional selecionável | Ausente; usar sandbox real quando exigido | Ausente |
+
+### Configuração e secrets
+
+- `.env` pertence aos dois modos de desenvolvimento bare metal; staging possui arquivo próprio e `.env.production` pertence exclusivamente ao servidor.
+- Todos os comandos validam a presença e o contrato do arquivo de configuração do seu nível antes de iniciar, inclusive `make dev`; essa validação mínima não é o `ensure` de infraestrutura.
+- `.env` pode apontar PostgreSQL, Redis, Kafka, Loki ou qualquer dependência para localhost, contêiner, máquina remota ou serviço já instalado. `make dev` respeita esses destinos e não tenta corrigi-los.
+- Nenhum arquivo de ambiente deve armazenar senha, token, chave privada ou secret real de provider.
+- Staging e produção devem consumir secrets pelo mesmo contrato `/run/secrets/...`; os valores e diretórios de origem são distintos.
+- Desenvolvimento pode usar valores falsos seguros exigidos pelos providers fake, sem copiar credenciais de staging ou produção.
+- Em produção, a origem permanece `/etc/rubrica/secrets`, com propriedade e permissões mínimas verificadas.
+- Templates podem declarar nomes e configuração não sensível, mas nunca conter valores reais.
+- Staging e produção nunca geram, substituem ou corrigem secrets silenciosamente.
+
+### Armazenamento de documentos por ambiente
+
+A diferença entre os ambientes é exclusivamente o destino físico dos arquivos:
+
+```text
+Dev bare metal       → LocalDocumentStorage → diretório local persistente fora do Git
+Dev + Docker         → LocalDocumentStorage → o mesmo diretório, pois as APIs seguem bare metal
+Staging              → LocalDocumentStorage → volume Docker nomeado
+Produção             → R2DocumentStorage    → bucket privado operacional
+Testes automatizados → LocalDocumentStorage → diretório/volume temporário isolado
+```
+
+As definições de segurança permanecem as mesmas nos dois providers. Não existe uma versão enfraquecida das regras para desenvolvimento. Devem continuar compartilhados:
+
+- contratos de armazenamento e identidade dos artefatos;
+- cálculo e verificação de hashes;
+- criptografia e proteção de dados já adotadas pelo Rúbrica;
+- autorização por tenant, usuário e objeto;
+- validação de PDF, MIME, tamanho e conteúdo;
+- vínculo entre documento, versão, assinatura, evidência e manifesto;
+- nomes de objetos gerados pela aplicação, sem confiar no nome fornecido pelo usuário;
+- prevenção de sobrescrita indevida e detecção de adulteração;
+- trilhas de auditoria, tratamento de falhas e preservação dos bytes assinados;
+- políticas funcionais de retenção e exclusão, ressalvadas as diferenças operacionais que a Parte 10 vier a comprovar.
+
+O código de negócio deve consumir uma única abstração de storage. Não espalhar condicionais de ambiente pelos fluxos de documento e assinatura; a seleção do provider acontece na composição/configuração.
+
+No desenvolvimento diário:
+
+- `DOCUMENT_STORAGE_PROVIDER=local` é obrigatório por padrão;
+- documentos ficam em diretório local persistente, ignorado pelo Git e acessível aos processos bare metal sem `sudo`;
+- `dev-docker-down` não remove esse diretório;
+- somente um reset local explicitamente destrutivo pode removê-lo;
+- testes usam armazenamento temporário próprio e não compartilham o volume de desenvolvimento;
+- o ambiente funciona offline e não depende de credenciais R2.
+
+No staging, o mesmo provider local usa volume Docker nomeado, preservado por `staging-down`; isso testa persistência e permissões em contêiner sem introduzir R2 no ambiente de validação.
+
+Em produção:
+
+- `DOCUMENT_STORAGE_PROVIDER=r2` é obrigatório;
+- `production-ensure` recusa provider local e produção sem configuração R2 completa;
+- documentos e backups usam buckets e credenciais separados conforme a política validada;
+- nenhum filesystem efêmero de contêiner pode ser tratado como armazenamento persistente;
+- mudanças de prefix, bucket, migração, reconciliação e restauração permanecem sujeitas à auditoria da Parte 10.
+
+Teste do provider R2 fora de produção, se necessário, usa comando explícito, credenciais limitadas e bucket exclusivo de teste. Nunca usa o bucket operacional de produção, não faz parte de `dev`, `dev-docker` ou `staging-up` e não sincroniza automaticamente arquivos locais com R2.
+
+### Semântica dos comandos
+
+- `dev` valida apenas `.env`, executáveis e contratos mínimos, então inicia frontend e APIs bare metal. Não sobe nem assegura dependências.
+- `dev-docker` executa ensure das dependências solicitadas, sobe esses contêineres e depois inicia frontend e APIs bare metal.
+- `staging` é a primeira composição 100% Docker e valida a forma de empacotamento e operação próxima de produção.
+- `ensure` verifica e prepara pré-condições do nível correspondente. Não deve ser confundido com o preflight mínimo de `dev`.
+- `bootstrap` inicializa um ambiente completo e pode alterar estado de forma prevista e documentada.
+- `provider-check` comprova configuração e comunicação com dependências externas sem ser confundido com healthcheck de processo.
+- `up` apenas sobe serviços já preparados; não deve esconder migrations, seed, geração de secrets ou provisionamento externo.
+- Operações de dev, staging e produção precisam ter nomes explícitos; comandos genéricos não podem selecionar outro nível por acidente.
+
+### `make dev` — aplicações bare metal
+
+É o caminho mais direto e deliberadamente não possui ensure de infraestrutura:
+
+1. Exigir e validar `.env` sem modificá-lo.
+2. Verificar somente executáveis necessários aos processos bare metal, dependências do projeto e conflitos nas portas das aplicações.
+3. Iniciar frontend e todas as APIs internas do Rúbrica fora do Docker, preferencialmente com hot reload e encerramento coordenado.
+4. Conectar exatamente aos endpoints informados em `.env`, independentemente de estarem bare metal, em contêineres ou remotos.
+5. Falhar com diagnóstico claro se uma dependência apontada estiver indisponível, sem instalá-la, iniciá-la ou trocar seu endereço.
+
+Não exige Docker, não cria rede, não sobe PostgreSQL/Redis/Kafka/Loki, não executa migration ou seed e não gera configuração. É responsabilidade do desenvolvedor fornecer as dependências apontadas.
+
+### `make dev-docker` — dependências em Docker
+
+É o fluxo principal de desenvolvimento. Somente infraestrutura e ferramentas externas às APIs internas entram em contêineres; frontend e APIs continuam bare metal para preservar hot reload rápido.
+
+Uso padrão:
+
+```bash
+make dev-docker
+```
+
+Sobe o conjunto padrão de dependências definido após o inventário — esperado inicialmente PostgreSQL, Redis e demais componentes realmente necessários — executa ensure/readiness desses contêineres e inicia as aplicações bare metal.
+
+Seleção manual:
+
+```bash
+make dev-docker services=postgres,redis
+make dev-docker services=postgres,loki,kafka
+```
+
+`make dev-docker=loki,postgres` não será adotado porque GNU Make interpreta essa forma como atribuição de variável. O parâmetro `services=` aceita nomes canônicos separados por vírgula, rejeita nomes desconhecidos e assegura somente os serviços escolhidos.
+
+O ensure desse fluxo deve:
+
+1. Validar `.env` e garantir que os endpoints selecionados correspondem às portas publicadas pelos contêineres.
+2. Verificar Docker/Compose, redes, volumes, portas e arquivos necessários apenas aos serviços selecionados.
+3. Subir os contêineres solicitados, aguardar health/readiness e apresentar falha por serviço.
+4. Aplicar migrations ou seed somente por comandos/flags explícitos definidos no bootstrap de desenvolvimento; o comando diário não altera dados implicitamente.
+5. Iniciar frontend e APIs bare metal depois que as dependências estiverem prontas.
+
+Contêiner de frontend ou API interna não pertence a `dev-docker`. MkDocs, Stripe CLI, Quick Tunnel, Loki/coletores e Kafka podem compor o catálogo selecionável conforme sua necessidade real e seus profiles, mas não precisam integrar o conjunto padrão.
+
+### Bootstrap de desenvolvimento
+
+Um comando explícito, como `make dev-bootstrap`, prepara a estação pela primeira vez: valida/cria o `.env` a partir do template sem sobrescrever configuração existente, prepara recursos locais seguros, sobe o conjunto padrão de dependências, aplica migrations, executa seed idempotente e inicia as aplicações bare metal. Depois disso, o uso diário volta a `make dev` ou `make dev-docker`.
+
+`dev-migrate` e `dev-seed` permanecem operações explícitas e reutilizáveis. Seed não roda automaticamente em cada inicialização diária.
+
+### Ferramentas opcionais de desenvolvimento
+
+- MkDocs é suporte regular ao desenvolvimento; pode rodar bare metal por comando próprio ou ser selecionado como dependência auxiliar no `dev-docker`.
+- Stripe CLI permanece opcional e só sobe por `stripe-up` ou seleção explícita em `dev-docker`.
+- Quick Tunnel permanece opcional e só expõe o ambiente após comando explícito como `quick-tunnel-up` ou seleção equivalente.
+- Quick Tunnel e Stripe CLI não devem ser acoplados obrigatoriamente; cada integração pode ser ligada de forma independente.
+- A Platform Infra de desenvolvimento permanece opcional; seus componentes podem ser selecionados quando o objetivo for desenvolver ou validar métricas, logs, traces, dashboards e alertas.
+- Comandos `down`, `logs` e `status` específicos devem existir para as ferramentas opcionais quando isso reduzir ambiguidade operacional.
+
+### Staging — primeiro fluxo 100% Docker
+
+Staging existe para validar aquilo que dev bare metal não comprova: imagens, Dockerfiles, entrypoints, dependências entre serviços, Docker Secrets, redes, volumes, gateway, healthchecks e ordem de inicialização.
+
+O fluxo deve:
+
+1. Usar configuração própria, nunca `.env` de desenvolvimento nem `.env.production`.
+2. Executar `staging-ensure` para validar Docker/Compose, secrets de staging, redes, volumes, portas e providers fake/sandbox.
+3. Executar frontend, gateway, APIs internas, PostgreSQL, Redis e demais dependências necessárias em contêineres.
+4. Usar Docker Secrets com os mesmos nomes e destinos internos de produção, mas valores exclusivos de staging.
+5. Usar imagens e comandos equivalentes aos de produção sempre que possível, permitindo apenas diferenças justificadas de endpoint, escala, TLS externo e providers.
+6. Persistir documentos em volume Docker nomeado e nunca acessar o R2 operacional.
+7. Expor somente portas necessárias em loopback ou em rede controlada; não se apresentar como ambiente público de produção.
+8. Não incluir MkDocs, Stripe CLI, Quick Tunnel ou seed local na composição padrão próxima de produção.
+9. Permitir migrations e um eventual seed próprio de staging apenas por comandos explícitos.
+10. Executar smoke ponta a ponta antes de qualquer deploy de produção.
+
+Comandos esperados incluem `staging-ensure`, `staging-bootstrap`, `staging-up`, `staging-down`, `staging-migrate`, `staging-status`, `staging-logs` e `staging-smoke`.
+
+### `production-ensure`
+
+O comando de produção deve ser estrito, somente preparatório e falhar de maneira objetiva:
+
+1. Exigir `.env.production` e recusar dependência de `.env`.
+2. Exigir todos os secrets aplicáveis em `/etc/rubrica/secrets`.
+3. Verificar existência, conteúdo não vazio, propriedade e permissões dos secrets sem exibi-los.
+4. Validar redes, volumes, diretórios persistentes e configuração Compose final.
+5. Validar configuração do Cloudflare Tunnel permanente.
+6. Confirmar que PostgreSQL, Redis, APIs, observabilidade e MkDocs não publicam portas no host.
+7. Confirmar que cloudflared alcança somente o gateway pela topologia aprovada.
+8. Confirmar ausência de seed, MkDocs, Stripe CLI e Quick Tunnel na configuração de produção.
+9. Validar que providers selecionados possuem a configuração estrutural correspondente.
+10. Validar a rede privada, o token Viewer e os endpoints de ingestão/consulta necessários à integração com a Platform Infra.
+
+Não gera secrets, não executa migrations, não sobe a aplicação e não realiza chamada paga.
+
+### `production-bootstrap`
+
+Destina-se à primeira instalação ou recuperação controlada, não a todo deploy:
+
+1. Executar `production-ensure`.
+2. Subir PostgreSQL e Redis e confirmar seus estados internos de readiness.
+3. Confirmar volumes e bancos necessários.
+4. Aplicar migrations por etapa explícita e com falha interrompendo o fluxo.
+5. Subir APIs internas e validar readiness.
+6. Subir frontend e gateway.
+7. Subir o Cloudflare Tunnel permanente.
+8. Executar healthchecks internos e validações seguras de providers.
+9. Produzir relatório final de prontidão sem revelar secrets ou dados pessoais.
+
+O bootstrap de produção nunca executa seed local, cria usuários de teste, gera secrets, inicia Stripe CLI/MkDocs, publica portas internas, apaga volumes ou reseta bancos. Deploys recorrentes usam `production-migrate` e `production-up`, não o bootstrap completo por padrão.
+
+### Observabilidade por ambiente
+
+A `observability_api` pertence ao Rúbrica e continua fazendo parte de dev, staging e produção. Loki, Prometheus, Tempo, Grafana e Alloy pertencem à `platform_infra` e não devem ser incorporados ao Compose principal do produto.
+
+No desenvolvimento:
+
+- a aplicação deve funcionar normalmente sem a Platform Infra;
+- instrumentação de métricas, logs e traces permanece ativa ou degradável, sem bloquear health, readiness, migrations, seed ou fluxos do produto;
+- Loki, coletores e outros componentes são ligados sob demanda, inclusive por `make dev-docker services=...`, quando o trabalho envolve telemetria, correlação, dashboards ou alertas;
+- comandos dedicados, como `telemetry-up`, `telemetry-down`, `telemetry-status` e `telemetry-smoke`, devem facilitar esse teste sem torná-lo requisito de todo `dev` ou `dev-docker`;
+- falha de exportação local deve ser visível em logs técnicos controlados, sem produzir loop de falhas nem despejar dados pessoais;
+- testes unitários e de contrato podem usar exporters em memória ou endpoints falsos; o smoke integrado usa a Platform Infra real local.
+
+No staging, a telemetria deve ser validada em topologia conteinerizada próxima de produção. O smoke confirma separadamente scrape de métricas, ingestão de logs e traces, mas indisponibilidade da Platform Infra continua sem bloquear o produto.
+
+Em produção:
+
+- o Rúbrica se conecta continuamente à Platform Infra pela rede privada já contratada na Parte 9;
+- Prometheus coleta métricas das APIs, Alloy/Loki recebe logs e OpenTelemetry envia traces ao endpoint confirmado do Tempo/collector;
+- a `observability_api` usa conta Viewer exclusiva e Docker Secret próprio para consultas permitidas;
+- indisponibilidade da Platform Infra degrada monitoramento, nunca a assinatura, autenticação, documentos, migrations ou health essencial;
+- `production-ensure` valida configuração, secrets, DNS, rede e endpoints sem exigir que uma falha transitória derrube o produto;
+- `production-provider-check` executa um evento/trace sintético identificado e confirma ingestão quando isso for seguro;
+- dashboards, alertas e retenção permanecem responsabilidade da Platform Infra, enquanto o Rúbrica mantém os contratos e a instrumentação.
+
+O status precisa diferenciar `telemetria configurada`, `exportação alcançável`, `ingestão confirmada` e `plataforma degradada`. Um endpoint configurado ou uma métrica exposta não comprova que logs e traces chegaram aos respectivos backends.
+
+### Validação de providers
+
+Cada provider deve distinguir três estados:
+
+1. **Configurado:** arquivos, endpoints e parâmetros obrigatórios existem e possuem formato básico válido.
+2. **Alcançável:** DNS, conexão e TLS funcionam.
+3. **Operacional:** autenticação e uma operação segura e representativa foram comprovadas.
+
+`production-ensure` executa apenas validações estruturais e passivas. `production-provider-check` executa probes reais, somente leitura ou sintéticos reversíveis, com timeout e saída sanitizada.
+
+| Provider | Probe operacional esperado |
+|---|---|
+| PostgreSQL | Conexão e consulta somente leitura em cada banco requerido |
+| Redis | `PING` e operação temporária isolada quando necessário |
+| R2 de documentos | Autenticação e acesso ao bucket; objeto temporário somente se explicitamente seguro |
+| R2 de backup | Acesso ao repositório/bucket sem confundir com teste completo de restore |
+| Stripe | Consulta somente leitura de conta, produtos ou configuração aplicável |
+| Resend | Validação de autenticação por endpoint seguro, sem envio quando possível |
+| SerproID | Obtenção/validação controlada de token sem produzir assinatura |
+| Carimbo do Tempo Serpro | Autenticação e disponibilidade sem emitir token cobrado por padrão |
+| Cloudflare Tunnel | Estado conectado e acesso ao gateway esperado |
+| Observabilidade | Evento sintético identificado e confirmação de ingestão quando seguro |
+
+Chamadas pagas, envio de e-mail, assinatura, emissão de carimbo ou qualquer operação com efeito externo ficam fora do check padrão. Se necessárias, usam comando separado como `production-provider-check-paid`, com autorização explícita, identificação do custo/efeito e proteção contra execução acidental.
+
+O relatório deve indicar individualmente `configurado`, `alcançável`, `operacional`, `degradado`, `não testado` ou `falhou`; presença de variável não pode ser apresentada como integração operacional.
+
+### Redes e portas
+
+No dev bare metal, as portas das aplicações e os endpoints das dependências vêm de `.env`. No dev-docker, cada dependência selecionada publica somente em `127.0.0.1`, para consumo pelos processos bare metal. A referência inicial, a confirmar no inventário, é:
+
+```text
+7171 gateway          7180 frontend
+7101 auth-api         7102 core-api
+7103 eventing-api     7104 notification-api
+7105 observability    7190 MkDocs
+7432 PostgreSQL       7379 Redis
+Kafka/Loki/OTLP       portas definidas pelo catálogo após inventário
+```
+
+Quick Tunnel é a única exposição externa opcional do desenvolvimento e precisa de ação explícita. Staging expõe apenas o gateway e portas técnicas deliberadamente necessárias em loopback; serviços internos comunicam-se por redes Docker.
+
+Em produção, a topologia de entrada é:
+
+```text
+Internet → Cloudflare → Cloudflare Tunnel → gateway → frontend/APIs internas
+```
+
+- Nenhuma porta de PostgreSQL, Redis, API interna, observabilidade ou MkDocs é publicada no host.
+- Cloudflared acessa apenas o gateway na rede necessária.
+- Gateway acessa somente frontend e APIs requeridas.
+- APIs acessam apenas suas dependências autorizadas.
+- Banco e Redis não compartilham redes desnecessárias com frontend ou cloudflared.
+- O Compose renderizado, e não apenas o arquivo-fonte, é a evidência final de isolamento.
+
+### Interface-alvo do Makefile
+
+```text
+Desenvolvimento bare metal:
+  dev
+  dev-bootstrap      dev-migrate         dev-seed
+
+Desenvolvimento com dependências Docker:
+  dev-docker
+  dev-docker services=postgres,redis
+  dev-docker services=postgres,loki,kafka
+  dev-docker-down    dev-docker-status   dev-docker-logs
+
+Ferramentas opcionais:
+  docs-up            docs-logs
+  stripe-up          stripe-down          stripe-logs
+  quick-tunnel-up    quick-tunnel-down    quick-tunnel-logs
+  telemetry-up       telemetry-down       telemetry-status
+  telemetry-smoke
+
+Staging 100% Docker:
+  staging-ensure     staging-bootstrap
+  staging-up         staging-down
+  staging-migrate    staging-status
+  staging-logs       staging-smoke
+
+Testes:
+  test-unit          test-integration     test-all
+
+Produção:
+  production-ensure          production-bootstrap
+  production-config          production-migrate
+  production-up              production-down
+  production-status          production-logs
+  production-provider-check  production-provider-check-paid
+```
+
+Aliases históricos devem ser inventariados antes de remoção. Durante eventual transição, aliases seguros podem apontar para o novo comando explícito, mas nenhum alias ambíguo pode escolher produção por variável incidental.
+
+### Instruções operacionais para agentes
+
+Depois que os pacotes técnicos da Parte 12 estiverem implementados e verificados, criar ou atualizar `AGENTS.md` versionado nos repositórios do Rúbrica. As instruções devem refletir os comandos que realmente existirem; o plano não pode ser copiado antecipadamente como se já estivesse operacional.
+
+O contrato para agentes deve registrar, no mínimo:
+
+- localização e responsabilidade de `rubrica-back` e `rubrica-front`;
+- `.env` exclusivamente local e `.env.production` exclusivamente no servidor;
+- proibição de colocar secrets em arquivos de ambiente ou no Git;
+- comandos canônicos `dev`, `dev-docker services=...`, `dev-bootstrap`, migrations, seed e ferramentas opcionais;
+- staging como primeiro fluxo 100% Docker e os comandos `staging-*` correspondentes;
+- comandos canônicos e mais restritivos para `production-ensure`, migrations, deploy, bootstrap e provider checks;
+- diferença entre `ensure`, `bootstrap`, `up`, health/readiness e `provider-check`;
+- regra de nunca executar seed, MkDocs, Stripe CLI ou Quick Tunnel em produção;
+- topologia bare metal, dependências Docker em loopback, staging conteinerizado e isolamento de produção pelo Cloudflare Tunnel → gateway;
+- comportamento da observabilidade: Platform Infra opcional para testes locais de telemetria e integrada em produção, sempre com degradação segura;
+- obrigação de consultar Makefile, Compose renderizado e documentação vigente antes de sugerir comandos;
+- proibição de chamadas pagas, envio real, assinatura, timestamp ou mutação externa sem autorização explícita;
+- comandos de validação e critérios mínimos antes de commit, push ou orientação de deploy;
+- cuidado com arquivos e volumes pertencentes a root e preferência por Docker sem `sudo` no desenvolvimento quando o usuário possuir acesso ao daemon.
+
+Como backend e frontend são repositórios Git separados, a implementação deve decidir uma fonte canônica e evitar duas cópias extensas divergentes. A preferência é manter o contrato operacional detalhado no backend e um `AGENTS.md` curto no frontend com suas regras próprias e referência clara ao contrato do ambiente, desde que essa referência funcione nos contextos reais de checkout e CI. Se os repositórios também forem usados isoladamente, cada um precisa conter instruções mínimas suficientes para não depender de um diretório irmão ausente.
+
+Os `AGENTS.md` não devem conter credenciais, endereços privados sensíveis, dados pessoais, senhas de seed reais fora do contrato público de desenvolvimento nem procedimentos destrutivos como padrão. Qualquer alteração futura em Makefile, nomes de comandos, arquivos de ambiente, secrets, profiles ou topologia deve atualizar as instruções no mesmo conjunto de mudanças.
+
+### Testes e critérios de aceitação da Parte 12
+
+- `make dev` exige e valida `.env`, inicia frontend e APIs internas bare metal com hot reload e não exige Docker nem executa ensure de dependências.
+- `make dev` respeita os endpoints configurados e falha claramente quando indisponíveis, sem instalar, iniciar ou redirecionar dependências.
+- `make dev-docker` sobe somente dependências externas às APIs internas, aguarda readiness e mantém frontend/APIs bare metal.
+- `make dev-docker services=postgres,loki` seleciona exatamente os serviços solicitados; nomes desconhecidos ou combinações inválidas falham antes de alterar estado.
+- O conjunto padrão de `dev-docker` é documentado e não inclui frontend ou APIs internas do Rúbrica.
+- Nenhum comando diário de dev executa migrations ou seed implicitamente; `dev-bootstrap`, `dev-migrate` e `dev-seed` possuem responsabilidades explícitas e são idempotentes onde aplicável.
+- Stripe CLI, Quick Tunnel, Kafka e componentes de telemetria somente sobem quando estiverem no conjunto padrão aprovado ou forem selecionados explicitamente.
+- Dev funciona com a Platform Infra desligada; `telemetry-up` e `telemetry-smoke` validam métricas, logs e traces sob demanda.
+- Dependências Docker de desenvolvimento publicam portas somente em loopback e os processos bare metal usam os mesmos endpoints declarados em `.env`.
+- Nenhum comando de dev lê configuração, secrets, buckets ou providers reais de staging/produção por acidente.
+- Staging é 100% Docker, usa Docker Secrets próprios, imagens/entrypoints próximos de produção e passa por `staging-ensure` e `staging-smoke`.
+- Staging não usa `.env`, `.env.production`, secrets reais, R2 operacional, seed local, MkDocs, Stripe CLI ou Quick Tunnel em sua composição padrão.
+- Dev persiste documentos em filesystem local fora do Git; staging usa volume Docker nomeado; produção recusa provider local e exige R2.
+- Trocar o provider não altera contratos de criptografia, hash, autorização, validação, evidência ou preservação; testes de contrato executam a mesma matriz de segurança nos providers aplicáveis.
+- `dev-docker-down` e `staging-down` preservam seus arquivos; remoção exige comando destrutivo explícito e não existe sincronização automática para R2.
+- Testes R2 fora da produção usam bucket e credenciais exclusivos, nunca o bucket operacional.
+- `production-ensure` falha antes do deploy quando configuração, secret, permissão, volume, rede ou isolamento estiver incorreto.
+- Nenhum comando de produção lê `.env`/configuração de staging, cria secret, executa seed ou inclui serviço de desenvolvimento.
+- A configuração Compose de produção não publica portas internas e aceita tráfego de entrada somente por Cloudflare Tunnel → gateway.
+- Produção valida a integração privada com a Platform Infra e confirma separadamente coleta de métricas, ingestão de logs e ingestão de traces.
+- Indisponibilidade da Platform Infra aparece como degradação observável, mas não bloqueia readiness essencial nem fluxos do produto.
+- `production-bootstrap` é seguro para primeira instalação, interrompe em falha e não apaga ou reinicializa dados existentes.
+- Cada provider reporta separadamente configuração, alcance e operação comprovada.
+- Checks padrão não realizam chamadas pagas nem efeitos externos; checks pagos exigem comando e autorização separados.
+- Makefile, Compose e documentação usam a mesma terminologia e não oferecem comandos duplicados com semântica divergente.
+- Os `AGENTS.md` descrevem os comandos realmente implementados, distinguem dev bare metal, dev-docker, staging e produção e impedem o uso do ambiente errado.
+- Um teste/revisão documental detecta comandos inexistentes ou referências divergentes entre Makefile, Compose, documentação e `AGENTS.md`.
+- Testes automatizados validam seleção de dependências, staging/produção renderizados, ausência de serviços proibidos, publicação de portas e proteção contra cruzamento de níveis.
+- Smokes controlados comprovam dev, dev-docker completo/parcial, staging e produção antes de marcar os pacotes como `VERIFICADO`.
 
 ## Próximas partes
 

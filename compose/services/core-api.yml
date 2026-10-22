@@ -85,7 +85,7 @@ services:
     restart: unless-stopped
     command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
     environment:
-      BILLING_PROVIDER: stripe
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-stripe}
       STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
       STRIPE_WEBHOOK_SECRET_FILE: /run/secrets/stripe_webhook_secret
       STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL: ${STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL:-}
@@ -114,7 +114,7 @@ services:
       STRIPE_PRICE_TEAM_ANNUAL_JPY: ${STRIPE_PRICE_TEAM_ANNUAL_JPY:-}
       STRIPE_PORTAL_CONFIGURATION_ID: ${STRIPE_PORTAL_CONFIGURATION_ID:-}
       BILLING_GRACE_PERIOD_DAYS: ${BILLING_GRACE_PERIOD_DAYS:-10}
-      ENVIRONMENT: production
+      ENVIRONMENT: ${RUNTIME_ENVIRONMENT:-production}
       APP_DEBUG: "false"
       PYTHONPATH: apps/core_api/src:packages/shared_kernel/src
       POSTGRES_USER: ${POSTGRES_USER:-rubrica}

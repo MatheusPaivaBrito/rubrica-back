@@ -62,15 +62,15 @@ class Settings(BaseSettings):
                 "AUTH_TURNSTILE_SECRET_KEY": "AUTH_TURNSTILE_SECRET_KEY_FILE",
             },
         )
-        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+        if self.ENVIRONMENT.lower() in {"production", "prod", "staging"} and (
             not self.AUTH_MFA_ENCRYPTION_KEY
             or self.AUTH_MFA_ENCRYPTION_KEY == self.DEVELOPMENT_MFA_KEY
             or len(self.AUTH_MFA_ENCRYPTION_KEY) < 32
         ):
             raise ValueError(
-                "AUTH_MFA_ENCRYPTION_KEY must be set to a secure value in production"
+                "AUTH_MFA_ENCRYPTION_KEY must be secure outside development"
             )
-        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+        if self.ENVIRONMENT.lower() in {"production", "prod", "staging"} and (
             len(self.AUTH_IDENTITY_ENCRYPTION_KEY) < 32
             or len(self.AUTH_IDENTITY_HMAC_KEY) < 32
             or self.AUTH_IDENTITY_ENCRYPTION_KEY.startswith("rubrica-development-")
@@ -80,7 +80,7 @@ class Settings(BaseSettings):
             or self.AUTH_IDENTITY_HMAC_KEY == self.AUTH_MFA_ENCRYPTION_KEY
         ):
             raise ValueError(
-                "Secure and distinct Auth identity keys are required in production"
+                "Secure and distinct Auth identity keys are required outside development"
             )
         return self
 

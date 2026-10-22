@@ -1,0 +1,43 @@
+name: rubrica-staging
+
+include:
+  - path: ./resources/production.yml
+    project_directory: .
+  - path: ./features/stripe-production.yml
+    project_directory: .
+
+services:
+  postgres:
+    extends: {file: ./services/postgres.yml, service: production}
+  redis:
+    extends: {file: ./services/redis.yml, service: production}
+  auth-api:
+    extends: {file: ./services/auth-api.yml, service: production}
+  core-api:
+    extends: {file: ./services/core-api.yml, service: production}
+  eventing-api:
+    extends: {file: ./services/eventing-api.yml, service: production}
+  observability-api:
+    extends: {file: ./services/observability-api.yml, service: production}
+  notification-api:
+    extends: {file: ./services/notification-api.yml, service: production}
+  web:
+    extends: {file: ./services/web.yml, service: production}
+  gateway:
+    extends: {file: ./services/gateway.yml, service: production}
+    ports:
+      - "127.0.0.1:${STAGING_GATEWAY_HOST_PORT:-7271}:8080"
+
+volumes:
+  postgres_data:
+  redis_data:
+  document_storage:
+  stripe_webhook_runtime:
+
+networks:
+  rubrica_internal:
+    internal: true
+  rubrica_external:
+  platform_observability:
+    name: platform-observability
+    external: true

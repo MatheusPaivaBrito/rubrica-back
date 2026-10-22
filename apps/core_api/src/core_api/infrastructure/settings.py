@@ -128,7 +128,7 @@ class Settings(BaseSettings):
             )
         ):
             raise ValueError("R2 document storage requires endpoint, credentials and bucket")
-        if self.ENVIRONMENT.lower() in {"production", "prod"} and (
+        if self.ENVIRONMENT.lower() in {"production", "prod", "staging"} and (
             len(self.TENANT_IDENTITY_ENCRYPTION_KEY) < 32
             or len(self.TENANT_IDENTITY_HMAC_KEY) < 32
             or self.TENANT_IDENTITY_ENCRYPTION_KEY.startswith("rubrica-development-")
@@ -137,7 +137,7 @@ class Settings(BaseSettings):
             or self.TENANT_IDENTITY_ENCRYPTION_KEY == self.EVIDENCE_SECRET
             or self.TENANT_IDENTITY_HMAC_KEY == self.EVIDENCE_SECRET
         ):
-            raise ValueError("Secure and distinct tenant identity keys are required in production")
+            raise ValueError("Secure and distinct tenant identity keys are required outside development")
         return self
 
     @property

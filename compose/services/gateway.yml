@@ -19,8 +19,6 @@ services:
   production:
     image: nginx:stable-alpine
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:${GATEWAY_HOST_PORT:-7171}:8080"
     volumes:
       - ../../infra/gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ../../infra/gateway/proxy_params:/etc/nginx/proxy_params:ro

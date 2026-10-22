@@ -1,0 +1,111 @@
+name: rubrica-dev
+
+services:
+  postgres:
+    extends:
+      file: ./services/postgres.yml
+      service: local
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+
+  redis:
+    extends:
+      file: ./services/redis.yml
+      service: local
+    volumes:
+      - dev_redis_data:/data
+
+  kafka:
+    image: apache/kafka:4.1.0
+    ports:
+      - "127.0.0.1:${KAFKA_HOST_PORT:-9092}:9092"
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://127.0.0.1:${KAFKA_HOST_PORT:-9092}
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  loki:
+    image: grafana/loki:3.6.3
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "127.0.0.1:${LOKI_HOST_PORT:-3100}:3100"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3100/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  docs:
+    build:
+      context: ..
+      dockerfile: apps/core_api/dockerfile
+    command: sh -c "python -m toolbox.docs.local_accounts && mkdocs serve -f mkdocs.local.yml --dev-addr 0.0.0.0:8000"
+    working_dir: /app
+    volumes:
+      - ../:/app
+      - ../../rubrica-front:/rubrica-web:ro
+    ports:
+      - "127.0.0.1:${DOCS_HOST_PORT:-7190}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  stripe-cli:
+    image: stripe/stripe-cli:latest
+    profiles: ["stripe"]
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        api_key="$$(tr -d '\r\n' < /run/secrets/stripe_secret_key)"
+        /bin/stripe listen \
+          --api-key "$$api_key" \
+          --device-name rubrica-dev \
+          --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed \
+          --forward-to http://host.docker.internal:${CORE_API_DEV_PORT:-8100}/billing/webhooks/stripe 2>&1 | \
+        while IFS= read -r line; do
+          webhook_secret="$$(printf '%s\n' "$$line" | sed -n 's/.*\(whsec_[[:alnum:]]*\).*/\1/p')"
+          if [ -n "$$webhook_secret" ]; then
+            umask 077
+            printf '%s' "$$webhook_secret" > /runtime/stripe_webhook_secret.tmp
+            mv /runtime/stripe_webhook_secret.tmp /runtime/stripe_webhook_secret
+            echo "Ready! Stripe webhook signing secret synchronized with bare-metal Core."
+          else
+            printf '%s\n' "$$line"
+          fi
+        done
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    secrets:
+      - stripe_secret_key
+    volumes:
+      - ../.runtime/stripe:/runtime
+    restart: unless-stopped
+
+  quick-tunnel:
+    image: cloudflare/cloudflared:latest
+    profiles: ["quick-tunnel"]
+    command: ["tunnel", "--no-autoupdate", "--url", "http://host.docker.internal:4200"]
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  dev_postgres_data:
+  dev_redis_data:
+
+secrets:
+  stripe_secret_key:
+    file: ${SECRETS_DIR:-.secrets/dev}/stripe_secret_key
+  stripe_webhook_secret:
+    file: ${SECRETS_DIR:-.secrets/dev}/stripe_webhook_secret
