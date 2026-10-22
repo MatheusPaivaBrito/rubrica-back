@@ -44,7 +44,7 @@ Regras:
 | 1C | Contratos backend de filtro, paginação e ordenação determinística | backend | 1A | `VERIFICADO` | Listagens completas usam `created_at DESC, id DESC`; paginação/filtros operam sobre o conjunto autorizado completo no cliente | Migrar para paginação server-side apenas quando o volume justificar. |
 | 1D | DataTable de solicitações de assinatura | frontend | 1B, 1C | `VERIFICADO` | Busca, data, status, ações, ordenação e paginação integrados | Build e regressão frontend aprovados. |
 | 1E | DataTable de documentos enviados | frontend | 1B, 1C | `VERIFICADO` | Busca, data, ações, ordenação e paginação integrados | Upload novo retorna ao topo pela ordem padrão. |
-| 1F | Testes unitários, integração e E2E das duas tabelas | ambos | 1C–1E | `IMPLEMENTADO` | 61 testes frontend e 285 testes backend aprovados; build de produção aprovado | E2E visual específico das duas tabelas ainda pode ser ampliado. |
+| 1F | Testes unitários, integração e E2E das duas tabelas | ambos | 1C–1E | `VERIFICADO` | 61 testes frontend, lint e build de produção aprovados; Playwright comprovou ordenação, paginação, busca, teclado, contenção responsiva e snapshots das duas tabelas em iPhone 8/13, Pixel 2/7 e desktop | Os 25 cenários legados de `pdf-mobile.spec.ts` estão desatualizados com fluxos atuais de planos, login e cadastro; sua manutenção é separada e não reduz a cobertura específica das DataTables. |
 
 ### Parte 2 — pacotes de trabalho
 
