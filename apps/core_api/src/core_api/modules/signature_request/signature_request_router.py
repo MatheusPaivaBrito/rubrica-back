@@ -19,6 +19,8 @@ from core_api.modules.signature_request.workflow_schema import (
     SigningLinkRead,
     SignerRead,
     SigningRead,
+    StampConfiguration,
+    StampCustomization,
 )
 from core_api.modules.signature_request.database_workflow_service import database_workflow_service as workflow_service
 from core_api.modules.signature_request.notification_client import SignatureInvitationDeliveryError
@@ -73,6 +75,26 @@ async def list_signers(request_id: UUID, context: AuthContext = Depends(require_
 @router.post("/signature-requests/{request_id}/signers", response_model=SignerRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
 async def add_signer(request_id: UUID, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
     return workflow_service.add_signer(request_id, payload, context.subject)
+
+
+@router.get("/signature-requests/{request_id}/stamp-configuration", response_model=StampConfiguration, tags=["signature requests - query"])
+async def stamp_configuration(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> StampConfiguration:
+    return workflow_service.stamp_configuration(request_id, context.subject)
+
+
+@router.put("/signature-requests/{request_id}/stamp-configuration", response_model=StampConfiguration, tags=["signature requests - command"])
+async def save_stamp_configuration(request_id: UUID, payload: StampConfiguration, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> StampConfiguration:
+    return workflow_service.save_stamp_configuration(request_id, context.subject, payload)
+
+
+@router.get("/tenants/{tenant_id}/stamp-customization", response_model=StampCustomization | None, tags=["signature requests - query"])
+async def tenant_stamp_customization(tenant_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> StampCustomization | None:
+    return workflow_service.tenant_stamp_customization(tenant_id, context.subject)
+
+
+@router.put("/tenants/{tenant_id}/stamp-customization", response_model=StampCustomization, tags=["signature requests - command"])
+async def save_tenant_stamp_customization(tenant_id: UUID, payload: StampCustomization, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> StampCustomization:
+    return workflow_service.save_tenant_stamp_customization(tenant_id, context.subject, payload)
 
 @router.post("/signature-requests/{request_id}/signing-link", response_model=SigningLinkRead, tags=["signature requests - command"])
 async def create_signing_link(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SigningLinkRead:
@@ -181,6 +203,7 @@ async def sign_document(token: str, payload: SignCommand, request: Request, cont
         geolocation=payload.geolocation,
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent", "unknown"),
+        drawn_signature_png_data_url=payload.drawn_signature_png_data_url,
     )
 
 

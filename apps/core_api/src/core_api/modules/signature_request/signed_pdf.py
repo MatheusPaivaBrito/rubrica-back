@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from base64 import b64decode
 from hashlib import sha256
 from io import BytesIO
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen.canvas import Canvas
+from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 
@@ -34,7 +36,11 @@ def generate_signed_pdf(
     for page_number, page in enumerate(reader.pages, start=1):
         writer.add_page(page)
         output_page = writer.pages[-1]
-        page_stamps = [item for item in stamps if int(item["stamp"]["page"]) == page_number]
+        page_stamps: list[dict[str, Any]] = []
+        for item in stamps:
+            for position in item.get("stamp_positions") or [item["stamp"]]:
+                if int(position["page"]) == page_number:
+                    page_stamps.append(item | {"stamp": position})
         for item in page_stamps:
             width = float(output_page.mediabox.width)
             height = float(output_page.mediabox.height)
@@ -55,8 +61,10 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
         item.get("participant_role") == "company_representative"
         and isinstance(representation, dict)
     )
-    box_width = min(255.0, width * 0.48)
-    box_height = 96.0 if company_representation else 72.0
+    box_width = min(320.0, width * float(stamp.get("width", 0.4)))
+    box_height = max(54.0, height * float(stamp.get("height", 0.12)))
+    if company_representation:
+        box_height = max(box_height, 96.0)
     center_x = float(stamp["x"]) * width
     center_y = (1 - float(stamp["y"])) * height
     left = min(max(4.0, center_x - box_width / 2), width - box_width - 4.0)
@@ -64,10 +72,12 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     stream = BytesIO()
     canvas = Canvas(stream, pagesize=(width, height), pageCompression=1)
     canvas.setFillColor(white)
-    canvas.setStrokeColor(HexColor("#187A66"))
+    customization = item.get("stamp_customization") or {}
+    primary_color = str(customization.get("primary_color") or "#187A66")
+    canvas.setStrokeColor(HexColor(primary_color))
     canvas.setLineWidth(1.5)
     canvas.roundRect(left, bottom, box_width, box_height, 4, fill=1, stroke=1)
-    canvas.setFillColor(HexColor("#0D5B4B"))
+    canvas.setFillColor(HexColor(primary_color))
     identity_country = str(item.get("identity_document_country") or "").upper()
     country_code = identity_country or str(stamp.get("country_code") or "").upper()
     flag_width = 25.0 if country_code and stamp.get("show_flag", True) else 0.0
@@ -121,6 +131,15 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas.setFont(regular_font, 6.5)
     canvas.drawString(left + 7, bottom + 18, _fit_text(f'{item["signed_at"]} · {timezone}', regular_font, 6.5, box_width - 14))
     canvas.drawString(left + 7, bottom + 7, _fit_text(f'{evidence_label}: {item["evidence_sha256"][:16]}', regular_font, 6.5, box_width - 14))
+    for data_url, image_left in (
+        (customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - 42),
+        (item.get("drawn_signature_png_data_url"), left + box_width * 0.55),
+    ):
+        if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
+            try:
+                canvas.drawImage(ImageReader(BytesIO(b64decode(data_url.split(",", 1)[1]))), image_left, bottom + 8, width=min(36, box_width * 0.35), height=min(24, box_height * 0.3), preserveAspectRatio=True, mask="auto")
+            except Exception:
+                pass
     canvas.save()
     stream.seek(0)
     return stream

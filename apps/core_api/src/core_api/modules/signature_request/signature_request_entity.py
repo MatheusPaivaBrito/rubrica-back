@@ -21,6 +21,8 @@ class SignatureRequestEntity(BaseEntity):
     signing_token_nonce: Mapped[str | None] = mapped_column(String(64), unique=True)
     signature_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="evidence", server_default="evidence")
     issuer_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    stamp_placements: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
+    stamp_customization_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
 class SignerEntity(BaseEntity):

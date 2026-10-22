@@ -29,6 +29,8 @@ class BillingAccountRead(BaseModel):
     files_remaining: int | None
     unlimited_files: bool
     email_invitations_enabled: bool
+    custom_stamp_placement: bool
+    custom_stamp_branding: bool
     usage_period_starts_at: datetime | None
     complimentary_lifetime: bool
     created_at: datetime

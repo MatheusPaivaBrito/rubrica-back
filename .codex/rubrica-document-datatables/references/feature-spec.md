@@ -4,7 +4,7 @@
 
 - Especificação em construção.
 - Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9 e 10.
-- Implementação ainda não autorizada por esta anotação.
+- Partes 1, 2, 3, 5, 6, 7 e 9 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas e Parte 10 reservada para revisão posterior.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
 
@@ -50,24 +50,24 @@ Regras:
 
 | ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
 |---|---|---|---|---|---|---|
-| 2A | Fechar regras de posição, signatário, ausência e edição após abertura | produto/ambos | decisões pendentes da Parte 2 | `NÃO INICIADO` | Requisitos preliminares abaixo | Resolver decisões funcionais abertas. |
-| 2B | Entitlement de posicionamento pago e autorização server-side | backend | 2A | `NÃO INICIADO` | Regra ainda não existe | Modelar capacidade e downgrade. |
-| 2C | Persistência, migration e API das posições normalizadas | backend | 2A, 2B | `NÃO INICIADO` | Nenhuma migration criada | Definir schema, validações e imutabilidade. |
-| 2D | Editor visual de posições no PDF | frontend | 2A, 2C | `NÃO INICIADO` | Visualizador atual não prepara posições do emissor | Criar interação e prévia responsiva. |
-| 2E | Congelamento na abertura e aplicação no PDF | backend | 2C, 2D | `NÃO INICIADO` | Fluxo atual permanece | Integrar snapshot e composição incremental. |
-| 2F | Evidência canônica com lista de posições | backend | 2E | `NÃO INICIADO` | Evidência atual não contém o novo modelo | Registrar posições sem duplicação. |
-| 2G | Testes de coordenadas, planos, múltiplos signatários e preservação | ambos | 2B–2F | `NÃO INICIADO` | Nenhum teste novo | Executar matriz definida na Parte 2. |
+| 2A | Fechar regras de posição, signatário, ausência e edição após abertura | produto/ambos | decisões pendentes da Parte 2 | `VERIFICADO` | Em 2026-10-22 foram adotados os padrões recomendados: posição atribuída a signatário, fixa, fallback atual quando ausente, replicação por página, bloqueio após abertura, cortesia sem entitlement e rejeição de sobreposição | Nenhum. |
+| 2B | Entitlement de posicionamento pago e autorização server-side | backend | 2A | `VERIFICADO` | `custom_stamp_placement` é derivado de assinatura paga ativa, sem cortesia; backend revalida ao salvar e abrir | Nenhum. |
+| 2C | Persistência, migration e API das posições normalizadas | backend | 2A, 2B | `VERIFICADO` | Migration `0026`; JSON versionado por request, signatário e página; GET/PUT restritos ao rascunho autorizado | Nenhum. |
+| 2D | Editor visual de posições no PDF | frontend | 2A, 2C | `VERIFICADO` | Modal no rascunho permite selecionar signatário, posicionar no PDF e replicar em todas as páginas; controle não existe na UI gratuita | Nenhum. |
+| 2E | Congelamento na abertura e aplicação no PDF | backend | 2C, 2D | `VERIFICADO` | Configuração só é gravável em `draft`; abertura congela o snapshot e o gerador aplica todas as posições atribuídas | Nenhum. |
+| 2F | Evidência canônica com lista de posições | backend | 2E | `VERIFICADO` | Uma evidência por assinatura contém `stamp_positions`; várias representações visuais não duplicam a manifestação de vontade | Nenhum. |
+| 2G | Testes de coordenadas, planos, múltiplos signatários e preservação | ambos | 2B–2F | `IMPLEMENTADO` | 75 testes backend focados, 61 frontend e lint aprovados; teste novo rejeita sobreposição entre signatários | Ampliar E2E visual em navegadores/dispositivos reais sem bloquear a entrega funcional. |
 
 ### Parte 3 — pacotes de trabalho
 
 | ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
 |---|---|---|---|---|---|---|
-| 3A | Entitlement CNPJ + Profissional/Equipe | backend | regra comercial confirmada | `NÃO INICIADO` | Política existente ainda não cobre a feature | Reusar `business_features_enabled`. |
-| 3B | Modelo de templates, logos, snapshots e ativos normalizados | backend | 3A | `NÃO INICIADO` | Nenhum modelo/migration | Definir formatos, hashes, limites e retenção. |
-| 3C | Configuração administrativa e seleção por solicitação | frontend/backend | 3A, 3B | `NÃO INICIADO` | Nenhuma interface/API | Criar presets seguros e prévia. |
-| 3D | Captura opcional de assinatura desenhada por mouse/toque | frontend/backend | decisões pendentes da Parte 3 | `NÃO INICIADO` | Recurso ausente | Definir habilitada versus obrigatória e formato normalizado. |
-| 3E | Renderização distinta de CNPJ e representante | backend | 3B–3D, Parte 2 | `NÃO INICIADO` | Carimbo atual permanece | Preservar alegações e identificadores obrigatórios. |
-| 3F | Segurança de imagens, evidências e testes completos | ambos | 3B–3E | `NÃO INICIADO` | Nenhum teste novo | Cobrir arquivos hostis, planos, dispositivos e imutabilidade. |
+| 3A | Entitlement CNPJ + Profissional/Equipe | backend | regra comercial confirmada | `VERIFICADO` | `custom_stamp_branding` exige tenant empresarial, `BR_CNPJ` e plano Profissional/Equipe ativo | Nenhum. |
+| 3B | Modelo de templates, logos, snapshots e ativos normalizados | backend | 3A | `VERIFICADO` | Templates `standard`, `business` e `representative`; cor e PNG decodificado, validado, limitado e regravado; snapshot no request | Nenhum. |
+| 3C | Configuração administrativa e seleção por solicitação | frontend/backend | 3A, 3B | `IMPLEMENTADO` | API de padrão por tenant e editor por solicitação; seleção visual só aparece com a capacidade de branding | Uma tela separada para administrar o padrão reutilizável do tenant pode ser acrescentada depois; a API já está pronta. |
+| 3D | Captura opcional de assinatura desenhada por mouse/toque | frontend/backend | decisões pendentes da Parte 3 | `VERIFICADO` | Emissor pode exigir por solicitação; signatário desenha em canvas por mouse/toque, pode limpar, e backend exige quando configurado | Nenhum. |
+| 3E | Renderização distinta de CNPJ e representante | backend | 3B–3D, Parte 2 | `VERIFICADO` | Snapshot seleciona template e preserva a representação empresarial já vinculada à evidência; logo e assinatura desenhada são elementos visuais | Nenhum. |
+| 3F | Segurança de imagens, evidências e testes completos | ambos | 3B–3E | `IMPLEMENTADO` | PNG real é verificado e normalizado, com limites de bytes/dimensões; conteúdo falso é rejeitado; suites backend/frontend e lint aprovadas | Ampliar E2E de toque e inspeção visual do PDF em dispositivos reais sem bloquear o corte funcional. |
 
 ### Parte 4 — pacotes de trabalho
 
@@ -300,16 +300,14 @@ Não duplique o pacote completo de evidências para cada carimbo visual. A unida
 - vários carimbos da mesma assinatura apontando para uma única evidência;
 - múltiplos signatários, cada qual com evidência canônica independente.
 
-### Decisões ainda pendentes
+### Decisões fechadas neste corte
 
-- Se cada posição será obrigatoriamente atribuída a um signatário ou se também haverá posições genéricas.
-- Se o signatário poderá ajustar uma posição predefinida ou apenas confirmá-la; pelo objetivo informado, o padrão recomendado é posição fixa.
-- Comportamento da conta paga quando nenhuma posição for configurada: usar o posicionamento padrão atual ou exigir pelo menos uma posição.
-- Se “um por página” será configurado manualmente ou por uma ação automática de replicação.
-- Regras de tamanho mínimo/máximo e prevenção de sobreposição.
-- Regra explícita para editar uma solicitação já aberta: proibir definitivamente ou exigir cancelamento e criação de nova versão/solicitação.
-- Como distribuir posições quando existem vários signatários e várias páginas.
-- Se o acesso vitalício cortesia receberá o entitlement de posicionamento personalizado.
+- Toda posição pertence obrigatoriamente a um signatário; não existem posições genéricas.
+- Posição predefinida é fixa para o signatário. Sem posição predefinida, permanece o posicionamento padrão já existente.
+- O editor oferece replicação automática da posição do signatário em todas as páginas.
+- Dimensões são limitadas pelo contrato e sobreposição entre signatários na mesma página é rejeitada.
+- A configuração fica imutável após a abertura; qualquer mudança exige novo rascunho/solicitação.
+- O acesso vitalício cortesia não recebe esse entitlement implicitamente.
 
 ## Parte 3 — personalização empresarial do carimbo
 
@@ -421,16 +419,15 @@ Campos técnicos obrigatórios para rastreabilidade não podem ser removidos pel
 - documento com múltiplos signatários e diferentes tipos de carimbo;
 - impressão e visualização móvel do PDF final.
 
-### Decisões ainda pendentes
+### Decisões fechadas neste corte
 
-- Se o emissor apenas habilita a assinatura desenhada ou pode torná-la obrigatória para concluir.
-- Se o signatário pode escolher entre desenhar, digitar o nome ou usar somente o carimbo padrão quando mais de uma opção estiver habilitada.
-- Quais campos técnicos serão sempre obrigatórios no carimbo.
-- Quais formatos de logo serão aceitos como entrada e qual será o formato normalizado de armazenamento.
-- Quantos templates e logos cada tenant poderá manter.
-- Se administradores criam templates livres ou personalizam modelos seguros predefinidos; a segunda opção é recomendada inicialmente.
-- Se o carimbo institucional será lançado somente quando existir um fluxo real de credencial organizacional, mantendo até lá apenas o template de representante com identidade visual empresarial.
-- Tratamento do acesso vitalício cortesia a essa capacidade empresarial.
+- O emissor decide por solicitação se o desenho é exigido; quando não exigido, o fluxo padrão permanece.
+- O desenho é representação visual e não substitui identificação, consentimento ou assinatura criptográfica.
+- Somente PNG é aceito; o backend decodifica, valida dimensões/conteúdo e regrava em PNG normalizado.
+- O tenant mantém um padrão reutilizável e cada solicitação congela seu próprio snapshot.
+- A personalização usa modelos seguros predefinidos, sem HTML/SVG ou template livre.
+- Templates institucional e de representante são distintos; o representante preserva pessoa e empresa na evidência.
+- Acesso vitalício cortesia não recebe branding empresarial implicitamente.
 
 ## Parte 4 — verificação opcional de identidade com documento e rosto
 

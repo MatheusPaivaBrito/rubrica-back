@@ -27,7 +27,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, ParticipantRole, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampPosition
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, ParticipantRole, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampConfiguration, StampCustomization, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
@@ -376,6 +376,90 @@ class DatabaseSignatureWorkflowService:
                     break
             return contacts
 
+    def stamp_configuration(self, request_id: str, actor_id: str) -> StampConfiguration:
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
+            return StampConfiguration(
+                placements=request.stamp_placements or [],
+                customization=request.stamp_customization_snapshot,
+            )
+
+    def save_stamp_configuration(
+        self, request_id: str, actor_id: str, payload: StampConfiguration
+    ) -> StampConfiguration:
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
+            if request.status != RequestStatus.DRAFT.value:
+                raise WorkflowError("Stamp configuration is frozen after opening", 409)
+            document = self._document(db, str(request.document_id))
+            document_id = document.id
+            tenant_id = document.tenant_id
+            version = request.document_version
+            placement_enabled = billing_service.custom_stamp_placement_enabled(db, tenant_id)
+        if payload.placements:
+            if not placement_enabled:
+                raise WorkflowError("Active paid plan required for custom stamp placement", 403)
+            metadata, content = self.get_content(str(document_id), version, actor_id)
+            del metadata
+            from pypdf import PdfReader
+            page_count = len(PdfReader(BytesIO(content)).pages)
+        else:
+            page_count = 0
+        with SessionLocal.begin() as db:
+            request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
+            if request.status != RequestStatus.DRAFT.value:
+                raise WorkflowError("Stamp configuration is frozen after opening", 409)
+            signer_ids = set(db.scalars(select(SignerEntity.id).where(
+                SignerEntity.signature_request_id == request.id
+            )).all())
+            positions = sorted(payload.placements, key=lambda item: (item.order, item.page))
+            for position in positions:
+                if position.signer_id not in signer_ids:
+                    raise WorkflowError("Every stamp position must belong to a request signer", 422)
+                if position.page > page_count:
+                    raise WorkflowError("Stamp position references a page that does not exist", 422)
+            self._reject_overlapping_positions(positions)
+            if payload.customization is not None and not billing_service.custom_stamp_branding_enabled(db, tenant_id):
+                raise WorkflowError("Professional business plan with CNPJ required for stamp branding", 403)
+            request.stamp_placements = [item.model_dump(mode="json") for item in positions] or None
+            request.stamp_customization_snapshot = payload.customization.model_dump(mode="json") if payload.customization else None
+            self._audit(db, request.id, actor_id, "signature_request.stamp_configuration_saved", "signature_request", request.id, {"position_count": len(positions), "customized": payload.customization is not None})
+            return StampConfiguration(placements=positions, customization=payload.customization)
+
+    def tenant_stamp_customization(
+        self, tenant_id: UUID, actor_id: str
+    ) -> StampCustomization | None:
+        with SessionLocal() as db:
+            tenant_service.require_role(db, tenant_id, actor_id, {"admin"})
+            tenant = db.get(TenantEntity, tenant_id)
+            return StampCustomization(**tenant.stamp_customization) if tenant and tenant.stamp_customization else None
+
+    def save_tenant_stamp_customization(
+        self, tenant_id: UUID, actor_id: str, payload: StampCustomization
+    ) -> StampCustomization:
+        with SessionLocal.begin() as db:
+            tenant_service.require_role(db, tenant_id, actor_id, {"admin"})
+            if not billing_service.custom_stamp_branding_enabled(db, tenant_id):
+                raise WorkflowError("Professional business plan with CNPJ required for stamp branding", 403)
+            tenant = db.get(TenantEntity, tenant_id)
+            if tenant is None:
+                raise WorkflowError("Tenant not found", 404)
+            tenant.stamp_customization = payload.model_dump(mode="json")
+            self._audit(db, None, actor_id, "tenant.stamp_customization_saved", "tenant", tenant.id, {"template": payload.template, "show_logo": payload.show_logo, "require_drawn_signature": payload.require_drawn_signature})
+            return payload
+
+    @staticmethod
+    def _reject_overlapping_positions(positions: list[StampPosition]) -> None:
+        for index, left in enumerate(positions):
+            for right in positions[index + 1:]:
+                if left.page != right.page or left.signer_id == right.signer_id:
+                    continue
+                if abs(left.x - right.x) < (left.width + right.width) / 2 and abs(left.y - right.y) < (left.height + right.height) / 2:
+                    raise WorkflowError("Stamp positions for different signers overlap", 422)
+
     def revoke_signer_link(self, request_id: str, signer_id: str, actor_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
@@ -411,6 +495,10 @@ class DatabaseSignatureWorkflowService:
                 if signer is None or identity_summary(signer.email).identifier_type not in {"BR_CPF", "BR_CNPJ"}:
                     raise WorkflowError("The Serpro ID signer must have a Brazilian CPF or CNPJ", 409)
             document = self._document(db, str(request.document_id))
+            if request.stamp_placements and not billing_service.custom_stamp_placement_enabled(db, document.tenant_id):
+                raise WorkflowError("Active paid plan required for custom stamp placement", 403)
+            if request.stamp_customization_snapshot and not billing_service.custom_stamp_branding_enabled(db, document.tenant_id):
+                raise WorkflowError("Professional business plan with CNPJ required for stamp branding", 403)
             if document.version != request.document_version or document.sha256 != request.document_sha256:
                 raise WorkflowError("Document changed after request creation", 409)
             request.status = RequestStatus.OPEN.value
@@ -456,7 +544,8 @@ class DatabaseSignatureWorkflowService:
             tenant = db.get(TenantEntity, document.tenant_id)
             signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.signer_id == signer.id))
             stamp = None if administrative_view else signature.evidence_json.get("stamp") if signature is not None else None
-            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, account_country=tenant.country_code if tenant else None, stamp=stamp, viewer_mode="administrator" if administrative_view else "signer", issuer_snapshot=request.issuer_snapshot)
+            assigned_positions = [item for item in (request.stamp_placements or []) if str(item.get("signer_id")) == str(signer.id)]
+            return SigningRead(request=self._request_read(db, request), signer=self._signer_read(signer), document_title=document.title, original_filename=document.original_filename, account_country=tenant.country_code if tenant else None, stamp=stamp, stamp_positions=assigned_positions, stamp_customization=request.stamp_customization_snapshot, viewer_mode="administrator" if administrative_view else "signer", issuer_snapshot=request.issuer_snapshot)
 
     def signing_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[DocumentVersionRead, bytes]:
         with SessionLocal() as db:
@@ -486,7 +575,7 @@ class DatabaseSignatureWorkflowService:
             db.flush()
             return self._signer_read(signer)
 
-    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition, *, consent_version: str = "rubrica-evidence-v2", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown", certificate_signer: Callable[[bytes], bytes] | None = None, certificate_info: dict[str, str] | None = None) -> SignerRead:
+    def sign(self, token: str, auth_user_id: str, consent: bool, stamp: StampPosition | None, *, consent_version: str = "rubrica-evidence-v2", client: ClientEvidence | None = None, geolocation: GeolocationEvidence | None = None, ip_address: str = "unknown", user_agent: str = "unknown", certificate_signer: Callable[[bytes], bytes] | None = None, certificate_info: dict[str, str] | None = None, drawn_signature_png_data_url: str | None = None) -> SignerRead:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         signer_identity = identity_summary(auth_user_id)
@@ -502,6 +591,7 @@ class DatabaseSignatureWorkflowService:
             certificate_required=certificate_signer is not None,
             certificate_info=certificate_info,
             signer_identity=signer_identity,
+            drawn_signature_png_data_url=drawn_signature_png_data_url,
         )
         if isinstance(prepared, SignerRead):
             return prepared
@@ -564,7 +654,7 @@ class DatabaseSignatureWorkflowService:
         self,
         token: str,
         auth_user_id: str,
-        stamp: StampPosition,
+        stamp: StampPosition | None,
         *,
         consent_version: str,
         client: ClientEvidence | None,
@@ -574,6 +664,7 @@ class DatabaseSignatureWorkflowService:
         certificate_required: bool,
         certificate_info: dict[str, str] | None,
         signer_identity: IdentitySummary,
+        drawn_signature_png_data_url: str | None,
     ) -> SignerRead | dict[str, object]:
         now = DateTimeService.utc_now()
         with SessionLocal.begin() as db:
@@ -637,6 +728,18 @@ class DatabaseSignatureWorkflowService:
             if document is None or document.deleted_at is not None:
                 raise WorkflowError("Document not found", 404)
             tenant = db.get(TenantEntity, document.tenant_id)
+            configured_positions = [
+                StampPosition(**item)
+                for item in (request.stamp_placements or [])
+                if str(item.get("signer_id")) == str(signer.id)
+            ]
+            if configured_positions:
+                stamp = configured_positions[0]
+            elif stamp is None:
+                raise WorkflowError("A stamp position is required", 422)
+            customization = request.stamp_customization_snapshot
+            if customization and customization.get("require_drawn_signature") and not drawn_signature_png_data_url:
+                raise WorkflowError("A drawn signature is required for this request", 422)
             if signer.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE.value:
                 active_representation = db.scalar(
                     select(TenantMemberEntity.id).where(
@@ -664,6 +767,9 @@ class DatabaseSignatureWorkflowService:
                     user_agent,
                     signer_identity,
                     tenant.country_code if tenant is not None else None,
+                    configured_positions or [stamp],
+                    customization,
+                    drawn_signature_png_data_url,
                 )
                 evidence["signature_mode"] = request.signature_mode
                 if certificate_info is not None:
@@ -943,7 +1049,7 @@ class DatabaseSignatureWorkflowService:
         return request
 
     @staticmethod
-    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str, identity: IdentitySummary | None = None, tenant_country: str | None = None) -> dict[str, object]:
+    def _signature_evidence(request, signer, auth_user_id: str, signed_at, stamp: StampPosition, consent_version: str, client: ClientEvidence | None, geolocation: GeolocationEvidence | None, ip_address: str, user_agent: str, identity: IdentitySummary | None = None, tenant_country: str | None = None, stamp_positions: list[StampPosition] | None = None, stamp_customization: dict[str, object] | None = None, drawn_signature_png_data_url: str | None = None) -> dict[str, object]:
         subject_hash = hmac_new(settings.EVIDENCE_SECRET.encode(), auth_user_id.lower().encode(), "sha256").hexdigest()
         identity_binding = hmac_new(settings.EVIDENCE_SECRET.encode(), f"{auth_user_id.lower()}|{request.id}|{signer.id}|{request.document_id}|{request.document_version}".encode(), "sha256").hexdigest()
         normalized_agent = user_agent[:1000] or "unknown"
@@ -954,6 +1060,14 @@ class DatabaseSignatureWorkflowService:
         stamp_payload["country_code"] = evidence_country
         stamp_payload["show_flag"] = bool(evidence_country)
         stamp_payload["template"] = evidence_country if evidence_country in {"BR", "JP"} else "INTL"
+        position_payloads = []
+        for position in stamp_positions or [stamp]:
+            payload = position.model_dump(mode="json")
+            payload.update({"country_code": evidence_country, "show_flag": bool(evidence_country), "template": stamp_payload["template"]})
+            position_payloads.append(payload)
+        drawn_signature_hash = None
+        if drawn_signature_png_data_url:
+            drawn_signature_hash = sha256(drawn_signature_png_data_url.encode()).hexdigest()
         return {
             "schema": "rubrica-signature-evidence-v1",
             "consent": True,
@@ -976,6 +1090,10 @@ class DatabaseSignatureWorkflowService:
             "issuer_snapshot": getattr(request, "issuer_snapshot", None),
             "signed_at": signed_at.isoformat(),
             "stamp": stamp_payload,
+            "stamp_positions": position_payloads,
+            "stamp_customization": stamp_customization,
+            "drawn_signature_sha256": drawn_signature_hash,
+            "drawn_signature_png_data_url": drawn_signature_png_data_url,
             "network": {"ip_address": ip_address[:64], "user_agent": normalized_agent, "device_type": device_type},
             "client": (client or ClientEvidence()).model_dump(),
             "geolocation": (geolocation or GeolocationEvidence(status="unavailable")).model_dump(),
@@ -1064,7 +1182,7 @@ class DatabaseSignatureWorkflowService:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
         document = db.get(DocumentEntity, item.document_id)
-        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot)
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot, has_custom_stamp_placement=bool(item.stamp_placements), has_custom_stamp_branding=bool(item.stamp_customization_snapshot))
 
     @staticmethod
     def _document_read(db, x: DocumentEntity) -> DocumentRead:

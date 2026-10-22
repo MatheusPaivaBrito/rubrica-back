@@ -3,7 +3,37 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from base64 import b64decode, b64encode
+from io import BytesIO
+
+from PIL import Image, UnidentifiedImageError
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+
+def _normalized_png_data_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    prefix = "data:image/png;base64,"
+    if not value.startswith(prefix):
+        raise ValueError("Image must be a base64 PNG data URL")
+    try:
+        content = b64decode(value[len(prefix):], validate=True)
+        if len(content) > 256_000:
+            raise ValueError("PNG exceeds 256 KB")
+        with Image.open(BytesIO(content)) as source:
+            source.verify()
+        with Image.open(BytesIO(content)) as source:
+            if source.width > 2048 or source.height > 2048 or source.width * source.height > 4_000_000:
+                raise ValueError("PNG dimensions exceed the supported limit")
+            normalized = source.convert("RGBA")
+            output = BytesIO()
+            normalized.save(output, format="PNG", optimize=True)
+    except (OSError, UnidentifiedImageError, ValueError) as exc:
+        raise ValueError("PNG image is invalid") from exc
+    encoded = b64encode(output.getvalue()).decode("ascii")
+    if len(encoded) > 400_000:
+        raise ValueError("Normalized PNG exceeds the supported limit")
+    return prefix + encoded
 
 
 class RequestStatus(StrEnum):
@@ -62,6 +92,8 @@ class SignatureRequestRead(BaseModel):
     original_filename: str = ""
     signature_mode: SignatureMode = SignatureMode.EVIDENCE
     issuer_snapshot: dict[str, object] | None = None
+    has_custom_stamp_placement: bool = False
+    has_custom_stamp_branding: bool = False
 
 
 class OpenSignatureRequest(BaseModel):
@@ -131,6 +163,28 @@ class StampPosition(BaseModel):
     template_version: Literal["rubrica-stamp-v2"] = "rubrica-stamp-v2"
     locale: Literal["pt-BR", "en", "es", "ja-JP"] = "en"
     timezone: str = Field(default="UTC", min_length=1, max_length=80)
+    signer_id: UUID | None = None
+    width: float = Field(default=0.4, ge=0.15, le=0.8)
+    height: float = Field(default=0.12, ge=0.06, le=0.35)
+    order: int = Field(default=0, ge=0, le=1000)
+
+
+class StampCustomization(BaseModel):
+    template: Literal["standard", "business", "representative"] = "standard"
+    primary_color: str = Field(default="#187A66", pattern=r"^#[0-9A-Fa-f]{6}$")
+    show_logo: bool = False
+    logo_png_data_url: str | None = Field(default=None, max_length=400_000)
+    require_drawn_signature: bool = False
+
+    @field_validator("logo_png_data_url")
+    @classmethod
+    def validate_logo(cls, value: str | None) -> str | None:
+        return _normalized_png_data_url(value)
+
+
+class StampConfiguration(BaseModel):
+    placements: list[StampPosition] = Field(default_factory=list, max_length=500)
+    customization: StampCustomization | None = None
 
 
 class ClientEvidence(BaseModel):
@@ -157,14 +211,22 @@ class SigningRead(BaseModel):
     stamp: StampPosition | None = None
     viewer_mode: str = Field(default="signer", pattern=r"^(signer|administrator)$")
     issuer_snapshot: dict[str, object] | None = None
+    stamp_positions: list[StampPosition] = Field(default_factory=list)
+    stamp_customization: StampCustomization | None = None
 
 
 class SignCommand(BaseModel):
     consent: bool
     consent_version: str = Field(pattern=r"^rubrica-evidence-v(?:1|2)$")
-    stamp: StampPosition
+    stamp: StampPosition | None = None
+    drawn_signature_png_data_url: str | None = Field(default=None, max_length=400_000)
     client: ClientEvidence
     geolocation: GeolocationEvidence
+
+    @field_validator("drawn_signature_png_data_url")
+    @classmethod
+    def validate_drawn_signature(cls, value: str | None) -> str | None:
+        return _normalized_png_data_url(value)
 
 
 class SignatureEvidenceRead(BaseModel):

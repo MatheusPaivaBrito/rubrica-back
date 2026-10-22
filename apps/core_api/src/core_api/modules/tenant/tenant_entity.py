@@ -2,7 +2,7 @@ from uuid import UUID
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -36,6 +36,7 @@ class TenantEntity(BaseEntity):
     registration_verification_status: Mapped[str | None] = mapped_column(String(32))
     registration_source: Mapped[str | None] = mapped_column(String(32))
     registration_provider_reference: Mapped[str | None] = mapped_column(String(255))
+    stamp_customization: Mapped[dict[str, object] | None] = mapped_column(JSON)
 
 
 class TenantMemberEntity(BaseEntity):

@@ -980,6 +980,32 @@ class BillingService:
         )
 
     @staticmethod
+    def custom_stamp_placement_enabled(database, tenant_id: UUID) -> bool:
+        account = database.scalar(
+            select(BillingAccountEntity).where(
+                BillingAccountEntity.tenant_id == tenant_id,
+                BillingAccountEntity.deleted_at.is_(None),
+            )
+        )
+        return bool(
+            account
+            and BillingService._normalize_product_code(account.current_product_code)
+            in {"rubrica_base", *BillingService.BUSINESS_PRODUCT_CODES}
+            and BillingService._paid_access_enabled(account)
+        )
+
+    @staticmethod
+    def custom_stamp_branding_enabled(database, tenant_id: UUID) -> bool:
+        tenant = database.get(TenantEntity, tenant_id)
+        return bool(
+            tenant
+            and tenant.kind == "business"
+            and tenant.registration_type == "BR_CNPJ"
+            and tenant.registration_masked
+            and BillingService.business_features_enabled(database, tenant_id)
+        )
+
+    @staticmethod
     def email_invitations_enabled(database, tenant_id: UUID) -> bool:
         account = database.scalar(
             select(BillingAccountEntity).where(
@@ -1066,6 +1092,12 @@ class BillingService:
                         in BillingService.BUSINESS_PRODUCT_CODES
                         and BillingService._paid_access_enabled(account)
                     )
+                ),
+                custom_stamp_placement=BillingService.custom_stamp_placement_enabled(
+                    database, tenant_id
+                ),
+                custom_stamp_branding=BillingService.custom_stamp_branding_enabled(
+                    database, tenant_id
                 ),
                 usage_period_starts_at=account.usage_period_starts_at,
                 complimentary_lifetime=account.complimentary_lifetime,
