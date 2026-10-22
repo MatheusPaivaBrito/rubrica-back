@@ -56,7 +56,7 @@ Regras:
 | 2D | Editor visual de posições no PDF | frontend | 2A, 2C | `VERIFICADO` | Modal no rascunho permite selecionar signatário, posicionar no PDF e replicar em todas as páginas; controle não existe na UI gratuita | Nenhum. |
 | 2E | Congelamento na abertura e aplicação no PDF | backend | 2C, 2D | `VERIFICADO` | Configuração só é gravável em `draft`; abertura congela o snapshot e o gerador aplica todas as posições atribuídas | Nenhum. |
 | 2F | Evidência canônica com lista de posições | backend | 2E | `VERIFICADO` | Uma evidência por assinatura contém `stamp_positions`; várias representações visuais não duplicam a manifestação de vontade | Nenhum. |
-| 2G | Testes de coordenadas, planos, múltiplos signatários e preservação | ambos | 2B–2F | `IMPLEMENTADO` | 75 testes backend focados, 61 frontend e lint aprovados; teste novo rejeita sobreposição entre signatários | Ampliar E2E visual em navegadores/dispositivos reais sem bloquear a entrega funcional. |
+| 2G | Testes de coordenadas, planos, múltiplos signatários e preservação | ambos | 2B–2F | `IMPLEMENTADO` | 75 testes backend focados, 61 frontend e lint aprovados; E2E Playwright cobre desktop/toque, páginas de tamanhos/rotação diferentes, replicação e vínculo ao signatário | Executar o E2E após disponibilizar navegador compatível: Playwright não fornece Chromium para Ubuntu 26.04 neste ambiente. |
 
 ### Parte 3 — pacotes de trabalho
 
@@ -64,10 +64,10 @@ Regras:
 |---|---|---|---|---|---|---|
 | 3A | Entitlement CNPJ + Profissional/Equipe | backend | regra comercial confirmada | `VERIFICADO` | `custom_stamp_branding` exige tenant empresarial, `BR_CNPJ` e plano Profissional/Equipe ativo | Nenhum. |
 | 3B | Modelo de templates, logos, snapshots e ativos normalizados | backend | 3A | `VERIFICADO` | Templates `standard`, `business` e `representative`; cor e PNG decodificado, validado, limitado e regravado; snapshot no request | Nenhum. |
-| 3C | Configuração administrativa e seleção por solicitação | frontend/backend | 3A, 3B | `IMPLEMENTADO` | API de padrão por tenant e editor por solicitação; seleção visual só aparece com a capacidade de branding | Uma tela separada para administrar o padrão reutilizável do tenant pode ser acrescentada depois; a API já está pronta. |
+| 3C | Configuração administrativa e seleção por solicitação | frontend/backend | 3A, 3B | `VERIFICADO` | Editor permite salvar o branding como padrão empresarial; solicitações novas carregam o padrão e congelam seu snapshot; API e UI permanecem condicionadas ao entitlement | Nenhum. |
 | 3D | Captura opcional de assinatura desenhada por mouse/toque | frontend/backend | decisões pendentes da Parte 3 | `VERIFICADO` | Emissor pode exigir por solicitação; signatário desenha em canvas por mouse/toque, pode limpar, e backend exige quando configurado | Nenhum. |
 | 3E | Renderização distinta de CNPJ e representante | backend | 3B–3D, Parte 2 | `VERIFICADO` | Snapshot seleciona template e preserva a representação empresarial já vinculada à evidência; logo e assinatura desenhada são elementos visuais | Nenhum. |
-| 3F | Segurança de imagens, evidências e testes completos | ambos | 3B–3E | `IMPLEMENTADO` | PNG real é verificado e normalizado, com limites de bytes/dimensões; conteúdo falso é rejeitado; suites backend/frontend e lint aprovadas | Ampliar E2E de toque e inspeção visual do PDF em dispositivos reais sem bloquear o corte funcional. |
+| 3F | Segurança de imagens, evidências e testes completos | ambos | 3B–3E | `IMPLEMENTADO` | PNG real é verificado e normalizado, com limites de bytes/dimensões; conteúdo falso é rejeitado; suites backend/frontend e lint aprovadas; E2E de toque/desktop registrado | Executar o E2E após disponibilizar navegador compatível; inspeção visual real do PDF permanece no aceite manual. |
 
 ### Parte 4 — pacotes de trabalho
 

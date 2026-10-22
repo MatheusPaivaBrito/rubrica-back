@@ -1,7 +1,7 @@
 services:
   local:
     build:
-      context: ../../../rubrica-web
+      context: ${RUBRICA_WEB_CONTEXT:-../../../rubrica-front}
       dockerfile: Dockerfile
     ports:
       - "127.0.0.1:${WEB_HOST_PORT:-7180}:80"
