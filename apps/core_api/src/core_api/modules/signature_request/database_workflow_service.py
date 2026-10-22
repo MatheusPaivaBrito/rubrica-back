@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from hashlib import sha256
 from hmac import new as hmac_new
 from io import BytesIO
@@ -23,7 +23,7 @@ from core_api.modules.document.storage import (
     document_version_storage_scope,
     signed_artifact_storage_scope,
 )
-from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureRequestEntity, SignerEntity
+from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureOperationEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
@@ -43,31 +43,46 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Document content cannot be empty")
         digest = sha256(content).hexdigest()
         document_id = uuid4()
+        with SessionLocal() as db:
+            tenant = db.scalar(
+                select(TenantEntity).where(
+                    TenantEntity.slug == payload.organization_id,
+                    TenantEntity.deleted_at.is_(None),
+                )
+            )
+            if tenant is None:
+                raise WorkflowError("Tenant not found", 404)
+            member = tenant_service.require_role(
+                db, tenant.id, payload.created_by, {"admin", "member"}
+            )
+            tenant_id = tenant.id
+            account_storage_id = self._account_storage_id(member, payload.created_by)
         key: str | None = None
         try:
+            key, size = self.storage.put(
+                BytesIO(content),
+                filename=payload.original_filename,
+                sha256=digest,
+                scope=document_version_storage_scope(
+                    tenant_id,
+                    account_storage_id,
+                    document_id,
+                ),
+            )
             with SessionLocal.begin() as db:
                 tenant = db.scalar(
                     select(TenantEntity).where(
+                        TenantEntity.id == tenant_id,
                         TenantEntity.slug == payload.organization_id,
                         TenantEntity.deleted_at.is_(None),
                     )
                 )
                 if tenant is None:
                     raise WorkflowError("Tenant not found", 404)
-                member = tenant_service.require_role(
+                tenant_service.require_role(
                     db, tenant.id, payload.created_by, {"admin", "member"}
                 )
                 billing_service.consume_document(db, tenant.id)
-                key, size = self.storage.put(
-                    BytesIO(content),
-                    filename=payload.original_filename,
-                    sha256=digest,
-                    scope=document_version_storage_scope(
-                        tenant.id,
-                        self._account_storage_id(member, payload.created_by),
-                        document_id,
-                    ),
-                )
                 item = DocumentEntity(id=document_id, **payload.model_dump(), tenant_id=tenant.id, storage_key=key, sha256=digest, version=1, status=DocumentStatus.READY.value)
                 db.add(item)
                 db.flush()
@@ -84,23 +99,37 @@ class DatabaseSignatureWorkflowService:
     def add_version(self, document_id: str, *, filename: str, content_type: str, actor_id: str, content: bytes) -> DocumentRead:
         if not content:
             raise WorkflowError("Document content cannot be empty")
+        digest = sha256(content).hexdigest()
+        with SessionLocal() as db:
+            item = self._document(db, document_id)
+            member = tenant_service.require_role(
+                db, item.tenant_id, actor_id, {"admin", "member"}
+            )
+            frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
+            if frozen is not None:
+                raise WorkflowError("A frozen document cannot receive a new version", 409)
+            expected_version = item.version
+            tenant_id = item.tenant_id
+            item_id = item.id
+            account_storage_id = self._account_storage_id(member, actor_id)
         key: str | None = None
         try:
+            key, size = self.storage.put(
+                BytesIO(content), filename=filename, sha256=digest,
+                scope=document_version_storage_scope(
+                    tenant_id,
+                    account_storage_id,
+                    item_id,
+                ),
+            )
             with SessionLocal.begin() as db:
                 item = self._document(db, document_id, lock=True)
-                member = tenant_service.require_role(db, item.tenant_id, actor_id, {"admin", "member"})
+                tenant_service.require_role(db, item.tenant_id, actor_id, {"admin", "member"})
+                if item.version != expected_version:
+                    raise WorkflowError("Document changed while the version was uploaded", 409)
                 frozen = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id == item.id, SignatureRequestEntity.status.in_([RequestStatus.OPEN.value, RequestStatus.COMPLETED.value])).limit(1))
                 if frozen is not None:
                     raise WorkflowError("A frozen document cannot receive a new version", 409)
-                digest = sha256(content).hexdigest()
-                key, size = self.storage.put(
-                    BytesIO(content), filename=filename, sha256=digest,
-                    scope=document_version_storage_scope(
-                        item.tenant_id,
-                        self._account_storage_id(member, actor_id),
-                        item.id,
-                    ),
-                )
                 item.version += 1
                 item.original_filename = filename
                 item.content_type = content_type
@@ -461,98 +490,378 @@ class DatabaseSignatureWorkflowService:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         signer_identity = identity_summary(auth_user_id)
+        prepared = self._prepare_signature_operation(
+            token,
+            auth_user_id,
+            stamp,
+            consent_version=consent_version,
+            client=client,
+            geolocation=geolocation,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            certificate_required=certificate_signer is not None,
+            certificate_info=certificate_info,
+            signer_identity=signer_identity,
+        )
+        if isinstance(prepared, SignerRead):
+            return prepared
+        operation_id = prepared["operation_id"]
+        if prepared["artifact_ready"]:
+            return self._finalize_signature_operation(operation_id, auth_user_id)
+
         artifact_key: str | None = None
+        artifact_recorded = False
         try:
-            with SessionLocal.begin() as db:
-                signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
-                if signer.status == SignerStatus.SIGNED.value:
-                    raise WorkflowError("Signer has already signed", 409)
-                if request.signature_mode == SignatureMode.SERPROID.value and certificate_signer is None:
-                    raise WorkflowError("This request requires a Serpro ID certificate signature", 409)
-                if request.signature_mode != SignatureMode.SERPROID.value and certificate_signer is not None:
-                    raise WorkflowError("This request does not accept a Serpro ID certificate signature", 409)
-                if certificate_signer is not None:
-                    if signer.status not in {SignerStatus.PENDING.value, SignerStatus.VIEWED.value}:
-                        raise WorkflowError("Signer cannot authorize a certificate signature in the current state", 409)
-                    remaining = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
-                    if remaining != 1:
-                        raise WorkflowError("Certificate signing must be the final signature on this PDF", 409)
-                version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
-                if version is None or version.sha256 != request.document_sha256:
-                    raise WorkflowError("Document hash does not match the frozen request", 409)
-                document = db.get(DocumentEntity, request.document_id)
-                if document is None or document.deleted_at is not None:
-                    raise WorkflowError("Document not found", 404)
-                tenant = db.get(TenantEntity, document.tenant_id)
-                tenant_country = tenant.country_code if tenant is not None else None
-                if signer.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE.value:
-                    active_representation = db.scalar(
-                        select(TenantMemberEntity.id).where(
-                            TenantMemberEntity.tenant_id == signer.represented_tenant_id,
-                            tenant_service.membership_identity_filter(auth_user_id),
-                            TenantMemberEntity.status == "active",
-                            TenantMemberEntity.role.in_(["admin", "member"]),
-                            TenantMemberEntity.deleted_at.is_(None),
-                        )
+            with self.storage.get(prepared["version_storage_key"]) as stream:
+                original = stream.read()
+            if sha256(original).hexdigest() != prepared["document_sha256"]:
+                raise WorkflowError("Document hash does not match the frozen request", 409)
+            validate_pdf_upload(
+                original,
+                filename=prepared["original_filename"],
+                content_type="application/pdf",
+            )
+            if certificate_signer is not None:
+                from pyhanko.pdf_utils.reader import PdfFileReader
+
+                if PdfFileReader(BytesIO(original)).embedded_signatures:
+                    raise WorkflowError("Uploaded PDF already has certificate signatures; this workflow cannot rewrite it safely", 409)
+            artifact = generate_signed_pdf(
+                original,
+                stamps=prepared["stamp_records"],
+                metadata=prepared["metadata"],
+            )
+            if certificate_signer is not None:
+                artifact = certificate_signer(artifact)
+            from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
+
+            artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
+            if trusted_timestamp is None:
+                raise WorkflowError("SERPRO timestamp is required for every signature", 503)
+            artifact_hash = sha256(artifact).hexdigest()
+            artifact_key, _ = self.storage.put(
+                BytesIO(artifact),
+                filename=f"rubrica-{prepared['request_id']}-signed.pdf",
+                sha256=artifact_hash,
+                scope=prepared["artifact_scope"],
+            )
+            self._record_signature_artifact(
+                operation_id,
+                auth_user_id,
+                artifact_key,
+                artifact_hash,
+                trusted_timestamp,
+            )
+            artifact_recorded = True
+            return self._finalize_signature_operation(operation_id, auth_user_id)
+        except Exception as exc:
+            if artifact_key and not artifact_recorded:
+                self.storage.discard_uncommitted(artifact_key)
+            self._fail_signature_operation(operation_id, exc)
+            raise
+
+    def _prepare_signature_operation(
+        self,
+        token: str,
+        auth_user_id: str,
+        stamp: StampPosition,
+        *,
+        consent_version: str,
+        client: ClientEvidence | None,
+        geolocation: GeolocationEvidence | None,
+        ip_address: str,
+        user_agent: str,
+        certificate_required: bool,
+        certificate_info: dict[str, str] | None,
+        signer_identity: IdentitySummary,
+    ) -> SignerRead | dict[str, object]:
+        now = DateTimeService.utc_now()
+        with SessionLocal.begin() as db:
+            signer, request = self._resolve_request(
+                db, token, auth_user_id, lock=True, allow_completed=True
+            )
+            operation = db.scalar(
+                select(SignatureOperationEntity)
+                .where(
+                    SignatureOperationEntity.signature_request_id == request.id,
+                    SignatureOperationEntity.signer_id == signer.id,
+                )
+                .with_for_update()
+            )
+            if signer.status == SignerStatus.SIGNED.value:
+                return self._signer_read(signer)
+            if operation is not None and operation.status == "completed":
+                return self._signer_read(signer)
+            if operation is not None and operation.status == "artifact_ready":
+                return {"operation_id": operation.id, "artifact_ready": True}
+            if (
+                operation is not None
+                and operation.status == "processing"
+                and operation.lease_expires_at is not None
+                and operation.lease_expires_at > now
+            ):
+                raise WorkflowError(
+                    "Signature processing is already in progress",
+                    409,
+                    code="signature_in_progress",
+                )
+            other_operation = db.scalar(
+                select(SignatureOperationEntity.id)
+                .where(
+                    SignatureOperationEntity.signature_request_id == request.id,
+                    SignatureOperationEntity.signer_id != signer.id,
+                    SignatureOperationEntity.status.in_(["processing", "artifact_ready"]),
+                )
+                .limit(1)
+            )
+            if other_operation is not None:
+                raise WorkflowError(
+                    "Another signature for this request is still being processed",
+                    409,
+                    code="signature_request_busy",
+                )
+            if request.signature_mode == SignatureMode.SERPROID.value and not certificate_required:
+                raise WorkflowError("This request requires a Serpro ID certificate signature", 409)
+            if request.signature_mode != SignatureMode.SERPROID.value and certificate_required:
+                raise WorkflowError("This request does not accept a Serpro ID certificate signature", 409)
+            if certificate_required:
+                if signer.status not in {SignerStatus.PENDING.value, SignerStatus.VIEWED.value}:
+                    raise WorkflowError("Signer cannot authorize a certificate signature in the current state", 409)
+                remaining = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
+                if remaining != 1:
+                    raise WorkflowError("Certificate signing must be the final signature on this PDF", 409)
+            version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
+            if version is None or version.sha256 != request.document_sha256:
+                raise WorkflowError("Document hash does not match the frozen request", 409)
+            document = db.get(DocumentEntity, request.document_id)
+            if document is None or document.deleted_at is not None:
+                raise WorkflowError("Document not found", 404)
+            tenant = db.get(TenantEntity, document.tenant_id)
+            if signer.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE.value:
+                active_representation = db.scalar(
+                    select(TenantMemberEntity.id).where(
+                        TenantMemberEntity.tenant_id == signer.represented_tenant_id,
+                        tenant_service.membership_identity_filter(auth_user_id),
+                        TenantMemberEntity.status == "active",
+                        TenantMemberEntity.role.in_(["admin", "member"]),
+                        TenantMemberEntity.deleted_at.is_(None),
                     )
-                    if active_representation is None:
-                        raise WorkflowError("Company representation authorization is no longer active", 403)
-                billing_service.consume_signature(db, document.tenant_id)
-                with self.storage.get(version.storage_key) as stream:
-                    original = stream.read()
-                if sha256(original).hexdigest() != request.document_sha256:
-                    raise WorkflowError("Document hash does not match the frozen request", 409)
-                validate_pdf_upload(original, filename=version.original_filename, content_type="application/pdf")
-                if certificate_signer is not None:
-                    from pyhanko.pdf_utils.reader import PdfFileReader
-                    if PdfFileReader(BytesIO(original)).embedded_signatures:
-                        raise WorkflowError("Uploaded PDF already has certificate signatures; this workflow cannot rewrite it safely", 409)
-                now = DateTimeService.utc_now()
-                evidence = self._signature_evidence(request, signer, auth_user_id, now, stamp, consent_version, client, geolocation, ip_address, user_agent, signer_identity, tenant_country)
+                )
+                if active_representation is None:
+                    raise WorkflowError("Company representation authorization is no longer active", 403)
+            existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
+            if operation is None:
+                evidence = self._signature_evidence(
+                    request,
+                    signer,
+                    auth_user_id,
+                    now,
+                    stamp,
+                    consent_version,
+                    client,
+                    geolocation,
+                    ip_address,
+                    user_agent,
+                    signer_identity,
+                    tenant.country_code if tenant is not None else None,
+                )
                 evidence["signature_mode"] = request.signature_mode
                 if certificate_info is not None:
                     evidence["certificate_signature"] = certificate_info
                 evidence_hash = evidence_sha256(evidence)
-                existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
-                stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
-                stamp_records.append(evidence | {"evidence_sha256": evidence_hash})
-                artifact_id = str(uuid4())
-                manifest_hash = sha256("|".join(item["evidence_sha256"] for item in stamp_records).encode()).hexdigest()
-                signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{item["subject_hmac_sha256"][:16]}' for item in stamp_records)
-                artifact = generate_signed_pdf(original, stamps=stamp_records, metadata={"RubricaArtifactId": artifact_id, "RubricaRequestId": str(request.id), "RubricaDocumentId": str(request.document_id), "RubricaDocumentVersion": str(request.document_version), "RubricaOriginalSHA256": request.document_sha256, "RubricaEvidenceManifestSHA256": manifest_hash, "RubricaSignerManifest": signer_manifest, "RubricaIdentityBindingHMACSHA256": evidence["identity_binding_hmac_sha256"], "RubricaLastSignedAt": now.isoformat(), "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8")})
-                if certificate_signer is not None:
-                    artifact = certificate_signer(artifact)
-                from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
-                artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
-                if trusted_timestamp is None:
-                    raise WorkflowError("SERPRO timestamp is required for every signature", 503)
-                artifact_hash = sha256(artifact).hexdigest()
-                artifact_key, _ = self.storage.put(
-                    BytesIO(artifact),
-                    filename=f"rubrica-{request.id}-signed.pdf",
-                    sha256=artifact_hash,
-                    scope=signed_artifact_storage_scope(
-                        document.tenant_id,
-                        self._document_owner_storage_id(db, document),
-                        document.id,
-                    ),
+                operation = SignatureOperationEntity(
+                    signature_request_id=request.id,
+                    signer_id=signer.id,
+                    auth_user_id=auth_user_id.lower(),
+                    status="processing",
+                    document_version=request.document_version,
+                    document_sha256=request.document_sha256,
+                    expected_signature_count=len(existing),
+                    attempt_count=1,
+                    lease_expires_at=now + timedelta(minutes=5),
+                    evidence_json=evidence,
+                    evidence_sha256=evidence_hash,
                 )
-                signature = SignatureEntity(signature_request_id=request.id, signer_id=signer.id, auth_user_id=auth_user_id, document_sha256=request.document_sha256, signed_at=now, evidence_json=evidence, evidence_sha256=evidence_hash, artifact_storage_key=artifact_key, artifact_sha256=artifact_hash, trusted_timestamp_json=trusted_timestamp)
-                db.add(signature)
-                signer.status = SignerStatus.SIGNED.value
-                signer.signed_at = now
-                self._audit(db, request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": request.document_sha256, "document_version": request.document_version, "evidence_sha256": evidence_hash, "artifact_sha256": artifact_hash})
+                db.add(operation)
                 db.flush()
-                pending = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
-                if pending == 0:
-                    request.status = RequestStatus.COMPLETED.value
-                    request.completed_at = now
-                    self._audit(db, request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {"artifact_sha256": artifact_hash})
+                self._audit(
+                    db,
+                    request.id,
+                    auth_user_id,
+                    "signature.operation_started",
+                    "signature_operation",
+                    operation.id,
+                    {"attempt": 1},
+                )
+            else:
+                if operation.document_version != request.document_version or operation.document_sha256 != request.document_sha256:
+                    raise WorkflowError("Signature operation no longer matches the frozen document", 409)
+                if operation.expected_signature_count != len(existing):
+                    raise WorkflowError("Signature request changed while the operation was pending", 409)
+                operation.status = "processing"
+                operation.attempt_count += 1
+                operation.lease_expires_at = now + timedelta(minutes=5)
+                operation.error_code = None
+                evidence = operation.evidence_json
+                evidence_hash = operation.evidence_sha256
+                self._audit(
+                    db,
+                    request.id,
+                    auth_user_id,
+                    "signature.operation_retried",
+                    "signature_operation",
+                    operation.id,
+                    {"attempt": operation.attempt_count},
+                )
+            stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
+            stamp_records.append(evidence | {"evidence_sha256": evidence_hash})
+            manifest_hash = sha256("|".join(str(item["evidence_sha256"]) for item in stamp_records).encode()).hexdigest()
+            signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{str(item["subject_hmac_sha256"])[:16]}' for item in stamp_records)
+            metadata = {
+                "RubricaArtifactId": str(operation.id),
+                "RubricaRequestId": str(request.id),
+                "RubricaDocumentId": str(request.document_id),
+                "RubricaDocumentVersion": str(request.document_version),
+                "RubricaOriginalSHA256": request.document_sha256,
+                "RubricaEvidenceManifestSHA256": manifest_hash,
+                "RubricaSignerManifest": signer_manifest,
+                "RubricaIdentityBindingHMACSHA256": str(evidence["identity_binding_hmac_sha256"]),
+                "RubricaLastSignedAt": str(evidence["signed_at"]),
+                "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8"),
+            }
+            return {
+                "operation_id": operation.id,
+                "artifact_ready": False,
+                "request_id": request.id,
+                "document_sha256": request.document_sha256,
+                "version_storage_key": version.storage_key,
+                "original_filename": version.original_filename,
+                "stamp_records": stamp_records,
+                "metadata": metadata,
+                "artifact_scope": signed_artifact_storage_scope(
+                    document.tenant_id,
+                    self._document_owner_storage_id(db, document),
+                    document.id,
+                ),
+            }
+
+    @staticmethod
+    def _record_signature_artifact(
+        operation_id: UUID,
+        auth_user_id: str,
+        artifact_key: str,
+        artifact_hash: str,
+        trusted_timestamp: dict[str, object],
+    ) -> None:
+        with SessionLocal.begin() as db:
+            operation = db.scalar(
+                select(SignatureOperationEntity)
+                .where(SignatureOperationEntity.id == operation_id)
+                .with_for_update()
+            )
+            if operation is None or operation.auth_user_id != auth_user_id.lower():
+                raise WorkflowError("Signature operation not found", 404)
+            if operation.status != "processing":
+                raise WorkflowError("Signature operation cannot accept an artifact", 409)
+            operation.artifact_storage_key = artifact_key
+            operation.artifact_sha256 = artifact_hash
+            operation.trusted_timestamp_json = trusted_timestamp
+            operation.status = "artifact_ready"
+            operation.lease_expires_at = None
+            operation.error_code = None
+
+    def _finalize_signature_operation(
+        self, operation_id: UUID, auth_user_id: str
+    ) -> SignerRead:
+        with SessionLocal.begin() as db:
+            operation = db.scalar(
+                select(SignatureOperationEntity)
+                .where(SignatureOperationEntity.id == operation_id)
+                .with_for_update()
+            )
+            if operation is None or operation.auth_user_id != auth_user_id.lower():
+                raise WorkflowError("Signature operation not found", 404)
+            request = self._request(db, str(operation.signature_request_id), lock=True)
+            signer = self._signer(db, str(operation.signer_id), request.id, lock=True)
+            if operation.status == "completed" and signer.status == SignerStatus.SIGNED.value:
                 return self._signer_read(signer)
+            if operation.status != "artifact_ready" or not operation.artifact_storage_key or not operation.artifact_sha256 or operation.trusted_timestamp_json is None:
+                raise WorkflowError("Signature operation artifact is not ready", 409)
+            if request.status != RequestStatus.OPEN.value:
+                raise WorkflowError("Signature request is not open", 409)
+            if signer.status == SignerStatus.SIGNED.value:
+                raise WorkflowError("Signer has already signed", 409)
+            version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == operation.document_version))
+            if version is None or version.sha256 != operation.document_sha256 or request.document_sha256 != operation.document_sha256:
+                raise WorkflowError("Document changed before signature confirmation", 409)
+            existing_count = db.scalar(select(func.count()).select_from(SignatureEntity).where(SignatureEntity.signature_request_id == request.id)) or 0
+            if existing_count != operation.expected_signature_count:
+                raise WorkflowError("Signature request changed before confirmation", 409)
+            document = db.get(DocumentEntity, request.document_id)
+            if document is None or document.deleted_at is not None:
+                raise WorkflowError("Document not found", 404)
+            if signer.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE.value:
+                active_representation = db.scalar(
+                    select(TenantMemberEntity.id).where(
+                        TenantMemberEntity.tenant_id == signer.represented_tenant_id,
+                        tenant_service.membership_identity_filter(auth_user_id),
+                        TenantMemberEntity.status == "active",
+                        TenantMemberEntity.role.in_(["admin", "member"]),
+                        TenantMemberEntity.deleted_at.is_(None),
+                    )
+                )
+                if active_representation is None:
+                    raise WorkflowError("Company representation authorization is no longer active", 403)
+            billing_service.consume_signature(db, document.tenant_id)
+            signed_at = datetime.fromisoformat(str(operation.evidence_json["signed_at"]))
+            db.add(
+                SignatureEntity(
+                    signature_request_id=request.id,
+                    signer_id=signer.id,
+                    auth_user_id=auth_user_id,
+                    document_sha256=operation.document_sha256,
+                    signed_at=signed_at,
+                    evidence_json=operation.evidence_json,
+                    evidence_sha256=operation.evidence_sha256,
+                    artifact_storage_key=operation.artifact_storage_key,
+                    artifact_sha256=operation.artifact_sha256,
+                    trusted_timestamp_json=operation.trusted_timestamp_json,
+                )
+            )
+            signer.status = SignerStatus.SIGNED.value
+            signer.signed_at = signed_at
+            operation.status = "completed"
+            operation.completed_at = DateTimeService.utc_now()
+            operation.error_code = None
+            self._audit(db, request.id, auth_user_id, "signature.completed", "signer", signer.id, {"document_sha256": operation.document_sha256, "document_version": operation.document_version, "evidence_sha256": operation.evidence_sha256, "artifact_sha256": operation.artifact_sha256, "operation_id": str(operation.id)})
+            db.flush()
+            pending = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
+            if pending == 0:
+                request.status = RequestStatus.COMPLETED.value
+                request.completed_at = signed_at
+                self._audit(db, request.id, auth_user_id, "signature_request.completed", "signature_request", request.id, {"artifact_sha256": operation.artifact_sha256})
+            return self._signer_read(signer)
+
+    @staticmethod
+    def _fail_signature_operation(operation_id: UUID, error: Exception) -> None:
+        error_code = (
+            error.code
+            if isinstance(error, WorkflowError) and error.code
+            else "signature_processing_failed"
+        )
+        try:
+            with SessionLocal.begin() as db:
+                operation = db.scalar(
+                    select(SignatureOperationEntity)
+                    .where(SignatureOperationEntity.id == operation_id)
+                    .with_for_update()
+                )
+                if operation is not None and operation.status == "processing":
+                    operation.status = "failed"
+                    operation.lease_expires_at = None
+                    operation.error_code = error_code[:64]
         except Exception:
-            if artifact_key:
-                self.storage.discard_uncommitted(artifact_key)
-            raise
+            return
 
     def signed_document(self, request_id: str, actor_id: str | None = None) -> tuple[str, str, bytes]:
         with SessionLocal() as db:

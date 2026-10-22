@@ -31,7 +31,7 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help doctor test lint docs docs-build ensure-observability-network ensure-local-databases ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test test-unit test-integration lint docs docs-build ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -49,6 +49,8 @@ help:
 
 	@echo "  make doctor              Validate local project prerequisites"
 	@echo "  make test                Run tests"
+	@echo "  make test-unit           Run tests that do not require PostgreSQL/Redis"
+	@echo "  make test-integration    Run required tests against isolated PostgreSQL/Redis"
 	@echo "  make lint                Run Ruff"
 	@echo ""
 	@echo "Smoke scripts"
@@ -107,6 +109,17 @@ help:
 test:
 	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest
 
+test-unit:
+	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest --ignore=tests/test_database_workflow.py -k "not real_redis"
+
+test-integration: ensure-integration-services
+	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run python toolbox/checks/integration_test_services.py
+	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest \
+		tests/test_database_workflow.py \
+		tests/test_auth_session_security.py::test_login_attempts_are_limited_with_real_redis \
+		tests/test_auth_session_security.py::test_refresh_rotation_replay_and_logout_with_real_redis \
+		-rA
+
 lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
@@ -137,6 +150,9 @@ ensure-observability-network:
 ensure-local-databases: local-config
 	$(LOCAL_COMPOSE) up -d --wait postgres
 	$(LOCAL_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
+
+ensure-integration-services: ensure-local-databases
+	$(LOCAL_COMPOSE) up -d --wait redis
 
 local-config: ensure-observability-network
 	$(LOCAL_COMPOSE) config --quiet

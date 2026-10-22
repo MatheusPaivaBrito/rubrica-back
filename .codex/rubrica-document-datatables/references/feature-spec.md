@@ -3,7 +3,7 @@
 ## Estado
 
 - Especificação em construção.
-- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8 e 9.
+- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9 e 10.
 - Implementação ainda não autorizada por esta anotação.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
@@ -95,21 +95,21 @@ Regras:
 
 | ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
 |---|---|---|---|---|---|---|
-| 6A | Inventariar chamadas externas executadas dentro de transações e locks | backend | nenhuma | `NÃO INICIADO` | Auditoria identificou storage, SerproID e Carimbo do Tempo no fluxo transacional de assinatura | Mapear também upload, versionamento e notificações antes de alterar fronteiras. |
-| 6B | Definir protocolo de operação de assinatura em fases e idempotência | backend | 6A | `NÃO INICIADO` | Fluxo atual mantém a transação durante I/O externo | Fechar estados, chave idempotente, retomada, timeout e compensação sem depender de Kafka. |
-| 6C | Retirar leitura/gravação de storage e chamadas Serpro da transação longa | backend | 6B | `NÃO INICIADO` | Nenhuma refatoração iniciada | Implementar fases curtas com revalidação sob lock antes da confirmação final. |
-| 6D | Tratar falhas, retries, operações abandonadas e artefatos órfãos | backend/infra | 6B, 6C | `NÃO INICIADO` | Existe compensação parcial de storage, mas não um protocolo completo de recuperação | Definir reconciliação segura e observabilidade sem duplicar assinatura ou consumo externo. |
-| 6E | Testes concorrentes e de falha nas fronteiras transacionais | backend | 6C, 6D, Parte 7 | `NÃO INICIADO` | Cobertura atual não comprova todas as falhas externas concorrentes em PostgreSQL real | Cobrir timeout, retry, dupla submissão, queda entre fases e confirmação concorrente. |
+| 6A | Inventariar chamadas externas executadas dentro de transações e locks | backend | nenhuma | `VERIFICADO` | Inventário confirmou storage em upload/versionamento; identidade, storage, geração de PDF, SerproID e timestamp no fluxo de assinatura; convite já era enviado após commit | Checkout/portal Stripe e provisionamento inicial de conta continuam registrados como fronteiras externas próprias; não pertencem à operação criptográfica desta parte. |
+| 6B | Definir protocolo de operação de assinatura em fases e idempotência | backend | 6A | `VERIFICADO` | `signature_operations` persiste uma operação única por request/signer com estados `processing`, `failed`, `artifact_ready` e `completed`, lease, contador de tentativas e hashes | Nenhum no escopo da assinatura; evolução futura pode criar reconciliador periódico para leases expirados. |
+| 6C | Retirar leitura/gravação de storage e chamadas Serpro da transação longa | backend | 6B | `VERIFICADO` | Upload e versionamento usam validação/confirmação curta; assinatura faz identidade, storage, PDF, certificado e timestamp fora da transação e revalida sob lock na confirmação | Nenhum. |
+| 6D | Tratar falhas, retries, operações abandonadas e artefatos órfãos | backend/infra | 6B, 6C | `VERIFICADO` | Falha antes do artefato marca a operação como `failed`; retry reutiliza a operação; `artifact_ready` é retomável; artefato não confirmado é descartado quando ainda não foi registrado | Reconciliador automático de operações permanentemente abandonadas é melhoria operacional futura, não requisito para retry seguro sob demanda. |
+| 6E | Testes concorrentes e de falha nas fronteiras transacionais | backend | 6C, 6D, Parte 7 | `VERIFICADO` | PostgreSQL real comprovou liberação do lock antes do callback externo com `FOR UPDATE NOWAIT`, falha/retry, cobrança somente na confirmação, idempotência e duas assinaturas sequenciais | Chamadas Serpro reais continuam deliberadamente fora do CI para não gerar custo. |
 
 ### Parte 7 — pacotes de trabalho
 
 | ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
 |---|---|---|---|---|---|---|
-| 7A | Subir PostgreSQL e Redis isolados no CI | backend/CI | nenhuma | `NÃO INICIADO` | Workflow atual executa `make test` antes de `make migrate-all`; integrações dependem de variáveis opcionais | Escolher services do GitHub Actions ou Compose existente, com healthcheck e credenciais exclusivas de teste. |
-| 7B | Aplicar migrations antes dos testes de integração | backend/CI | 7A | `NÃO INICIADO` | CI valida migrations separadamente, mas não executa o workflow real sobre o banco migrado | Preparar os bancos e falhar o job se qualquer migration não aplicar. |
-| 7C | Tornar testes PostgreSQL obrigatórios no CI | backend/CI | 7A, 7B | `NÃO INICIADO` | `test_database_workflow.py` é ignorado sem `RUBRICA_DATABASE_TESTS=1` | Definir a flag no job integrado, isolar dados e impedir skips silenciosos. |
-| 7D | Tornar testes Redis e concorrência de sessão obrigatórios no CI | backend/CI | 7A | `NÃO INICIADO` | Testes reais de Redis são ignorados sem `RUBRICA_TEST_REDIS_URL` | Fornecer URL isolada e provar rotação, replay e concorrência reais. |
-| 7E | Separar e reportar unitários e integração sem duplicar desnecessariamente o pipeline | backend/CI | 7C, 7D | `NÃO INICIADO` | Não existe gate explícito para quantidade inesperada de skips | Exibir resumo, impor limite de skips esperados e manter tempo de CI proporcional. |
+| 7A | Subir PostgreSQL e Redis isolados no CI | backend/CI | nenhuma | `VERIFICADO` | `ensure-integration-services` sobe ambos via Compose, espera healthchecks e o preflight recusa hosts que não sejam loopback | Nenhum. |
+| 7B | Aplicar migrations antes dos testes de integração | backend/CI | 7A | `VERIFICADO` | Workflow executa `make migrate-all` antes de `make test-integration`; migration `0025` foi aplicada em PostgreSQL real | Nenhum. |
+| 7C | Tornar testes PostgreSQL obrigatórios no CI | backend/CI | 7A, 7B | `VERIFICADO` | Gate define `RUBRICA_DATABASE_TESTS=1`, executa o arquivo explicitamente e isola dados com `TRUNCATE ... CASCADE` sem contornar os gatilhos append-only | Nenhum. |
+| 7D | Tornar testes Redis e concorrência de sessão obrigatórios no CI | backend/CI | 7A | `VERIFICADO` | Gate fornece `RUBRICA_TEST_REDIS_URL` e seleciona explicitamente limitação de login, rotação, replay, logout e concorrência contra Redis real | Nenhum. |
+| 7E | Separar e reportar unitários e integração sem duplicar desnecessariamente o pipeline | backend/CI | 7C, 7D | `VERIFICADO` | `make test-unit` exclui somente integrações reais; `make test-integration` seleciona os quatro gates e usa `-rA`, portanto um skip inesperado aparece e falha no preflight por configuração ausente | Nenhum. |
 
 ### Parte 8 — pacotes de trabalho
 
@@ -133,6 +133,19 @@ Regras:
 | 9F | Implementar autorização e consultas controladas de observabilidade | backend | 9B–9D | `VERIFICADO` | Status interno protegido por `X-Rubrica-Service-Key`, comparação constante e respostas sanitizadas; testes de chave ausente/inválida | Consultas de logs/métricas/traces para usuários permanecem deliberadamente fora deste primeiro corte e exigirão política própria antes de existir. |
 | 9G | Configurar coleta, logs, traces, dashboards e alertas na Platform Infra | platform_infra/backend | 9D, 9E, contratos fechados | `VERIFICADO` | Job `rubrica-apis`, dashboard `Rubrica / APIs`, alertas, Tempo na rede privada; cinco targets `up=1`, logs no Loki e traces dos cinco serviços no Tempo | Nenhum no código; provisionar o token Viewer é tarefa de deploy. |
 | 9H | Validar migrations, resiliência, segurança e integração ponta a ponta | backend/infra/CI | 9C–9G | `VERIFICADO` | 14 testes focados e suíte completa com 299 aprovados/4 ignorados; Ruff/Poetry/Compose/promtool válidos; migration e smoke Docker executados com plataforma disponível e Grafana indisponível | A validação usou ambiente local e credenciais de desenvolvimento; repetir o smoke após o deploy de produção sem expor secrets. |
+
+### Parte 10 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 10A | Inventariar todos os arquivos, buckets, prefixes e metadados persistidos | backend/infra | nenhuma | `NÃO INICIADO` | Escopo registrado nesta Parte 10; nenhuma revisão executada | Mapear originais, versões, PDFs assinados, evidências, manifestos, ativos visuais, temporários e backups. |
+| 10B | Reconstruir o ciclo de vida completo entre banco, storage local e R2 | backend | 10A | `NÃO INICIADO` | Fluxos ainda não foram rastreados ponta a ponta | Documentar criação, leitura, versionamento, assinatura, substituição, migração, exclusão e recuperação. |
+| 10C | Revisar integridade, imutabilidade e vínculo criptográfico dos objetos | backend/segurança | 10A, 10B | `NÃO INICIADO` | Nenhuma conclusão registrada | Verificar hashes, checksums, version IDs, manifesto, evidências, prevenção de sobrescrita e detecção de adulteração. |
+| 10D | Revisar isolamento, autorização e exposição de arquivos | backend/segurança | 10A, 10B | `NÃO INICIADO` | Nenhuma conclusão registrada | Auditar tenant, autorização por objeto, URLs assinadas, duração, replay, enumeração, MIME e download seguro. |
+| 10E | Revisar retenção, exclusão, LGPD e preservação probatória | produto/backend/infra | 10A–10D, decisão jurídica/produto | `NÃO INICIADO` | Políticas consolidadas ainda não foram confrontadas com o código | Definir matriz por tipo de artefato, finalidade, prazo, legal hold, descarte e conflito entre apagamento e prova. |
+| 10F | Revisar backup, restauração, replicação e recuperação de desastre | infra/backend | 10A, 10B | `NÃO INICIADO` | Existem mecanismos de backup R2, mas o ciclo de restauração de documentos não foi comprovado nesta parte | Verificar cobertura, criptografia, credenciais separadas, RPO/RTO, teste de restore e perda parcial de banco ou objetos. |
+| 10G | Localizar objetos órfãos, referências quebradas e layouts legados | backend/infra | 10A–10C | `NÃO INICIADO` | Histórico já incluiu mudança de prefixo e migração de objetos | Definir auditoria somente leitura e reconciliação segura antes de qualquer correção ou remoção. |
+| 10H | Produzir relatório, matriz de riscos e plano mínimo de adequação | arquitetura/segurança | 10A–10G | `NÃO INICIADO` | Esta anotação define apenas o trabalho futuro | Separar fatos comprovados, hipóteses, riscos e mudanças recomendadas; nenhuma implementação automática. |
 
 ## Parte 1 — tabelas e ordenação
 
@@ -859,6 +872,96 @@ O secret nunca pode aparecer em `.env`, Git, Compose como valor literal, logs, d
 - Compose local e produção, migrations, lint, testes e smoke integrado passam com a plataforma ligada e desligada.
 - Existe runbook para criar/rotacionar/revogar o token Viewer, diagnosticar targets e operar o modo degradado.
 
+## Parte 10 — revisão do armazenamento de arquivos e R2
+
+### Decisão de prioridade
+
+Executar esta parte por último no ciclo atual. A revisão é um reforço de integridade, preservação e operação diante de uma provável migração futura do R2; neste momento não existe evidência de incidente crítico que justifique colocá-la à frente das Partes 6 e 7. A postergação não autoriza presumir que os controles já foram validados nem executar a migração sem a auditoria prevista aqui.
+
+### Objetivo
+
+Realizar uma revisão técnica e operacional de como o Rúbrica recebe, identifica, transforma, armazena, recupera, preserva e exclui arquivos, com atenção especial ao Cloudflare R2. Esta parte começa exclusivamente como auditoria e documentação: não autoriza alterar código, banco, buckets, objetos, configurações, lifecycle rules ou dados existentes.
+
+### Escopo da revisão
+
+A revisão deve localizar e diferenciar, no mínimo:
+
+- documento original enviado pelo usuário;
+- versões congeladas apresentadas aos signatários;
+- PDFs intermediários e PDFs finais assinados;
+- assinaturas CMS/PAdES e tokens de Carimbo do Tempo;
+- JSONs de evidência e manifestos consolidados;
+- logos, carimbos visuais e assinaturas desenhadas, quando existirem;
+- arquivos temporários, staging, uploads incompletos e artefatos de operações falhas;
+- objetos legados em prefixes antigos e objetos migrados;
+- backups de banco, arquivos e repositórios Restic relacionados ao R2.
+
+Para cada classe de arquivo, registrar bucket, prefix/key, proprietário lógico, tenant, tabela e coluna de referência, formato, tamanho máximo, hash/checksum, criptografia, versionamento, retenção, forma de acesso e regra de exclusão. Não confundir a key do R2 com identidade confiável do documento: o vínculo deve ser demonstrado por identificadores e hashes persistidos de modo consistente.
+
+### Perguntas obrigatórias
+
+1. Quais buckets e credenciais são usados para documentos operacionais e backups, e eles estão realmente separados?
+2. Como a key é construída e como tenant, documento, versão, solicitação e assinatura são relacionados sem permitir colisão ou acesso cruzado?
+3. O banco aponta para objetos imutáveis ou uma mesma key pode ser sobrescrita silenciosamente?
+4. Os bytes originais e cada versão assinada permanecem preservados exatamente como produzidos?
+5. Quais hashes são calculados, em qual momento e contra quais bytes? Eles são revalidados no download e antes/depois da assinatura?
+6. Evidência e manifesto possuem vínculo verificável por terceiros com o PDF correspondente?
+7. Versionamento, Object Lock, retenção ou outro controle impedem alterações administrativas não autorizadas? Se não impedem, alterações são ao menos detectáveis?
+8. URLs pré-assinadas possuem escopo mínimo, expiração adequada, método restrito e proteção contra reutilização indevida?
+9. Uploads validam tamanho, MIME real, estrutura PDF, conteúdo ativo e nome fornecido pelo usuário sem confiar apenas em extensão ou header?
+10. Falhas entre banco e R2 deixam objetos órfãos, registros sem objeto ou versões parcialmente confirmadas?
+11. Exclusão de conta/documento respeita LGPD sem destruir indevidamente evidências necessárias para exercício regular de direitos ou obrigações legais?
+12. Backups cobrem banco e objetos de forma consistente, e existe restauração testada que preserve a correspondência entre registros e arquivos?
+13. Mudanças de bucket ou prefix mantêm compatibilidade com documentos históricos e possuem reconciliação verificável?
+14. É possível exportar documento, evidências e manifesto e validá-los sem depender exclusivamente do banco ou de uma URL ativa do Rúbrica?
+15. Logs e métricas permitem detectar falhas, objetos ausentes, divergência de hash, crescimento anormal, custo e operações administrativas sem registrar conteúdo sensível?
+
+### Segurança e conformidade
+
+- Confirmar isolamento por tenant e autorização por objeto em upload, visualização, download, assinatura e exclusão.
+- Revisar permissões das credenciais R2 pelo princípio do menor privilégio; documentos e backups não devem compartilhar acesso amplo sem justificativa.
+- Confirmar TLS em trânsito e a proteção em repouso oferecida/configurada, distinguindo criptografia do provedor de criptografia controlada pela aplicação.
+- Segredos permanecem em Docker Secrets ou mecanismo equivalente e nunca aparecem em Git, `.env` versionado, logs ou respostas.
+- Acesso administrativo, migração e recuperação devem deixar trilha auditável e não permitir substituir silenciosamente um documento histórico.
+- Definir retenção por finalidade e tipo de artefato, incluindo descarte seguro, legal hold e resposta a solicitações de titulares.
+- Não classificar automaticamente Object Lock, versionamento ou backup como requisito obrigatório: primeiro registrar o risco, a necessidade probatória e o custo, então recomendar a medida proporcional.
+
+### Método da revisão
+
+- Inspecionar código real, migrations, modelos, serviços de storage, Compose, Makefile, scripts operacionais, testes e documentação.
+- Reconstruir os fluxos de ponta a ponta e produzir uma tabela por artefato com evidências de arquivo e linha.
+- Comparar referências do banco com convenções de keys e prefixes, sem listar nomes reais que contenham dados pessoais.
+- Qualquer inventário no R2 deve começar em modo somente leitura e agregado. Não baixar documentos pessoais nem realizar chamadas potencialmente cobradas sem autorização específica.
+- Não apagar, mover, copiar, regravar ou corrigir objetos durante a auditoria.
+- Classificar achados em comprovado, risco potencial, hipótese e não verificável.
+- Separar correções necessárias de melhorias opcionais; evitar recomendar nova infraestrutura quando controles existentes forem suficientes.
+
+### Entrega esperada
+
+O relatório da Parte 10 deve conter:
+
+- diagrama do ciclo de vida dos arquivos;
+- inventário de buckets, prefixes e classes de objetos sem revelar dados pessoais ou secrets;
+- matriz entre registros de banco, objects keys, hashes, versões e evidências;
+- avaliação de isolamento, autorização, integridade, imutabilidade, retenção e recuperação;
+- lista de objetos órfãos ou referências quebradas apenas em forma agregada e sanitizada;
+- riscos classificados por criticidade e impacto real;
+- plano de adequação mínimo, ordenado por dependência, com critérios objetivos de aceite;
+- indicação explícita do que já funciona, do que foi apenas inferido e do que não pôde ser verificado.
+
+### Critérios de aceitação da Parte 10
+
+- Todas as classes conhecidas de arquivos estão inventariadas e associadas aos módulos que as criam e consomem.
+- O fluxo entre upload, banco, R2, assinatura, evidências, download, backup e exclusão está documentado ponta a ponta.
+- A revisão demonstra se sobrescrita ou adulteração é impedida, detectada ou atualmente não controlada.
+- O isolamento entre tenants e a autorização por objeto são avaliados em todos os endpoints relevantes.
+- A correspondência entre PDF, versão, assinatura, timestamp, evidência e manifesto é explicada com hashes e referências concretas.
+- Prefixes antigos, migrações e fallback de leitura são avaliados sem alterar documentos históricos.
+- Retenção, descarte, legal hold e direitos dos titulares possuem lacunas e decisões pendentes claramente identificadas.
+- Backup e restauração são diferenciados de alta disponibilidade e têm cobertura, RPO/RTO e teste de recuperação avaliados.
+- Nenhuma chamada paga, leitura de documento pessoal ou mutação em R2 ocorre sem autorização adicional.
+- O resultado final é uma auditoria acionável; nenhuma mudança de implementação é incluída nesta parte sem nova autorização.
+
 ## Próximas partes
 
-Acrescente aqui a Parte 10 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.
+Acrescente aqui a Parte 11 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.

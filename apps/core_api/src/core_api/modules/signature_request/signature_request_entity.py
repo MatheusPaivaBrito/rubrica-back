@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, UniqueConstraint, Uuid
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -61,6 +61,38 @@ class SignatureEntity(BaseEntity):
     artifact_storage_key: Mapped[str | None] = mapped_column(String(255), unique=True)
     artifact_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
     trusted_timestamp_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
+
+
+class SignatureOperationEntity(BaseEntity):
+    __tablename__ = "signature_operations"
+    __table_args__ = (
+        UniqueConstraint("signature_request_id", "signer_id"),
+    )
+
+    signature_request_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("signature_requests.id", ondelete="RESTRICT"),
+        index=True,
+    )
+    signer_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("signers.id", ondelete="RESTRICT"), index=True
+    )
+    auth_user_id: Mapped[str] = mapped_column(String(255), index=True)
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    document_version: Mapped[int]
+    document_sha256: Mapped[str] = mapped_column(String(64))
+    expected_signature_count: Mapped[int]
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), index=True
+    )
+    evidence_json: Mapped[dict[str, object]] = mapped_column(JSON)
+    evidence_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    artifact_storage_key: Mapped[str | None] = mapped_column(String(255), unique=True)
+    artifact_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    trusted_timestamp_json: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    error_code: Mapped[str | None] = mapped_column(String(64), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuditEventEntity(BaseEntity):

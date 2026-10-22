@@ -41,7 +41,7 @@ jobs:
         run: make lint
 
       - name: Run unit and route contract tests
-        run: make test
+        run: make test-unit
 
       - name: Validate Compose configuration
         run: docker compose --env-file .env.example -f compose/local.yml --profile gateway config -q
@@ -51,6 +51,15 @@ jobs:
 
       - name: Apply every migration on clean PostgreSQL databases
         run: make migrate-all
+
+      - name: Run PostgreSQL and Redis integration gates
+        env:
+          DOCUMENT_STORAGE_PATH: /tmp/rubrica-ci-document-storage
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: "7432"
+          RUBRICA_DATABASE_TESTS: "1"
+          RUBRICA_TEST_REDIS_URL: redis://127.0.0.1:7379/15
+        run: make test-integration
 
       - name: Stop CI containers
         if: always()

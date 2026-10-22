@@ -9,6 +9,7 @@ from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEnti
 from core_api.modules.signature_request.signature_request_entity import (  # noqa: F401
     AuditEventEntity,
     SignatureEntity,
+    SignatureOperationEntity,
     SignatureRequestEntity,
     SignerEntity,
 )
