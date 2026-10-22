@@ -3,7 +3,7 @@ import argparse
 import subprocess
 import sys
 
-DATABASES = ("auth", "core", "eventing", "notification")
+DATABASES = ("auth", "core", "eventing", "notification", "observability")
 
 
 def main() -> None:

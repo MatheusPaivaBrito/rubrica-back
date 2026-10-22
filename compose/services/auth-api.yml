@@ -5,7 +5,7 @@ services:
       dockerfile: apps/auth_api/dockerfile
     ports:
       - "127.0.0.1:${AUTH_API_HOST_PORT:-7101}:8000"
-    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
+    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
     environment:
       PYTHONPATH: apps/auth_api/src:packages/shared_kernel/src
       POSTGRES_USER: ${POSTGRES_USER:-rubrica}
@@ -28,18 +28,24 @@ services:
       AUTH_MFA_CHALLENGE_TTL_SECONDS: ${AUTH_MFA_CHALLENGE_TTL_SECONDS:-300}
       NOTIFICATION_API_URL: http://notification-api:8000
       NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     depends_on:
       - postgres
       - redis
       - notification-api
       - core-api
+    networks:
+      default:
+      platform_observability:
+        aliases: [rubrica-auth-api]
 
   production:
     build:
       context: ../..
       dockerfile: apps/auth_api/dockerfile
     restart: unless-stopped
-    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
+    command: gunicorn auth_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${AUTH_WEB_CONCURRENCY:-2}
     environment:
       ENVIRONMENT: production
       APP_DEBUG: "false"
@@ -64,6 +70,8 @@ services:
       AUTH_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/auth_identity_encryption_key
       AUTH_IDENTITY_HMAC_KEY_FILE: /run/secrets/auth_identity_hmac_key
       AUTH_MFA_ISSUER: ${AUTH_MFA_ISSUER:-Rubrica}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     secrets:
       - postgres_password
       - auth_seed_admin_password
@@ -83,5 +91,7 @@ services:
       core-api:
         condition: service_started
     networks:
-      - rubrica_internal
-      - rubrica_external
+      rubrica_internal:
+      rubrica_external:
+      platform_observability:
+        aliases: [rubrica-auth-api]

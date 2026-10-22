@@ -3,7 +3,7 @@
 ## Estado
 
 - Especificação em construção.
-- Partes registradas: 1, 2, 3, 4 e 5.
+- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8 e 9.
 - Implementação ainda não autorizada por esta anotação.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
@@ -14,7 +14,7 @@ Modernizar o fluxo de documentos e assinaturas do Rúbrica em uma branch exclusi
 
 ## Acompanhamento da implementação
 
-Última atualização do quadro: **2026-10-16**.
+Última atualização do quadro: **2026-10-22**.
 
 ### Legenda obrigatória
 
@@ -90,6 +90,49 @@ Regras:
 | 5C | Parse seguro de `latestVersion.appData` e fallbacks | frontend | 5A, 5B | `VERIFICADO` | Parser limita schema, tipos, quantidade e tamanho; fallback en/pt-BR e modal genérico | Conteúdo editorial é exibido pela propriedade `text`, sem HTML. |
 | 5D | SweetAlert com destaques e controle por sessão | frontend | 5C | `VERIFICADO` | Modal evita concorrência e grava dispensa por `release_id` na sessão | Ativação e recarga continuam no fluxo confirmado. |
 | 5E | Testes e procedimento editorial de release | frontend/CI | 5B–5D | `VERIFICADO` | Testes cobrem quatro locales, fallback, conteúdo hostil, JSON inválido, sessão e concorrência | 61 testes frontend aprovados. |
+
+### Parte 6 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 6A | Inventariar chamadas externas executadas dentro de transações e locks | backend | nenhuma | `NÃO INICIADO` | Auditoria identificou storage, SerproID e Carimbo do Tempo no fluxo transacional de assinatura | Mapear também upload, versionamento e notificações antes de alterar fronteiras. |
+| 6B | Definir protocolo de operação de assinatura em fases e idempotência | backend | 6A | `NÃO INICIADO` | Fluxo atual mantém a transação durante I/O externo | Fechar estados, chave idempotente, retomada, timeout e compensação sem depender de Kafka. |
+| 6C | Retirar leitura/gravação de storage e chamadas Serpro da transação longa | backend | 6B | `NÃO INICIADO` | Nenhuma refatoração iniciada | Implementar fases curtas com revalidação sob lock antes da confirmação final. |
+| 6D | Tratar falhas, retries, operações abandonadas e artefatos órfãos | backend/infra | 6B, 6C | `NÃO INICIADO` | Existe compensação parcial de storage, mas não um protocolo completo de recuperação | Definir reconciliação segura e observabilidade sem duplicar assinatura ou consumo externo. |
+| 6E | Testes concorrentes e de falha nas fronteiras transacionais | backend | 6C, 6D, Parte 7 | `NÃO INICIADO` | Cobertura atual não comprova todas as falhas externas concorrentes em PostgreSQL real | Cobrir timeout, retry, dupla submissão, queda entre fases e confirmação concorrente. |
+
+### Parte 7 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 7A | Subir PostgreSQL e Redis isolados no CI | backend/CI | nenhuma | `NÃO INICIADO` | Workflow atual executa `make test` antes de `make migrate-all`; integrações dependem de variáveis opcionais | Escolher services do GitHub Actions ou Compose existente, com healthcheck e credenciais exclusivas de teste. |
+| 7B | Aplicar migrations antes dos testes de integração | backend/CI | 7A | `NÃO INICIADO` | CI valida migrations separadamente, mas não executa o workflow real sobre o banco migrado | Preparar os bancos e falhar o job se qualquer migration não aplicar. |
+| 7C | Tornar testes PostgreSQL obrigatórios no CI | backend/CI | 7A, 7B | `NÃO INICIADO` | `test_database_workflow.py` é ignorado sem `RUBRICA_DATABASE_TESTS=1` | Definir a flag no job integrado, isolar dados e impedir skips silenciosos. |
+| 7D | Tornar testes Redis e concorrência de sessão obrigatórios no CI | backend/CI | 7A | `NÃO INICIADO` | Testes reais de Redis são ignorados sem `RUBRICA_TEST_REDIS_URL` | Fornecer URL isolada e provar rotação, replay e concorrência reais. |
+| 7E | Separar e reportar unitários e integração sem duplicar desnecessariamente o pipeline | backend/CI | 7C, 7D | `NÃO INICIADO` | Não existe gate explícito para quantidade inesperada de skips | Exibir resumo, impor limite de skips esperados e manter tempo de CI proporcional. |
+
+### Parte 8 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 8A | Reavaliar necessidade comercial e operacional de eventing distribuído | produto/arquitetura | receita, escala ou requisito operacional concreto | `ADIADO` | Eventing possui estrutura parcial, mas o produto ainda não justifica Kafka e sua operação | Retomar apenas quando os gatilhos da Parte 8 forem atendidos. |
+| 8B | Integrar produtores ao outbox transacional | backend | 8A aprovada | `ADIADO` | Core, Auth e Notification ainda não publicam no eventing de forma operacional | Não expandir agora; manter o fluxo síncrono atual sob testes e observabilidade. |
+| 8C | Implementar relay/dispatcher e processamento idempotente | backend/worker | 8B | `ADIADO` | Worker atual é placeholder e não há relay operacional | Definir somente quando existir consumidor real e requisito de entrega assíncrona. |
+| 8D | Avaliar Kafka versus alternativa mais simples | arquitetura/infra | 8A | `ADIADO` | Kafka está apenas na direção arquitetural, sem necessidade comprovada | Preferir a menor solução que satisfaça volume, ordenação, retenção e replay exigidos. |
+| 8E | Testar entrega, duplicidade, reprocessamento, DLQ e recuperação | backend/infra | 8B–8D | `ADIADO` | Nenhuma topologia operacional foi escolhida | Tornar obrigatório somente se a Parte 8 for formalmente reativada. |
+
+### Parte 9 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 9A | Absorver o contrato da Platform Infra e inventariar a base do Nexo | backend/arquitetura | handoffs Platform Infra e Nexo | `VERIFICADO` | Handoff absorvido; esta especificação e `docs/OBSERVABILITY.md` registram as fronteiras definitivas | Nenhum. O handoff transitório permanece fora do Git. |
+| 9B | Adaptar nomes, configurações e contratos do Nexo para o domínio Rúbrica | backend | 9A | `VERIFICADO` | `apps/observability_api`, namespace `rubrica_*` e busca textual sem identificadores estrangeiros no código operacional | Nenhum. |
+| 9C | Integrar banco, migrations, Compose, Makefile e checks de runtime | backend/infra | 9B | `VERIFICADO` | Banco `rubrica_observability`, migrations `0001`/`0002`, Compose, readiness, backup e `make migrate-observability`; migration real executada até o head | Nenhum. |
+| 9D | Integrar rede privada da plataforma, secret Viewer e degradação segura | backend/infra | 9B, conta de serviço no Grafana | `VERIFICADO` | Cinco aliases privados; secrets de produção; Grafana local parado produziu `health=ok` e status `unavailable`, depois recuperou para `available` | No deploy, o operador ainda deve criar e rotacionar a conta Viewer conforme o runbook; nenhuma credencial é criada pelo código. |
+| 9E | Instrumentar métricas HTTP e de produto nas APIs do Rúbrica | backend | 9B, 9C | `VERIFICADO` | `shared_kernel.observability`; collectors Auth/Core/Eventing/Observability; cinco `/metrics` comprovados com Gunicorn multiprocess | Notification expõe métricas HTTP; não recebeu collector de produto porque não há conexão durável própria reutilizável no bootstrap atual. |
+| 9F | Implementar autorização e consultas controladas de observabilidade | backend | 9B–9D | `VERIFICADO` | Status interno protegido por `X-Rubrica-Service-Key`, comparação constante e respostas sanitizadas; testes de chave ausente/inválida | Consultas de logs/métricas/traces para usuários permanecem deliberadamente fora deste primeiro corte e exigirão política própria antes de existir. |
+| 9G | Configurar coleta, logs, traces, dashboards e alertas na Platform Infra | platform_infra/backend | 9D, 9E, contratos fechados | `VERIFICADO` | Job `rubrica-apis`, dashboard `Rubrica / APIs`, alertas, Tempo na rede privada; cinco targets `up=1`, logs no Loki e traces dos cinco serviços no Tempo | Nenhum no código; provisionar o token Viewer é tarefa de deploy. |
+| 9H | Validar migrations, resiliência, segurança e integração ponta a ponta | backend/infra/CI | 9C–9G | `VERIFICADO` | 14 testes focados e suíte completa com 299 aprovados/4 ignorados; Ruff/Poetry/Compose/promtool válidos; migration e smoke Docker executados com plataforma disponível e Grafana indisponível | A validação usou ambiente local e credenciais de desenvolvimento; repetir o smoke após o deploy de produção sem expor secrets. |
 
 ## Parte 1 — tabelas e ordenação
 
@@ -613,6 +656,209 @@ Regras do contrato:
 - Se haverá link opcional para um changelog completo no futuro.
 - Onde ficará o arquivo editorial fonte e qual etapa do build o incorporará ao `appData`.
 
+## Parte 6 — retirar chamadas externas de transações e locks longos
+
+### Objetivo
+
+Reduzir contenção, esgotamento do pool e estados ambíguos no fluxo de documentos e assinaturas. Nenhuma transação de banco deve permanecer aberta enquanto aguarda rede, storage de objetos, SerproID, Carimbo do Tempo, revogação de certificados ou outro provedor externo, salvo exceção tecnicamente justificada e documentada.
+
+### Problema confirmado
+
+- O fluxo atual de assinatura bloqueia o pedido e executa leitura do documento, geração de PDF, assinatura por certificado, Carimbo do Tempo e gravação do artefato antes de encerrar a transação.
+- Upload e criação de versão também escrevem no storage durante a transação, embora exista descarte compensatório em caso de erro.
+- Uma indisponibilidade externa pode prolongar locks de linha e ocupar conexões de banco por todo o timeout do provedor.
+- A correção desta parte não depende da Parte 8, de Kafka ou de um event bus.
+
+### Direção de implementação
+
+1. Em uma transação curta, bloquear e validar pedido, signatário, documento congelado, permissões e estado atual.
+2. Registrar uma operação durável com identificador idempotente, estado inicial e hashes necessários; então confirmar a transação.
+3. Executar storage, composição, SerproID e timestamp fora da transação e sem manter lock de linha.
+4. Em nova transação curta, readquirir o lock, revalidar todas as precondições e confirmar exatamente uma assinatura e seu artefato.
+5. Se o estado tiver mudado, não anexar silenciosamente o resultado externo; registrar resultado recuperável e realizar compensação segura quando aplicável.
+6. Um retry com a mesma chave deve retomar ou retornar a mesma operação, nunca criar outra assinatura ou fazer parecer que outro usuário autorizou a operação.
+
+O desenho definitivo pode usar uma tabela simples de operações e um reconciliador local. Não introduzir Kafka apenas para resolver a fronteira transacional desta parte.
+
+### Critérios de aceitação da Parte 6
+
+- Nenhuma chamada HTTP ou operação de R2 permanece dentro da transação que bloqueia o pedido de assinatura.
+- Timeout do provedor não mantém lock de linha nem conexão de banco durante toda a espera.
+- Duas submissões concorrentes resultam em no máximo uma assinatura confirmada.
+- Retry após timeout ou resposta perdida não duplica assinatura, evidência, timestamp ou consumo faturável quando o provedor permitir idempotência.
+- Queda do processo entre chamada externa e confirmação final deixa estado detectável e recuperável.
+- Artefatos não confirmados são reconciliados ou removidos sem apagar objetos históricos válidos.
+- O hash e a versão do documento são revalidados imediatamente antes da confirmação.
+- Logs correlacionam a operação entre as fases sem registrar tokens, documentos ou segredos.
+
+## Parte 7 — PostgreSQL e Redis reais como gates do CI
+
+### Objetivo
+
+Fazer o pipeline provar continuamente os comportamentos que dependem de transações, constraints, locks e comandos atômicos do Redis. Testes unitários e mocks continuam úteis, mas não substituem esses testes.
+
+### Requisitos confirmados
+
+- O CI deve iniciar instâncias efêmeras e isoladas de PostgreSQL e Redis.
+- Todas as migrations devem ser aplicadas antes dos testes de integração.
+- `RUBRICA_DATABASE_TESTS=1` e `RUBRICA_TEST_REDIS_URL` devem ser configurados pelo job apropriado.
+- Um teste marcado como integração não pode virar skip silencioso por erro de configuração do CI.
+- Banco e Redis de teste não podem apontar para desenvolvimento compartilhado ou produção.
+- O pipeline deve usar os comandos e o Compose existentes quando adequados, evitando uma segunda infraestrutura divergente.
+- Falha em migrations, healthcheck, lock, constraint ou concorrência deve reprovar o pull request.
+
+### Cobertura mínima
+
+- transições e estados do workflow de assinatura;
+- constraints de unicidade e integridade referencial;
+- triggers append-only;
+- concorrência com `SELECT FOR UPDATE`;
+- idempotência de assinatura e webhook;
+- rotação atômica do refresh token no Redis;
+- detecção de reuse/replay e revogação da sessão;
+- expiração e consumo unitário dos estados temporários relevantes.
+
+### Critérios de aceitação da Parte 7
+
+- O workflow do GitHub Actions sobe PostgreSQL e Redis saudáveis sem depender de serviço externo pago.
+- As migrations partem de banco vazio e terminam antes dos testes.
+- A suíte de PostgreSQL deixa de aparecer como skipped no CI.
+- Os testes reais de concorrência de Redis deixam de aparecer como skipped no CI.
+- O job falha se as variáveis apontarem para host não isolado ou se os serviços não estiverem disponíveis.
+- O resumo do CI diferencia unitários, integração e skips expressamente permitidos.
+- O tempo adicional do job é medido; paralelização ou cache só devem ser adicionados se preservarem isolamento e determinismo.
+
+## Parte 8 — eventing e worker distribuído (opcional e adiado)
+
+### Decisão de escopo
+
+Esta parte está conscientemente **ADIADA**. O Rúbrica ainda não possui receita ou carga que justifique introduzir e operar Kafka, consumers, schema registry, dead-letter queues e toda a observação associada. A existência de scaffolding de eventing não obriga sua conclusão agora.
+
+Enquanto estiver adiada:
+
+- não ampliar a infraestrutura Kafka;
+- não migrar fluxos estáveis para eventos apenas por preferência arquitetural;
+- não tornar a Parte 6 dependente de mensageria;
+- manter chamadas síncronas atuais com timeout, idempotência e tratamento de erro adequados;
+- corrigir apenas falhas de segurança, custo ou estabilidade do scaffolding existente quando necessário.
+
+### Gatilhos para reavaliação
+
+A Parte 8 somente deve voltar a `NÃO INICIADO` ou `EM ANDAMENTO` após decisão explícita e pelo menos um requisito concreto, como:
+
+- volume medido que torne o processamento síncrono inadequado;
+- necessidade real de fan-out para múltiplos consumidores independentes;
+- integrações que exijam entrega durável, replay ou ordenação;
+- exigência operacional de desacoplar indisponibilidade de notificações do fluxo principal;
+- receita e capacidade operacional para manter broker, monitoramento, retenção, DLQ e resposta a incidentes.
+
+Mesmo quando reavaliada, Kafka não é escolha automática. Antes da implementação, comparar uma fila gerenciada, PostgreSQL outbox com worker simples, Redis Streams e Kafka conforme volume, semântica de entrega, custo e capacidade da equipe.
+
+### Critérios futuros de aceitação
+
+- Existe pelo menos um produtor e um consumidor reais ligados a um caso de negócio aprovado.
+- Persistência do evento ocorre atomicamente com a mudança de estado do produtor.
+- Relay e consumers toleram entrega duplicada e retomam após falha.
+- Retry, backoff, DLQ, replay, ordenação e retenção possuem políticas explícitas.
+- Métricas, alertas, runbook e recuperação são entregues junto da feature.
+- O custo e a complexidade da solução escolhida são justificados por medição, não por expectativa abstrata de escala.
+
+## Parte 9 — observabilidade integrada à Platform Infra
+
+### Objetivo
+
+Integrar o Rúbrica à plataforma compartilhada de observabilidade usando uma `observability_api` pertencente ao próprio produto. A Platform Infra permanece responsável por Alloy, Loki, Prometheus, Tempo, Grafana e exporters; o Rúbrica permanece responsável por autenticação, autorização, métricas do seu domínio e memória operacional normalizada.
+
+O código da Observability API do Nexo é apenas uma base de implementação. Nomes, bancos, métricas, permissões, fontes e regras do Nexo não fazem parte do contrato do Rúbrica e devem ser removidos ou adaptados antes de considerar qualquer pacote verificado.
+
+### Estado inicial observado em 2026-10-22
+
+- A base do Nexo foi copiada para `apps/observability_api`, junto de migrations, Dockerfile e dois testes iniciais.
+- Compose local e produção começaram a incluir o serviço e a rede externa `platform-observability`.
+- A base ainda usa `NexoDesk`, `nexodesk_observability` e prefixos Prometheus `nexodesk_*` em pontos do código e da documentação.
+- O Makefile, a sequência completa de migrations, os checks de dependências, backup e CI ainda não integram completamente o novo banco/serviço.
+- O endpoint de status do Grafana possui degradação inicial para `unavailable`, mas autenticação, autorização, rate limiting e consultas reais ainda não estão implementados.
+- A instrumentação compartilhada das demais APIs, suporte multiprocess, OpenTelemetry, targets Prometheus, dashboards e alertas do Rúbrica continuam pendentes.
+
+### Fronteiras obrigatórias
+
+- A `observability_api` pertence ao Rúbrica e usa banco exclusivo para configuração e memória operacional.
+- Logs brutos permanecem no Loki, métricas no Prometheus e traces no Tempo; não duplicar telemetria bruta no PostgreSQL do Rúbrica.
+- A Platform Infra não acessa bancos de Auth, Core, Eventing, Notification ou Observability.
+- O Rúbrica não recebe senha administrativa do Grafana. Usar conta de serviço dedicada, papel Viewer, token revogável e Docker Secret.
+- Apenas serviços que precisem expor `/metrics` participam da rede de coleta. Não conectar PostgreSQL, Redis, frontend ou gateway indiscriminadamente.
+- Grafana, Loki, Prometheus, Tempo e Alloy não devem ser publicados pelo gateway do Rúbrica.
+- Falha ou ausência completa da Platform Infra não pode bloquear bootstrap, migrations, health, ready ou funcionalidades centrais do Rúbrica.
+- Desligar o Rúbrica não pode comprometer a Platform Infra.
+
+### Contratos iniciais
+
+Serviço interno esperado:
+
+```text
+observability-api:8000
+```
+
+Endpoints mínimos:
+
+| Método e rota | Responsabilidade |
+|---|---|
+| `GET /health` | Vida do processo, independente de banco e Grafana. |
+| `GET /ready` | Prontidão do banco exclusivo da Observability API. |
+| `GET /internal/observability/platform/status` | Estado controlado da conexão com Grafana; indisponibilidade não derruba a API. |
+| `GET /metrics` | Métricas Prometheus internas, fora do OpenAPI público. |
+
+Configuração base:
+
+```text
+PLATFORM_GRAFANA_URL=http://grafana:3000
+PLATFORM_GRAFANA_TIMEOUT_SECONDS=3
+PLATFORM_GRAFANA_SERVICE_TOKEN_FILE=/run/secrets/platform_grafana_service_token
+```
+
+O secret nunca pode aparecer em `.env`, Git, Compose como valor literal, logs, dashboards ou respostas HTTP.
+
+### Métricas e cardinalidade
+
+- Usar namespace estável `rubrica_`; qualquer métrica `nexodesk_*` deve ser eliminada.
+- Métricas HTTP devem usar serviço, método, template de rota e classe de status.
+- Nunca usar IDs de usuário, tenant, documento, assinatura, request, trace, URLs concretas ou query strings como labels.
+- Cada collector de negócio consulta apenas o banco pertencente à própria API.
+- Falha ao coletar indicador de negócio deve produzir uma métrica de sucesso com valor `0`, sem derrubar o scrape.
+- Como as APIs usam múltiplos workers Gunicorn, implementar corretamente `PROMETHEUS_MULTIPROC_DIR`, agregação e `mark_process_dead`.
+- Indicadores do produto devem ser agregados, de baixa cardinalidade e revisados para não expor dados pessoais ou documentos.
+
+### Logs, traces e privacidade
+
+- Logs estruturados devem incluir somente dimensões seguras, como timestamp, level, service, environment, evento, `request_id` e `trace_id`.
+- Não registrar tokens, cookies, Authorization, senhas, e-mails, telefones, CPF/CNPJ, conteúdo de documentos ou payloads pessoais.
+- Confirmar o endpoint OTLP efetivamente disponível na rede compartilhada antes de configurar OpenTelemetry.
+- Propagar contexto entre serviços sem incluir payloads ou dados pessoais nos atributos dos spans.
+- `request_id` e `trace_id` podem aparecer em logs e spans, mas não em labels Prometheus.
+
+### Autorização e consultas
+
+- O endpoint técnico de status permanece interno; nenhuma interface do Grafana será proxyada ao usuário.
+- Antes de disponibilizar consultas de logs, métricas, traces ou incidentes, definir permissões, escopo de tenant, filtros permitidos, intervalos máximos, paginação e rate limiting.
+- Consultas devem ser construídas pelo backend a partir de contratos controlados. Não aceitar PromQL, LogQL ou TraceQL arbitrários enviados pelo frontend.
+- Auditar consultas, reconhecimentos e silenciamentos sem registrar tokens ou conteýo sensível.
+- O primeiro corte não exige frontend nem exposição pelo gateway; isso só entra após política de acesso definida.
+
+### Critérios de aceitação da Parte 9
+
+- Não restam identificadores, bancos, métricas ou regras de negócio do Nexo no código do Rúbrica.
+- A Observability API possui banco exclusivo, migrations no head e integração com comandos locais e de produção.
+- `health` funciona sem banco e sem Platform Infra; `ready` representa somente as dependências necessárias da própria API.
+- A API resolve `grafana` pela rede privada e usa somente seu token Viewer montado como secret.
+- Grafana desligado retorna estado degradado controlado e não afeta outras APIs.
+- Todas as APIs selecionadas expõem `/metrics` internamente com namespace `rubrica_`, suporte multiprocess e labels de baixa cardinalidade.
+- Prometheus coleta os targets do Rúbrica; logs aparecem no Loki e traces chegam ao Tempo com correlação segura.
+- Dashboards e alertas exibem indicadores técnicos e de produto aprovados, sem acessar bancos operacionais pela Platform Infra.
+- Testes cobrem token ausente/inválido, DNS, timeout, 401/403, 429, 5xx, JSON inválido e plataforma desligada.
+- Testes verificam ausência de labels de alta cardinalidade, dados pessoais e secrets em métricas, logs e respostas.
+- Compose local e produção, migrations, lint, testes e smoke integrado passam com a plataforma ligada e desligada.
+- Existe runbook para criar/rotacionar/revogar o token Viewer, diagnosticar targets e operar o modo degradado.
+
 ## Próximas partes
 
-Acrescente aqui a Parte 6 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.
+Acrescente aqui a Parte 10 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.

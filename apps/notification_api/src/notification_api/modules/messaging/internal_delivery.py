@@ -79,7 +79,7 @@ def request_internal_delivery(
         return request_email_delivery(
             EmailMessage(
                 to=payload.recipient,
-                subject=payload.subject or "NexoDesk",
+                subject=payload.subject or "Rúbrica",
                 body=payload.content,
                 idempotency_key=payload.idempotency_key,
                 metadata=payload.metadata,

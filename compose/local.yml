@@ -37,6 +37,11 @@ services:
       file: ./services/eventing-api.yml
       service: local
 
+  observability-api:
+    extends:
+      file: ./services/observability-api.yml
+      service: local
+
   notification-api:
     extends:
       file: ./services/notification-api.yml
@@ -51,3 +56,8 @@ services:
     extends:
       file: ./services/k6.yml
       service: local
+
+networks:
+  platform_observability:
+    name: platform-observability
+    external: true

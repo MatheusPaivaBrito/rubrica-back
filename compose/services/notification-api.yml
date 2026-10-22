@@ -19,11 +19,17 @@ services:
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Rubrica <onboarding@resend.dev>}
       NOTIFICATION_INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_SERVICE_KEY:-rubrica-local-notification-key}
       NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: ${NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW:-auth_api,core_api,bootstrap}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     secrets:
       - resend_api_key
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      default:
+      platform_observability:
+        aliases: [rubrica-notification-api]
 
   production:
     build:
@@ -44,6 +50,8 @@ services:
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-Rubrica <no-reply@rubricasignature.com>}
       NOTIFICATION_INTERNAL_SERVICE_KEY_FILE: /run/secrets/notification_internal_service_key
       NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW: ${NOTIFICATION_INTERNAL_ALLOWED_SERVICES_RAW:-auth_api,core_api,bootstrap}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     secrets:
       - postgres_password
       - resend_api_key
@@ -52,5 +60,7 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - rubrica_internal
-      - rubrica_external
+      rubrica_internal:
+      rubrica_external:
+      platform_observability:
+        aliases: [rubrica-notification-api]

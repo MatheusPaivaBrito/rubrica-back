@@ -128,7 +128,7 @@ def _provider_for(
 
         email_payload = payload or {}
         return ResendEmailProvider(
-            subject=str(email_payload.get("subject") or "NexoDesk"),
+            subject=str(email_payload.get("subject") or "Rúbrica"),
             idempotency_key=str(email_payload.get("idempotency_key") or uuid4()),
         )
     if channel == "slack" and settings.SLACK_WEBHOOK_URL:

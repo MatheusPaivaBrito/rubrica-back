@@ -1,0 +1,21 @@
+FROM python:3.14-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/apps/observability_api/src:/app/packages/shared_kernel/src
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir poetry
+
+COPY pyproject.toml poetry.lock ./
+RUN poetry config virtualenvs.create false
+RUN poetry install --no-root
+
+COPY apps/observability_api ./apps/observability_api
+COPY packages ./packages
+RUN mkdir -p /tmp/prometheus-multiproc
+
+EXPOSE 8000
+
+CMD ["sh", "-c", "exec gunicorn observability_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${OBSERVABILITY_WEB_CONCURRENCY:-1} --access-logfile - --error-logfile -"]

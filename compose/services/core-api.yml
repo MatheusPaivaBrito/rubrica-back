@@ -5,7 +5,7 @@ services:
       dockerfile: apps/core_api/dockerfile
     ports:
       - "127.0.0.1:${CORE_API_HOST_PORT:-7102}:8000"
-    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
+    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
     environment:
       BILLING_PROVIDER: ${BILLING_PROVIDER:-fake}
       STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
@@ -63,6 +63,8 @@ services:
       EVIDENCE_SECRET: ${EVIDENCE_SECRET:-rubrica-development-evidence-secret-change-me}
       TENANT_IDENTITY_ENCRYPTION_KEY: ${TENANT_IDENTITY_ENCRYPTION_KEY:-rubrica-development-tenant-encryption-key-change-me}
       TENANT_IDENTITY_HMAC_KEY: ${TENANT_IDENTITY_HMAC_KEY:-rubrica-development-tenant-hmac-key-change-me}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     volumes:
       - ../../data/documents:/var/lib/rubrica/documents
       - stripe_webhook_runtime:/run/rubrica/stripe:ro
@@ -71,13 +73,17 @@ services:
       - stripe_webhook_secret
     depends_on:
       - postgres
+    networks:
+      default:
+      platform_observability:
+        aliases: [rubrica-core-api]
 
   production:
     build:
       context: ../..
       dockerfile: apps/core_api/dockerfile
     restart: unless-stopped
-    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
+    command: gunicorn core_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers ${CORE_WEB_CONCURRENCY:-2}
     environment:
       BILLING_PROVIDER: stripe
       STRIPE_SECRET_KEY_FILE: /run/secrets/stripe_secret_key
@@ -138,6 +144,8 @@ services:
       EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
       TENANT_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/tenant_identity_encryption_key
       TENANT_IDENTITY_HMAC_KEY_FILE: /run/secrets/tenant_identity_hmac_key
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     secrets:
       - postgres_password
       - evidence_secret
@@ -159,5 +167,7 @@ services:
       notification-api:
         condition: service_started
     networks:
-      - rubrica_internal
-      - rubrica_external
+      rubrica_internal:
+      rubrica_external:
+      platform_observability:
+        aliases: [rubrica-core-api]

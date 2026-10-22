@@ -1,0 +1,70 @@
+services:
+  local:
+    build:
+      context: ../..
+      dockerfile: apps/observability_api/dockerfile
+    ports:
+      - "127.0.0.1:${OBSERVABILITY_API_HOST_PORT:-7105}:8000"
+    environment:
+      APP_NAME: Rubrica Observability API
+      ENVIRONMENT: development
+      PLATFORM_GRAFANA_URL: ${PLATFORM_GRAFANA_URL:-http://grafana:3000}
+      PLATFORM_GRAFANA_TIMEOUT_SECONDS: ${PLATFORM_GRAFANA_TIMEOUT_SECONDS:-3}
+      OBSERVABILITY_INTERNAL_SERVICE_KEY: ${OBSERVABILITY_INTERNAL_SERVICE_KEY:-rubrica-local-observability-key}
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rubrica}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 5s
+    networks:
+      default:
+      platform_observability:
+        aliases: [rubrica-observability-api]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  production:
+    build:
+      context: ../..
+      dockerfile: apps/observability_api/dockerfile
+    restart: unless-stopped
+    environment:
+      APP_NAME: Rubrica Observability API
+      ENVIRONMENT: production
+      PLATFORM_GRAFANA_URL: ${PLATFORM_GRAFANA_URL:-http://grafana:3000}
+      PLATFORM_GRAFANA_TIMEOUT_SECONDS: ${PLATFORM_GRAFANA_TIMEOUT_SECONDS:-3}
+      PLATFORM_GRAFANA_SERVICE_TOKEN_FILE: /run/secrets/platform_grafana_service_token
+      OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE: /run/secrets/observability_internal_service_key
+      POSTGRES_USER: ${POSTGRES_USER:-rubrica}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
+    secrets:
+      - platform_grafana_service_token
+      - observability_internal_service_key
+      - postgres_password
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+      start_period: 5s
+    networks:
+      rubrica_internal:
+      platform_observability:
+        aliases: [rubrica-observability-api]
+    depends_on:
+      postgres:
+        condition: service_healthy

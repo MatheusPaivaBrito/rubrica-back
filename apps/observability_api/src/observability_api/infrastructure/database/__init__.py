@@ -1,0 +1,1 @@
+"""Observability API persistence boundary."""

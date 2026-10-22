@@ -13,9 +13,15 @@ services:
       EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
       EVENTING_DEFAULT_EVENT_TOPIC: ${EVENTING_DEFAULT_EVENT_TOPIC:-rubrica.events}
       EVENTING_DEAD_LETTER_TOPIC: ${EVENTING_DEAD_LETTER_TOPIC:-rubrica.events.dead_letter}
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      default:
+      platform_observability:
+        aliases: [rubrica-eventing-api]
 
   production:
     build:
@@ -31,10 +37,14 @@ services:
       EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
       EVENTING_DEFAULT_EVENT_TOPIC: rubrica.events
       EVENTING_DEAD_LETTER_TOPIC: rubrica.events.dead_letter
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://tempo:4318/v1/traces}
     secrets:
       - postgres_password
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - rubrica_internal
+      rubrica_internal:
+      platform_observability:
+        aliases: [rubrica-eventing-api]

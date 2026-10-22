@@ -37,8 +37,8 @@ fi
 
 if [[ "$include_databases" == "1" ]]; then
   case "$database_selector" in
-    all|core|auth|eventing|notification) ;;
-    *) echo "[error] Unknown database: $database_selector (use all, core, auth, eventing, or notification)" >&2; exit 2 ;;
+    all|core|auth|eventing|notification|observability) ;;
+    *) echo "[error] Unknown database: $database_selector (use all, core, auth, eventing, notification, or observability)" >&2; exit 2 ;;
   esac
   "${compose[@]}" ps --status running postgres >/dev/null
   "${compose[@]}" exec -T -e BACKUP_DATABASE_SELECTOR="$database_selector" postgres sh -ec '
@@ -52,6 +52,7 @@ if [[ "$include_databases" == "1" ]]; then
       auth) wanted=2 ;;
       eventing) wanted=3 ;;
       notification) wanted=4 ;;
+      observability) wanted=5 ;;
     esac
     selected=""
     position=1

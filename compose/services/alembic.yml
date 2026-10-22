@@ -9,7 +9,7 @@ services:
     command: [python, toolbox/database/migrate.py, all]
     environment:
       ENVIRONMENT: ${ENVIRONMENT:-development}
-      PYTHONPATH: .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:packages/shared_kernel/src
+      PYTHONPATH: .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/observability_api/src:packages/shared_kernel/src
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       POSTGRES_USER: ${POSTGRES_USER:-rubrica}
@@ -18,6 +18,7 @@ services:
       CORE_POSTGRES_DB: ${CORE_POSTGRES_DB:-rubrica_core}
       EVENTING_POSTGRES_DB: ${EVENTING_POSTGRES_DB:-rubrica_eventing}
       NOTIFICATION_POSTGRES_DB: ${NOTIFICATION_POSTGRES_DB:-rubrica_notification}
+      OBSERVABILITY_POSTGRES_DB: ${OBSERVABILITY_POSTGRES_DB:-rubrica_observability}
     depends_on:
       postgres:
         condition: service_healthy

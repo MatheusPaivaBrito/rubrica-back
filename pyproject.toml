@@ -26,6 +26,10 @@ dependencies = [
     "qrcode[pil] (>=8.2,<9.0)",
     "pyhanko (>=0.37.0,<0.38.0)",
     "boto3 (>=1.40,<2.0)",
+    "prometheus-client (>=0.23,<1.0)",
+    "opentelemetry-sdk (>=1.38,<2.0)",
+    "opentelemetry-exporter-otlp-proto-http (>=1.38,<2.0)",
+    "opentelemetry-instrumentation-fastapi (>=0.59b0,<1.0)",
 ]
 
 [tool.poetry]

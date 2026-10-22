@@ -13,7 +13,7 @@ KUBECTL ?= kubectl
 K8S_KIND_CLUSTER ?= rubrica
 K8S_NAMESPACE ?= rubrica
 
-TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/worker/src:packages/shared_kernel/src
+TEST_PYTHONPATH = .:apps/auth_api/src:apps/core_api/src:apps/eventing_api/src:apps/notification_api/src:apps/observability_api/src:apps/worker/src:packages/shared_kernel/src
 TEST_ENV = env -u DEBUG
 LOCAL_COMPOSE_FILE ?= compose/local.yml
 PRODUCTION_COMPOSE_FILE ?= compose/production.yml
@@ -31,7 +31,7 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help doctor test lint docs docs-build local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help doctor test lint docs docs-build ensure-observability-network ensure-local-databases ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rubrica"
@@ -71,7 +71,7 @@ help:
 	@echo "  sudo make production-reset-mfa email=EMAIL actor=EMAIL reason='...'"
 	@echo "  sudo make production-organize-r2-documents [apply=1] [delete_source=1]"
 	@echo "  make backup-all [environment=production]"
-	@echo "  make backup-database database=all|core|auth|eventing|notification [environment=production]"
+	@echo "  make backup-database database=all|core|auth|eventing|notification|observability [environment=production]"
 	@echo "  make backup-files [environment=production]"
 	@echo "  make backup-production  Alias for backup-all environment=production"
 	@echo "  sudo make backup-r2       Back up production databases and upload encrypted copy to R2"
@@ -87,11 +87,12 @@ help:
 	@echo ""
 	@echo "Database"
 	@echo "  Postgres and Redis are available only inside the Compose network"
-	@echo "  make migrate             Run all four databases in a one-shot container"
+	@echo "  make migrate             Run all five databases in a one-shot container"
 	@echo "  make migrate-all         Alias for make migrate"
 	@echo "  make migrate-core           Run Core Alembic migrations"
 	@echo "  make revision-core msg=create_domain"
 	@echo "  make migrate-auth           Run Auth Alembic migrations"
+	@echo "  make migrate-observability  Run Observability Alembic migrations"
 	@echo "  make seed-auth              Create the local signature administrator"
 	@echo "  make seed-local-users       Create 14 local test accounts across all implemented plans"
 	@echo "  make invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
@@ -130,7 +131,14 @@ doctor:
 
 	@echo "[ok] Poetry, Docker Compose, environment and project metadata are ready"
 
-local-config:
+ensure-observability-network:
+	@docker network inspect platform-observability >/dev/null 2>&1 || docker network create platform-observability >/dev/null
+
+ensure-local-databases: local-config
+	$(LOCAL_COMPOSE) up -d --wait postgres
+	$(LOCAL_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
+
+local-config: ensure-observability-network
 	$(LOCAL_COMPOSE) config --quiet
 
 local-start: local-config
@@ -178,11 +186,14 @@ migrate-eventing:
 migrate-notification:
 	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py notification
 
+migrate-observability: ensure-local-databases
+	$(LOCAL_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py observability
+
 revision-auth:
 	@test -n "$(msg)" || (echo "Usage: make revision-auth msg=create_users"; exit 2)
 	$(LOCAL_COMPOSE) exec -T auth-api alembic -c apps/auth_api/alembic.ini revision --autogenerate -m "$(msg)"
 
-migrate:
+migrate: ensure-local-databases
 	$(LOCAL_MAINTENANCE) run --rm --build alembic
 
 migrate-all: migrate
@@ -232,11 +243,15 @@ bootstrap:
 
 compose-down: local-down
 
-production-config:
+production-config: ensure-observability-network
 	python3 toolbox/checks/production_readiness.py $(PRODUCTION_ENV_FILE)
 	$(PRODUCTION_COMPOSE) config --quiet
 	@web_context="$$( $(PRODUCTION_COMPOSE) config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["web"]["build"]["context"])' )"; \
 		test -f "$$web_context/Dockerfile.prod" || (echo "[error] Frontend not found at $$web_context; set RUBRICA_WEB_CONTEXT=../../../rubrica-front in $(PRODUCTION_ENV_FILE)"; exit 1)
+
+ensure-production-databases: production-config
+	$(PRODUCTION_COMPOSE) up -d --wait postgres
+	$(PRODUCTION_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
 
 production-up: production-config
 	$(PRODUCTION_COMPOSE) up -d --build --wait
@@ -247,7 +262,7 @@ production-down:
 production-logs:
 	$(PRODUCTION_COMPOSE) logs -f --tail=100
 
-production-migrate:
+production-migrate: ensure-production-databases
 	$(PRODUCTION_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py $(or $(database),all)
 
 production-seed:

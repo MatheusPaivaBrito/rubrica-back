@@ -1,0 +1,1 @@
+"""Rubrica Observability API."""

@@ -1,6 +1,6 @@
 ---
 name: rubrica-document-datatables
-description: Planejar e implementar a evolução full stack do fluxo de documentos e assinaturas do Rúbrica, incluindo DataTables, carimbos, verificação opcional de identidade e notas de release. Use ao continuar esta feature, revisar seu escopo ou executar uma de suas partes.
+description: Planejar e implementar a evolução full stack do Rúbrica, incluindo DataTables, carimbos, verificação opcional de identidade, notas de release, fronteiras transacionais, CI integrado e observabilidade. Use ao continuar esta feature, revisar seu escopo ou executar uma de suas partes.
 ---
 
 # Evolução full stack de documentos e assinaturas
@@ -97,3 +97,13 @@ Antes de planejar ou alterar código, leia [references/feature-spec.md](referenc
 - Renderize os destaques como texto, nunca como HTML arbitrário. Limite quantidade e comprimento para manter o SweetAlert rápido de ler e adequado ao celular.
 - Use `event.latestVersion`, não a versão atualmente carregada, para evitar mostrar notas de uma release diferente daquela que será ativada.
 - “Mais tarde” adia apenas naquela sessão. Não marque a release como instalada/lida antes de `activateUpdate()` concluir; uma nova sessão pode oferecer novamente a atualização ainda pendente.
+
+## Observabilidade e Platform Infra
+
+- Trate a `observability_api` copiada do Nexo apenas como base: remova nomes, bancos, métricas e regras do Nexo antes de promover qualquer pacote a verificado.
+- Preserve a fronteira de responsabilidade: o Rúbrica autentica, autoriza e mantém memória operacional; Loki, Prometheus, Tempo, Grafana e Alloy pertencem à Platform Infra.
+- Faça o Rúbrica continuar operacional com a Platform Infra desligada. `health`, migrations e fluxos centrais não podem depender do Grafana.
+- Use conta de serviço Viewer exclusiva, token por Docker Secret, timeout curto e resposta degradada controlada. Nunca use credencial administrativa nem exponha Grafana pelo gateway.
+- Use namespace Prometheus `rubrica_`, templates de rota e labels de baixa cardinalidade. IDs, documentos, dados pessoais, requests e traces não podem virar labels.
+- Considere Gunicorn multiprocess na implementação de métricas e confirme o endpoint OTLP real antes de instrumentar traces.
+- Não aceite linguagens de consulta arbitrárias vindas do frontend. Toda consulta futura deve obedecer a contratos, permissões, limites, rate limiting e auditoria definidos pelo backend.
