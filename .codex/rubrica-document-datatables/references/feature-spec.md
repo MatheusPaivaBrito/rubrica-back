@@ -3,7 +3,7 @@
 ## Estado
 
 - Especificação em construção.
-- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9 e 10.
+- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 e 11.
 - Partes 1, 2, 3, 5, 6, 7 e 9 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas e Parte 10 reservada para revisão posterior.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
@@ -146,6 +146,17 @@ Regras:
 | 10F | Revisar backup, restauração, replicação e recuperação de desastre | infra/backend | 10A, 10B | `NÃO INICIADO` | Existem mecanismos de backup R2, mas o ciclo de restauração de documentos não foi comprovado nesta parte | Verificar cobertura, criptografia, credenciais separadas, RPO/RTO, teste de restore e perda parcial de banco ou objetos. |
 | 10G | Localizar objetos órfãos, referências quebradas e layouts legados | backend/infra | 10A–10C | `NÃO INICIADO` | Histórico já incluiu mudança de prefixo e migração de objetos | Definir auditoria somente leitura e reconciliação segura antes de qualquer correção ou remoção. |
 | 10H | Produzir relatório, matriz de riscos e plano mínimo de adequação | arquitetura/segurança | 10A–10G | `NÃO INICIADO` | Esta anotação define apenas o trabalho futuro | Separar fatos comprovados, hipóteses, riscos e mudanças recomendadas; nenhuma implementação automática. |
+
+### Parte 11 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 11A | Fechar modelo de documento, versão e rodadas encadeadas | produto/ambos | decisões desta Parte 11 | `NÃO INICIADO` | Escopo registrado em 2026-10-22; nenhum código alterado | Confirmar regras de seleção de pendentes, remoção e motivo obrigatório antes da implementação. |
+| 11B | Persistir encadeamento e criar nova rodada sem mutar a expirada | backend | 11A | `NÃO INICIADO` | Nenhuma migration ou endpoint criado | Definir `parent_request_id`, número da rodada, motivo, ator e instante da reabertura. |
+| 11C | Preservar assinaturas e selecionar o artefato-base correto | backend | 11A, 11B | `NÃO INICIADO` | Fluxo atual não possui reabertura | Partir do último PDF assinado válido quando houver assinaturas; caso contrário, reutilizar a mesma versão original. |
+| 11D | Interface de reabertura e histórico agrupado | frontend | 11B, 11C | `NÃO INICIADO` | Nenhum botão ou linha do tempo criado | Implementar modal, novo prazo, pendentes, novos signatários, motivo e histórico por rodada. |
+| 11E | Links, notificações e auditoria da nova rodada | ambos | 11B–11D | `NÃO INICIADO` | Contratos atuais atendem apenas a solicitação original | Gerar links novos somente para participantes da nova rodada e comunicar a reabertura sem alterar evidências antigas. |
+| 11F | Testes de integridade, permissões e múltiplas rodadas | ambos | 11B–11E | `NÃO INICIADO` | Nenhuma cobertura específica | Cobrir rodadas sem assinatura, parcialmente assinadas, novos signatários, conteúdo alterado e concorrência. |
 
 ## Parte 1 — tabelas e ordenação
 
@@ -959,6 +970,124 @@ O relatório da Parte 10 deve conter:
 - Nenhuma chamada paga, leitura de documento pessoal ou mutação em R2 ocorre sem autorização adicional.
 - O resultado final é uma auditoria acionável; nenhuma mudança de implementação é incluída nesta parte sem nova autorização.
 
+## Parte 11 — reabertura de processos de assinatura expirados
+
+### Decisão de arquitetura
+
+O recurso não reabre nem altera uma solicitação expirada. Ele cria uma **nova rodada de assinatura**, encadeada à anterior e pertencente à mesma versão do documento quando os bytes não forem modificados. A rodada anterior, seus eventos e suas evidências permanecem imutáveis.
+
+```text
+Documento original
+└── Versão do documento
+    ├── Rodada de assinatura 1 — expirada
+    └── Rodada de assinatura 2 — reaberta a partir da rodada 1
+```
+
+Alertas operacionais por e-mail não formam uma parte do plano do Rúbrica. Essa capacidade pertence à Platform Infra e ao futuro aplicativo de mensageria operacional da plataforma; a `notification_api` do Rúbrica permanece responsável pelas comunicações transacionais do produto.
+
+### Terminologia
+
+- **Documento original:** arquivo recebido por upload e preservado pelo Rúbrica.
+- **Versão do documento:** conjunto exato de bytes congelados e identificado por hash.
+- **Rodada de assinatura:** processo com prazo, participantes, links, estado e histórico próprios.
+- **Rodada reaberta:** nova rodada criada a partir de uma rodada expirada; não é um novo documento nem uma mutação da rodada anterior.
+- **Assinatura preservada:** assinatura válida produzida em rodada anterior sobre os mesmos bytes e referenciada historicamente, sem nova data ou nova declaração de vontade.
+
+Na interface, a ação deve se chamar **Reabrir para assinatura**. Evitar “reabrir documento” e “documento vencido” quando o que expirou foi a rodada.
+
+### Requisitos confirmados
+
+- Apenas uma rodada expirada pode originar a ação de reabertura.
+- A rodada expirada permanece imutável e consultável no histórico.
+- A reabertura cria novo identificador, novo prazo, novos links e novo histórico operacional.
+- A nova rodada registra a rodada pai, o motivo, o usuário responsável e a data/hora da ação.
+- O emissor escolhe quais signatários pendentes serão mantidos e pode adicionar novos signatários.
+- Signatários que já assinaram não recebem novo link por padrão e suas assinaturas não são recriadas nem redatadas.
+- Sem assinatura anterior, a nova rodada usa a mesma versão original do documento.
+- Com assinaturas válidas anteriores, a nova rodada parte do último PDF assinado válido e preserva incrementalmente as evidências criptográficas anteriores.
+- Cada nova assinatura produz sua própria evidência, autorização, consentimento e Carimbo do Tempo conforme o modo da nova rodada.
+- Alterar qualquer byte do conteúdo cria uma nova versão; assinaturas anteriores não podem ser apresentadas como assinaturas da versão nova.
+- O documento aparece como uma unidade na listagem, com a rodada atual e histórico das anteriores.
+- Filtros distinguem processos abertos, expirados, concluídos e reabertos sem duplicar fisicamente documentos.
+
+### Fluxo proposto
+
+1. O emissor abre uma rodada expirada e seleciona **Reabrir para assinatura**.
+2. O sistema apresenta assinaturas preserváveis, participantes pendentes e o aviso de imutabilidade da rodada anterior.
+3. O emissor define novo prazo, seleciona pendentes, adiciona participantes e informa o motivo.
+4. O backend valida autorização, estado expirado, versão/hash e integridade do último artefato assinado.
+5. Uma nova rodada é criada em rascunho e vinculada à rodada pai.
+6. O emissor revisa posições, personalização e participantes antes de abrir a nova rodada.
+7. Na abertura, links novos são emitidos somente para quem ainda precisa assinar.
+8. Novas assinaturas são aplicadas incrementalmente sem reescrever as preservadas.
+
+### Modelo mínimo de dados
+
+A implementação deve avaliar uma relação equivalente a:
+
+- `parent_request_id`: rodada imediatamente anterior;
+- `round_number`: sequência legível dentro da versão do documento;
+- `reopened_reason`: justificativa sanitizada e limitada;
+- `reopened_by`: identidade do ator autorizado;
+- `reopened_at`: instante auditável;
+- referência imutável ao artefato-base e seu hash;
+- relação explícita entre assinaturas preservadas e suas rodadas de origem.
+
+Não copie registros de assinatura para fingir que foram produzidos na rodada nova. A nova rodada referencia evidências anteriores e cria registros somente para novos eventos.
+
+### Interface e histórico
+
+A listagem principal deve agrupar por documento/versão e mostrar a rodada ativa mais recente, por exemplo:
+
+```text
+Contrato de prestação de serviços
+Versão 1 · Rodada 2 · Reaberta
+2 de 3 assinaturas
+```
+
+Os detalhes apresentam uma linha do tempo com número, estado, prazo, motivo, ator, assinaturas concluídas naquela rodada, assinaturas preservadas, participantes pendentes e participantes adicionados.
+
+O modal contém novo prazo, motivo obrigatório, seleção de pendentes, inclusão de novos signatários, resumo das assinaturas preservadas e aviso de que a rodada expirada não será alterada.
+
+### Regras de integridade e autorização
+
+- Revalidar permissão por tenant e objeto no backend; ocultar o botão não é controle suficiente.
+- Usar transação curta, lock e idempotência para impedir duas reaberturas concorrentes.
+- Não reutilizar tokens ou links da rodada expirada.
+- Não transportar consentimento, visualização, autenticação ou geolocalização de quem ainda precisará assinar.
+- Verificar o hash do artefato-base antes de criar e antes de abrir a nova rodada.
+- Preservar `signature_id`, evidência, CMS/PAdES e token de Carimbo do Tempo anteriores sem alterar bytes protegidos.
+- Auditar tentativa, sucesso, falha e eventual cancelamento da rodada nova.
+- Expiração ou reabertura não apaga evidências nem altera contadores históricos anteriores.
+
+### Casos que os testes devem cobrir
+
+- rodada expirada sem assinatura e parcialmente assinada;
+- preservação de uma ou várias assinaturas anteriores;
+- manutenção de pendentes, inclusão de novos signatários e exclusão consciente de um pendente;
+- tentativa de reabrir rodada aberta, concluída ou cancelada;
+- tentativa por usuário ou tenant não autorizado;
+- duas reaberturas concorrentes e retry idempotente;
+- links antigos revogados e links novos independentes;
+- prazo válido, inválido ou no passado;
+- alteração do PDF exigindo nova versão;
+- falha de hash ou artefato-base;
+- múltiplas reaberturas formando cadeia íntegra;
+- novas assinaturas sem invalidar assinaturas e timestamps anteriores;
+- agrupamento, filtros e linha do tempo no desktop e celular.
+
+### Critérios de aceitação da Parte 11
+
+- Nenhuma coluna ou evidência da rodada expirada é modificada pela reabertura.
+- A nova rodada possui vínculo inequívoco e navegável com sua origem.
+- Assinaturas anteriores permanecem verificáveis e não recebem nova data.
+- Novos signatários assinam exatamente o artefato-base apresentado e validado.
+- Modificação de conteúdo vira nova versão, nunca simples extensão de prazo.
+- Apenas participantes da nova rodada recebem links novos.
+- A listagem não duplica o documento como se cada rodada fosse outro upload.
+- Histórico e auditoria permitem reconstruir quem reabriu, por quê, quando e o que foi preservado.
+- Testes demonstram autorização, idempotência, concorrência, integridade e preservação das evidências.
+
 ## Próximas partes
 
-Acrescente aqui a Parte 11 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.
+Acrescente aqui a Parte 12 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.
