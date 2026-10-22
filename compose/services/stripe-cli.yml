@@ -1,6 +1,7 @@
 services:
   stripe-cli:
     image: stripe/stripe-cli:latest
+    profiles: ["stripe"]
     entrypoint: ["/bin/sh", "-ec"]
     command:
       - |

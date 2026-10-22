@@ -76,6 +76,12 @@ class SignatureRequestInput(BaseModel):
     expires_at: datetime
 
 
+class ReopenSignatureRequest(BaseModel):
+    expires_at: datetime
+    reason: str = Field(min_length=5, max_length=500)
+    pending_signer_ids: list[UUID] = Field(default_factory=list, max_length=200)
+
+
 class SignatureRequestRead(BaseModel):
     id: UUID
     document_id: UUID
@@ -94,6 +100,13 @@ class SignatureRequestRead(BaseModel):
     issuer_snapshot: dict[str, object] | None = None
     has_custom_stamp_placement: bool = False
     has_custom_stamp_branding: bool = False
+    parent_request_id: UUID | None = None
+    round_number: int = 1
+    reopened_reason: str | None = None
+    reopened_by: str | None = None
+    reopened_at: datetime | None = None
+    preserved_signature_count: int = 0
+    child_request_id: UUID | None = None
 
 
 class OpenSignatureRequest(BaseModel):

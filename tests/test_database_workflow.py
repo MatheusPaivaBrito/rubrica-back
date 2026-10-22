@@ -1,5 +1,6 @@
 import os
 from datetime import timedelta
+from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
 from uuid import uuid4
@@ -21,7 +22,7 @@ from core_api.modules.signature_request.signature_request_entity import (
     SignatureOperationEntity,
     SignatureRequestEntity,
 )
-from core_api.modules.signature_request.workflow_schema import RequestStatus, SignatureRequestCreate, SignerCreate, StampPosition
+from core_api.modules.signature_request.workflow_schema import ReopenSignatureRequest, RequestStatus, SignatureRequestCreate, SignerCreate, StampPosition
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from shared_kernel.time.datetime_service import DateTimeService
@@ -267,3 +268,66 @@ def test_database_workflow_round_trip(
             assert billing_account.free_signatures_limit == 5
     finally:
         pass
+
+
+def test_expired_request_reopens_as_immutable_round_with_signed_base(
+    tmp_path: Path, trusted_timestamp: dict[str, int]
+) -> None:
+    service = DatabaseSignatureWorkflowService(LocalDocumentStorage(tmp_path / "round-objects"))
+    organization = f"reopen-{uuid4()}"
+    with SessionLocal.begin() as db:
+        tenant = TenantEntity(name="Reopening test", slug=organization)
+        db.add(tenant)
+        db.flush()
+        db.add(TenantMemberEntity(tenant_id=tenant.id, auth_user_id="operator", role="admin"))
+        db.add(BillingAccountEntity(tenant_id=tenant.id, status="active", current_product_code="rubrica_base"))
+    source = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.write(source)
+    document = service.create_document(DocumentCreate(organization_id=organization, title="Round test", original_filename="round.pdf", content_type="application/pdf", created_by="operator"), source.getvalue())
+    first = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
+    service.add_signer(first.id, SignerCreate(name="Signed User", email="signed@example.com"), "operator")
+    pending = service.add_signer(first.id, SignerCreate(name="Pending User", email="pending@example.com"), "operator")
+    service.open_request(first.id, "operator")
+    token = service.create_signing_link(first.id, "operator").signing_url.rsplit("/", 1)[-1]
+    service.sign(token, "signed@example.com", True, StampPosition(page=1, x=0.5, y=0.5))
+    signed_bytes = service.signed_document(first.id, "operator")[2]
+    with SessionLocal.begin() as db:
+        persisted = db.get(SignatureRequestEntity, first.id)
+        assert persisted is not None
+        persisted.expires_at = DateTimeService.utc_now() - timedelta(minutes=1)
+
+    assert service.get_request(first.id, "operator").status == RequestStatus.EXPIRED
+    with pytest.raises(WorkflowError) as expired_link:
+        service.create_signing_link(first.id, "operator")
+    assert expired_link.value.status_code == 409
+    payload = ReopenSignatureRequest(
+        expires_at=DateTimeService.utc_now() + timedelta(days=2),
+        reason="Prazo solicitado pelo emissor",
+        pending_signer_ids=[pending.id],
+    )
+    reopened = service.reopen_request(first.id, "operator", payload)
+    duplicate = service.reopen_request(first.id, "operator", payload)
+
+    assert duplicate.id == reopened.id
+    assert reopened.parent_request_id == first.id
+    assert reopened.round_number == 2
+    assert reopened.preserved_signature_count == 1
+    assert reopened.status == RequestStatus.DRAFT
+    assert [item.email for item in service.list_signers(reopened.id, "operator")] == ["pending@example.com"]
+    with SessionLocal() as db:
+        unchanged = db.get(SignatureRequestEntity, first.id)
+        child = db.get(SignatureRequestEntity, reopened.id)
+        assert unchanged is not None and unchanged.status == RequestStatus.OPEN.value
+        assert child is not None and child.base_artifact_sha256 == sha256(signed_bytes).hexdigest()
+
+    service.open_request(reopened.id, "operator")
+    reopened_token = service.create_signing_link(reopened.id, "operator").signing_url.rsplit("/", 1)[-1]
+    metadata, presented = service.signing_document(reopened_token, "pending@example.com")
+    assert presented == signed_bytes
+    assert metadata.sha256 == sha256(signed_bytes).hexdigest()
+    service.sign(reopened_token, "pending@example.com", True, StampPosition(page=1, x=0.3, y=0.7))
+    final = service.signed_document(reopened.id, "operator")[2]
+    evidence = PdfReader(BytesIO(final)).metadata["/RubricaEvidenceJSON"]
+    assert evidence.count('"schema":"rubrica-signature-evidence-v1"') == 2

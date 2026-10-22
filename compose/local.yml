@@ -52,6 +52,24 @@ services:
       file: ./services/gateway.yml
       service: local
 
+  docs:
+    build:
+      context: ..
+      dockerfile: apps/core_api/dockerfile
+    command: sh -c "python -m toolbox.docs.local_accounts && mkdocs serve -f mkdocs.local.yml --dev-addr 0.0.0.0:8000"
+    working_dir: /app
+    volumes:
+      - ../:/app
+      - ../../rubrica-front:/rubrica-web:ro
+    ports:
+      - "127.0.0.1:${DOCS_HOST_PORT:-7190}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
   k6:
     extends:
       file: ./services/k6.yml

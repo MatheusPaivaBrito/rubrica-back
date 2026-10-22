@@ -124,8 +124,8 @@ lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
 docs:
-	poetry run python -m toolbox.docs.local_accounts
-	poetry run mkdocs serve -f mkdocs.local.yml --dev-addr 127.0.0.1:8000
+	$(LOCAL_COMPOSE) up -d --build --wait docs
+	@echo "[ok] Development docs available at http://127.0.0.1:$${DOCS_HOST_PORT:-7190}"
 
 docs-build:
 	poetry run python -m toolbox.docs.local_accounts
@@ -164,7 +164,7 @@ local-up: local-config
 	$(LOCAL_COMPOSE) up -d --build --wait
 
 local-up-stripe: local-config
-	$(LOCAL_COMPOSE) up -d --build --wait
+	$(LOCAL_COMPOSE) --profile stripe up -d --build --wait
 
 local-down:
 	$(LOCAL_COMPOSE) --profile "*" down --remove-orphans
@@ -181,7 +181,7 @@ local-rebuild:
 	$(LOCAL_COMPOSE) up -d --build --force-recreate --wait
 
 stripe-up:
-	$(LOCAL_COMPOSE) up -d stripe-cli
+	$(LOCAL_COMPOSE) --profile stripe up -d stripe-cli
 
 stripe-logs:
 	$(LOCAL_COMPOSE) logs -f --tail=100 stripe-cli

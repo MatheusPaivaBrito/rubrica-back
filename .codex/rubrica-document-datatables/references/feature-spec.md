@@ -151,12 +151,12 @@ Regras:
 
 | ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
 |---|---|---|---|---|---|---|
-| 11A | Fechar modelo de documento, versão e rodadas encadeadas | produto/ambos | decisões desta Parte 11 | `NÃO INICIADO` | Escopo registrado em 2026-10-22; nenhum código alterado | Confirmar regras de seleção de pendentes, remoção e motivo obrigatório antes da implementação. |
-| 11B | Persistir encadeamento e criar nova rodada sem mutar a expirada | backend | 11A | `NÃO INICIADO` | Nenhuma migration ou endpoint criado | Definir `parent_request_id`, número da rodada, motivo, ator e instante da reabertura. |
-| 11C | Preservar assinaturas e selecionar o artefato-base correto | backend | 11A, 11B | `NÃO INICIADO` | Fluxo atual não possui reabertura | Partir do último PDF assinado válido quando houver assinaturas; caso contrário, reutilizar a mesma versão original. |
-| 11D | Interface de reabertura e histórico agrupado | frontend | 11B, 11C | `NÃO INICIADO` | Nenhum botão ou linha do tempo criado | Implementar modal, novo prazo, pendentes, novos signatários, motivo e histórico por rodada. |
-| 11E | Links, notificações e auditoria da nova rodada | ambos | 11B–11D | `NÃO INICIADO` | Contratos atuais atendem apenas a solicitação original | Gerar links novos somente para participantes da nova rodada e comunicar a reabertura sem alterar evidências antigas. |
-| 11F | Testes de integridade, permissões e múltiplas rodadas | ambos | 11B–11E | `NÃO INICIADO` | Nenhuma cobertura específica | Cobrir rodadas sem assinatura, parcialmente assinadas, novos signatários, conteúdo alterado e concorrência. |
+| 11A | Fechar modelo de documento, versão e rodadas encadeadas | produto/ambos | decisões desta Parte 11 | `VERIFICADO` | Contrato exige motivo, nova validade e seleção dos pendentes; novos signatários entram no rascunho da rodada criada | Nenhum. |
+| 11B | Persistir encadeamento e criar nova rodada sem mutar a expirada | backend | 11A | `VERIFICADO` | Migration `0027`, autorrelacionamento único, número da rodada, endpoint idempotente e evento `signature_request.reopened`; teste PostgreSQL comprova que a rodada anterior não é alterada | Nenhum. |
+| 11C | Preservar assinaturas e selecionar o artefato-base correto | backend | 11A, 11B | `VERIFICADO` | Nova rodada referencia a última versão assinada por storage key e SHA-256, verifica os bytes antes de persistir e incorpora evidências ancestrais no PDF seguinte | Nenhum. |
+| 11D | Interface de reabertura e histórico agrupado | frontend | 11B, 11C | `VERIFICADO` | Dashboard oferece reabertura somente para solicitação expirada, modal de prazo/motivo/pendentes, abre o novo rascunho e agrupa o histórico de rodadas | Nenhum. |
+| 11E | Links, notificações e auditoria da nova rodada | ambos | 11B–11D | `VERIFICADO` | Solicitação expirada não gera novo link; a rodada reaberta usa novo nonce e o fluxo existente envia convites idempotentes aos pendentes quando o emissor gerar o link | Nenhum. |
+| 11F | Testes de integridade, permissões e múltiplas rodadas | ambos | 11B–11E | `IMPLEMENTADO` | Integração real PostgreSQL valida imutabilidade, idempotência, hash do artefato-base, preservação de duas evidências e bloqueio de link vencido; 303 testes unitários, 5 integrações e 61 testes frontend passaram | Acrescentar E2E visual da jornada completa quando houver navegador Playwright compatível; não bloqueia a implementação funcional. |
 
 ## Parte 1 — tabelas e ordenação
 

@@ -23,6 +23,14 @@ class SignatureRequestEntity(BaseEntity):
     issuer_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
     stamp_placements: Mapped[list[dict[str, object]] | None] = mapped_column(JSON)
     stamp_customization_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    parent_request_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("signature_requests.id", ondelete="RESTRICT"), unique=True, index=True)
+    round_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    reopened_reason: Mapped[str | None] = mapped_column(String(500))
+    reopened_by: Mapped[str | None] = mapped_column(String(255), index=True)
+    reopened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    base_artifact_storage_key: Mapped[str | None] = mapped_column(String(255))
+    base_artifact_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    preserved_signature_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class SignerEntity(BaseEntity):

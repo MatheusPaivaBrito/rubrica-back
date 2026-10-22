@@ -9,6 +9,7 @@ from core_api.infrastructure.content_disposition import pdf_content_disposition
 from core_api.modules.signature_request.workflow_schema import (
     AuditEventRead,
     OpenSignatureRequest,
+    ReopenSignatureRequest,
     SignCommand,
     SignatureRequestCreate,
     SignatureRequestInput,
@@ -136,6 +137,11 @@ async def open_request(request_id: UUID, payload: OpenSignatureRequest, context:
 @router.post("/signature-requests/{request_id}/cancel", response_model=SignatureRequestRead, tags=["signature requests - command"])
 async def cancel_request(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
     return workflow_service.cancel_request(request_id, context.subject)
+
+
+@router.post("/signature-requests/{request_id}/reopen", response_model=SignatureRequestRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
+async def reopen_request(request_id: UUID, payload: ReopenSignatureRequest, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignatureRequestRead:
+    return workflow_service.reopen_request(request_id, context.subject, payload)
 
 
 @router.get("/signature-requests/{request_id}/audit", response_model=list[AuditEventRead], tags=["audit - query"])

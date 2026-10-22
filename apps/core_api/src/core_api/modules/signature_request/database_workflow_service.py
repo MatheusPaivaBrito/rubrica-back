@@ -27,7 +27,7 @@ from core_api.modules.signature_request.signature_request_entity import AuditEve
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
 from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
-from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, ParticipantRole, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampConfiguration, StampCustomization, StampPosition
+from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, ParticipantRole, ReopenSignatureRequest, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampConfiguration, StampCustomization, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
@@ -225,6 +225,115 @@ class DatabaseSignatureWorkflowService:
             self._audit(db, item.id, payload.created_by, "signature_request.created", "signature_request", item.id, {"document_version": document.version, "document_sha256": document.sha256})
             return self._request_read(db, item)
 
+    def reopen_request(
+        self, request_id: str, actor_id: str, payload: ReopenSignatureRequest
+    ) -> SignatureRequestRead:
+        now = DateTimeService.utc_now()
+        if payload.expires_at <= now:
+            raise WorkflowError("Expiration must be in the future", 422)
+        reason = payload.reason.strip()
+        selected_ids = set(payload.pending_signer_ids)
+        with SessionLocal() as db:
+            parent = self._request(db, request_id)
+            self._require_request_access(db, parent, actor_id)
+            if parent.status != RequestStatus.OPEN.value or parent.expires_at > now:
+                raise WorkflowError("Only an expired signature request can be reopened", 409)
+            existing_child = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.parent_request_id == parent.id, SignatureRequestEntity.deleted_at.is_(None)))
+            if existing_child is not None:
+                return self._request_read(db, existing_child)
+            pending = list(db.scalars(select(SignerEntity).where(
+                SignerEntity.signature_request_id == parent.id,
+                SignerEntity.id.in_(selected_ids) if selected_ids else False,
+                SignerEntity.status != SignerStatus.SIGNED.value,
+            )).all())
+            if len(pending) != len(selected_ids):
+                raise WorkflowError("A selected pending signer is not available", 422)
+            current_signature_count = db.scalar(select(func.count()).select_from(SignatureEntity).where(SignatureEntity.signature_request_id == parent.id)) or 0
+            latest_signature = db.scalar(select(SignatureEntity).where(
+                SignatureEntity.signature_request_id == parent.id,
+                SignatureEntity.artifact_storage_key.is_not(None),
+            ).order_by(SignatureEntity.id.desc()).limit(1))
+            base_key = latest_signature.artifact_storage_key if latest_signature else parent.base_artifact_storage_key
+            base_digest = latest_signature.artifact_sha256 if latest_signature else parent.base_artifact_sha256
+            preserved_count = parent.preserved_signature_count + current_signature_count
+            parent_snapshot = {
+                "id": parent.id,
+                "document_id": parent.document_id,
+                "document_version": parent.document_version,
+                "document_sha256": parent.document_sha256,
+                "round_number": parent.round_number,
+                "issuer_snapshot": parent.issuer_snapshot,
+                "stamp_customization_snapshot": parent.stamp_customization_snapshot,
+            }
+            pending_snapshots = [
+                {
+                    "name": signer.name,
+                    "email": signer.email,
+                    "preferred_locale": signer.preferred_locale,
+                    "participant_role": signer.participant_role,
+                    "represented_tenant_id": signer.represented_tenant_id,
+                    "representation_snapshot": signer.representation_snapshot,
+                }
+                for signer in pending
+            ]
+        if base_key and base_digest:
+            with self.storage.get(base_key) as stream:
+                if sha256(stream.read()).hexdigest() != base_digest:
+                    raise WorkflowError("Previous signed artifact integrity check failed", 409)
+        with SessionLocal.begin() as db:
+            parent = self._request(db, request_id, lock=True)
+            self._require_request_access(db, parent, actor_id)
+            existing_child = db.scalar(select(SignatureRequestEntity).where(SignatureRequestEntity.parent_request_id == parent.id, SignatureRequestEntity.deleted_at.is_(None)))
+            if existing_child is not None:
+                return self._request_read(db, existing_child)
+            if parent.status != RequestStatus.OPEN.value or parent.expires_at > DateTimeService.utc_now():
+                raise WorkflowError("Signature request is no longer eligible for reopening", 409)
+            if parent.document_id != parent_snapshot["document_id"] or parent.document_version != parent_snapshot["document_version"] or parent.document_sha256 != parent_snapshot["document_sha256"]:
+                raise WorkflowError("Signature request changed during reopening", 409)
+            item = SignatureRequestEntity(
+                document_id=parent.document_id,
+                document_version=parent.document_version,
+                document_sha256=parent.document_sha256,
+                status=RequestStatus.DRAFT.value,
+                expires_at=payload.expires_at,
+                created_by=actor_id,
+                issuer_snapshot=parent_snapshot["issuer_snapshot"],
+                stamp_customization_snapshot=parent_snapshot["stamp_customization_snapshot"],
+                parent_request_id=parent.id,
+                round_number=int(parent_snapshot["round_number"]) + 1,
+                reopened_reason=reason,
+                reopened_by=actor_id,
+                reopened_at=now,
+                base_artifact_storage_key=base_key,
+                base_artifact_sha256=base_digest,
+                preserved_signature_count=preserved_count,
+            )
+            db.add(item)
+            db.flush()
+            for snapshot in pending_snapshots:
+                token = token_urlsafe(32)
+                db.add(SignerEntity(
+                    signature_request_id=item.id,
+                    auth_user_id=str(snapshot["email"]).lower(),
+                    name=snapshot["name"],
+                    email=snapshot["email"],
+                    preferred_locale=snapshot["preferred_locale"],
+                    signing_token_hash=sha256(token.encode()).hexdigest(),
+                    token_expires_at=payload.expires_at,
+                    status=SignerStatus.PENDING.value,
+                    participant_role=snapshot["participant_role"],
+                    represented_tenant_id=snapshot["represented_tenant_id"],
+                    representation_snapshot=snapshot["representation_snapshot"],
+                ))
+            self._audit(db, item.id, actor_id, "signature_request.reopened", "signature_request", item.id, {
+                "parent_request_id": str(parent.id),
+                "round_number": item.round_number,
+                "preserved_signature_count": preserved_count,
+                "pending_signer_count": len(pending_snapshots),
+            })
+            db.flush()
+            return self._request_read(db, item)
+
     def list_requests(self, actor_id: str) -> list[SignatureRequestRead]:
         with SessionLocal() as db:
             normalized_actor = actor_id.lower()
@@ -309,6 +418,8 @@ class DatabaseSignatureWorkflowService:
             self._require_request_access(db, request, actor_id)
             if request.status not in {RequestStatus.OPEN.value, RequestStatus.COMPLETED.value}:
                 raise WorkflowError("Only an open or completed request can receive a signing link", 409)
+            if request.status == RequestStatus.OPEN.value and request.expires_at <= DateTimeService.utc_now():
+                raise WorkflowError("Expired signature requests must be reopened before creating a signing link", 409)
             request.signing_token_nonce = token_urlsafe(24)
             token = self._request_token(request.id, request.signing_token_nonce)
             request.signing_token_hash = sha256(token.encode()).hexdigest()
@@ -474,11 +585,24 @@ class DatabaseSignatureWorkflowService:
             return self._signer_read(signer)
 
     def open_request(self, request_id: str, actor_id: str, signature_mode: SignatureMode = SignatureMode.EVIDENCE) -> SignatureRequestRead:
+        with SessionLocal() as db:
+            snapshot = self._request(db, request_id)
+            self._require_request_access(db, snapshot, actor_id)
+            base_key = snapshot.base_artifact_storage_key
+            base_digest = snapshot.base_artifact_sha256
+        if bool(base_key) != bool(base_digest):
+            raise WorkflowError("Signature round base artifact is incomplete", 409)
+        if base_key and base_digest:
+            with self.storage.get(base_key) as stream:
+                if sha256(stream.read()).hexdigest() != base_digest:
+                    raise WorkflowError("Signature round base artifact integrity check failed", 409)
         with SessionLocal.begin() as db:
             request = self._request(db, request_id, lock=True)
             self._require_request_access(db, request, actor_id)
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Only a draft request can be opened", 409)
+            if request.base_artifact_storage_key != base_key or request.base_artifact_sha256 != base_digest:
+                raise WorkflowError("Signature round base artifact changed", 409)
             signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id)) or 0
             if not signer_count:
                 raise WorkflowError("At least one signer is required", 409)
@@ -558,10 +682,13 @@ class DatabaseSignatureWorkflowService:
             if version is None:
                 raise WorkflowError("Document version not found", 404)
             metadata = self._version_read(version)
-            storage_key = version.storage_key
+            storage_key = request.base_artifact_storage_key or version.storage_key
+            expected_sha256 = request.base_artifact_sha256 or version.sha256
+            if request.base_artifact_sha256:
+                metadata = metadata.model_copy(update={"sha256": request.base_artifact_sha256})
         with self.storage.get(storage_key) as stream:
             content = stream.read()
-        if sha256(content).hexdigest() != metadata.sha256:
+        if sha256(content).hexdigest() != expected_sha256:
             raise WorkflowError("Stored document integrity check failed", 409)
         validate_pdf_upload(content, filename=metadata.original_filename, content_type="application/pdf")
         return metadata, content
@@ -724,6 +851,8 @@ class DatabaseSignatureWorkflowService:
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
             if version is None or version.sha256 != request.document_sha256:
                 raise WorkflowError("Document hash does not match the frozen request", 409)
+            input_storage_key = request.base_artifact_storage_key or version.storage_key
+            input_sha256 = request.base_artifact_sha256 or version.sha256
             document = db.get(DocumentEntity, request.document_id)
             if document is None or document.deleted_at is not None:
                 raise WorkflowError("Document not found", 404)
@@ -753,6 +882,7 @@ class DatabaseSignatureWorkflowService:
                 if active_representation is None:
                     raise WorkflowError("Company representation authorization is no longer active", 403)
             existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
+            inherited = self._ancestor_signatures(db, request)
             if operation is None:
                 evidence = self._signature_evidence(
                     request,
@@ -781,7 +911,7 @@ class DatabaseSignatureWorkflowService:
                     auth_user_id=auth_user_id.lower(),
                     status="processing",
                     document_version=request.document_version,
-                    document_sha256=request.document_sha256,
+                    document_sha256=input_sha256,
                     expected_signature_count=len(existing),
                     attempt_count=1,
                     lease_expires_at=now + timedelta(minutes=5),
@@ -800,7 +930,7 @@ class DatabaseSignatureWorkflowService:
                     {"attempt": 1},
                 )
             else:
-                if operation.document_version != request.document_version or operation.document_sha256 != request.document_sha256:
+                if operation.document_version != request.document_version or operation.document_sha256 != input_sha256:
                     raise WorkflowError("Signature operation no longer matches the frozen document", 409)
                 if operation.expected_signature_count != len(existing):
                     raise WorkflowError("Signature request changed while the operation was pending", 409)
@@ -821,8 +951,10 @@ class DatabaseSignatureWorkflowService:
                 )
             stamp_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in existing]
             stamp_records.append(evidence | {"evidence_sha256": evidence_hash})
-            manifest_hash = sha256("|".join(str(item["evidence_sha256"]) for item in stamp_records).encode()).hexdigest()
-            signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{str(item["subject_hmac_sha256"])[:16]}' for item in stamp_records)
+            inherited_records = [item.evidence_json | {"evidence_sha256": item.evidence_sha256 or evidence_sha256(item.evidence_json)} for item in inherited]
+            manifest_records = inherited_records + stamp_records
+            manifest_hash = sha256("|".join(str(item["evidence_sha256"]) for item in manifest_records).encode()).hexdigest()
+            signer_manifest = ";".join(f'{item["signer_name"]}|{item["signed_at"]}|{str(item["subject_hmac_sha256"])[:16]}' for item in manifest_records)
             metadata = {
                 "RubricaArtifactId": str(operation.id),
                 "RubricaRequestId": str(request.id),
@@ -833,14 +965,14 @@ class DatabaseSignatureWorkflowService:
                 "RubricaSignerManifest": signer_manifest,
                 "RubricaIdentityBindingHMACSHA256": str(evidence["identity_binding_hmac_sha256"]),
                 "RubricaLastSignedAt": str(evidence["signed_at"]),
-                "RubricaEvidenceJSON": canonical_json(stamp_records).decode("utf-8"),
+                "RubricaEvidenceJSON": canonical_json(manifest_records).decode("utf-8"),
             }
             return {
                 "operation_id": operation.id,
                 "artifact_ready": False,
                 "request_id": request.id,
-                "document_sha256": request.document_sha256,
-                "version_storage_key": version.storage_key,
+                "document_sha256": input_sha256,
+                "version_storage_key": input_storage_key,
                 "original_filename": version.original_filename,
                 "stamp_records": stamp_records,
                 "metadata": metadata,
@@ -898,7 +1030,8 @@ class DatabaseSignatureWorkflowService:
             if signer.status == SignerStatus.SIGNED.value:
                 raise WorkflowError("Signer has already signed", 409)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == operation.document_version))
-            if version is None or version.sha256 != operation.document_sha256 or request.document_sha256 != operation.document_sha256:
+            expected_input_sha256 = request.base_artifact_sha256 or request.document_sha256
+            if version is None or version.sha256 != request.document_sha256 or operation.document_sha256 != expected_input_sha256:
                 raise WorkflowError("Document changed before signature confirmation", 409)
             existing_count = db.scalar(select(func.count()).select_from(SignatureEntity).where(SignatureEntity.signature_request_id == request.id)) or 0
             if existing_count != operation.expected_signature_count:
@@ -1156,6 +1289,21 @@ class DatabaseSignatureWorkflowService:
         return item
 
     @staticmethod
+    def _ancestor_signatures(db, request: SignatureRequestEntity) -> list[SignatureEntity]:
+        ancestors: list[SignatureRequestEntity] = []
+        parent_id = request.parent_request_id
+        while parent_id is not None:
+            parent = db.get(SignatureRequestEntity, parent_id)
+            if parent is None:
+                raise WorkflowError("Signature round history is incomplete", 409)
+            ancestors.append(parent)
+            parent_id = parent.parent_request_id
+        signatures: list[SignatureEntity] = []
+        for ancestor in reversed(ancestors):
+            signatures.extend(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == ancestor.id).order_by(SignatureEntity.id)).all())
+        return signatures
+
+    @staticmethod
     def _require_request_access(db, request: SignatureRequestEntity, actor_id: str) -> None:
         document = db.get(DocumentEntity, request.document_id)
         if document is None:
@@ -1182,7 +1330,9 @@ class DatabaseSignatureWorkflowService:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
         signed_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id, SignerEntity.status == SignerStatus.SIGNED.value)) or 0
         document = db.get(DocumentEntity, item.document_id)
-        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=item.status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count, signed_count=signed_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot, has_custom_stamp_placement=bool(item.stamp_placements), has_custom_stamp_branding=bool(item.stamp_customization_snapshot))
+        effective_status = RequestStatus.EXPIRED.value if item.status == RequestStatus.OPEN.value and item.expires_at <= DateTimeService.utc_now() else item.status
+        child_request_id = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.parent_request_id == item.id, SignatureRequestEntity.deleted_at.is_(None)))
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=effective_status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count + item.preserved_signature_count, signed_count=signed_count + item.preserved_signature_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot, has_custom_stamp_placement=bool(item.stamp_placements), has_custom_stamp_branding=bool(item.stamp_customization_snapshot), parent_request_id=item.parent_request_id, round_number=item.round_number, reopened_reason=item.reopened_reason, reopened_by=item.reopened_by, reopened_at=item.reopened_at, preserved_signature_count=item.preserved_signature_count, child_request_id=child_request_id)
 
     @staticmethod
     def _document_read(db, x: DocumentEntity) -> DocumentRead:
