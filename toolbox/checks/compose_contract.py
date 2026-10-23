@@ -21,12 +21,15 @@ def validate(level: str, config: dict[str, object]) -> list[str]:
         if "cloudflared" not in services or "gateway" not in services:
             errors.append("production requires cloudflared and gateway")
     elif level == "staging":
-        forbidden = {"cloudflared", "docs", "stripe-cli", "seed"} & services.keys()
+        forbidden = {"cloudflared", "docs", "seed"} & services.keys()
         if forbidden:
             errors.append(f"staging contains forbidden services: {', '.join(sorted(forbidden))}")
         for name, service in services.items():
             if name != "gateway" and service.get("ports"):
                 errors.append(f"only staging gateway may publish a host port: {name}")
+        for required in ("gateway", "quick-tunnel", "stripe-cli"):
+            if required not in services:
+                errors.append(f"remote staging requires service: {required}")
     else:
         errors.append(f"unknown Compose contract: {level}")
     return errors

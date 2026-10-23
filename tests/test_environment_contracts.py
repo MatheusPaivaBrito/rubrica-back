@@ -26,8 +26,12 @@ def test_production_contract_rejects_host_ports_and_dev_tools() -> None:
 
 
 def test_staging_contract_allows_only_gateway_host_port() -> None:
-    assert validate("staging", {"services": {"gateway": {"ports": [{"published": "7271"}]}, "core-api": {}}}) == []
-    assert validate("staging", {"services": {"gateway": {}, "core-api": {"ports": [{"published": "8100"}]}}}) == [
+    edge = {"quick-tunnel": {}, "stripe-cli": {}}
+    assert validate(
+        "staging",
+        {"services": {"gateway": {"ports": [{"published": "7271"}]}, "core-api": {}, **edge}},
+    ) == []
+    assert validate("staging", {"services": {"gateway": {}, "core-api": {"ports": [{"published": "8100"}]}, **edge}}) == [
         "only staging gateway may publish a host port: core-api"
     ]
 

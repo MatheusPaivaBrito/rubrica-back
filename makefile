@@ -42,7 +42,7 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-public-url staging-stripe-logs staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rúbrica — comandos por ambiente"
@@ -64,13 +64,15 @@ help:
 	@echo ""
 	@echo "Staging — aplicação completa em Docker"
 	@echo "  make staging-secrets-init      Cria somente os secrets isolados de staging"
-	@echo "  make staging-bootstrap         Executa migrations, sobe tudo e roda o smoke"
-	@echo "  make staging-up                Sobe/reconstrói a stack sem migration ou seed"
+	@echo "  make staging-bootstrap         Executa migrations, seed, stack completa e smoke"
+	@echo "  make staging-up                Sobe stack, Quick Tunnel e Stripe CLI sem migration/seed"
 	@echo "  make staging-migrate           Aplica migrations nos cinco bancos de staging"
 	@echo "  make staging-seed              Cria/atualiza as mesmas contas de teste no staging"
 	@echo "  make staging-status            Exibe todos os contêineres"
 	@echo "  make staging-smoke             Valida stack e gateway"
 	@echo "  make staging-logs              Acompanha os logs"
+	@echo "  make staging-public-url        Mostra a URL pública emitida pelo Quick Tunnel"
+	@echo "  make staging-stripe-logs       Acompanha listener e webhooks Stripe test"
 	@echo "  make staging-down              Encerra preservando volumes"
 	@echo ""
 	@echo "Qualidade"
@@ -161,6 +163,13 @@ staging-status:
 staging-logs:
 	$(STAGING_COMPOSE) logs -f --tail=100
 
+staging-public-url:
+	@$(STAGING_COMPOSE) logs --no-color quick-tunnel | grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' | tail -n 1 || \
+		(echo "[error] Quick Tunnel ainda não emitiu uma URL; consulte 'make staging-logs'"; exit 2)
+
+staging-stripe-logs:
+	$(STAGING_COMPOSE) logs -f --tail=100 stripe-cli
+
 staging-migrate: staging-ensure
 	$(STAGING_COMPOSE) up -d --wait postgres
 	$(STAGING_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
@@ -171,8 +180,10 @@ staging-seed: staging-migrate
 
 staging-smoke: staging-ensure
 	$(STAGING_COMPOSE) ps --status running
+	@test -n "$$($(STAGING_COMPOSE) ps --services --status running quick-tunnel)" || (echo "[error] staging Quick Tunnel is not running"; exit 2)
+	@test -n "$$($(STAGING_COMPOSE) ps --services --status running stripe-cli)" || (echo "[error] staging Stripe CLI is not running"; exit 2)
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
-	@echo "[ok] staging gateway and containers are operational"
+	@echo "[ok] staging gateway, Quick Tunnel, Stripe CLI and containers are operational"
 
 staging-bootstrap: staging-seed
 	$(MAKE) --no-print-directory staging-up STAGING_ENV_FILE=$(STAGING_ENV_FILE)

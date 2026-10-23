@@ -21,8 +21,12 @@ def main() -> None:
         path = root / name
         if path.exists():
             continue
-        prefix = "sk_test_" if name == "stripe_secret_key" else "staging_"
-        path.write_text(prefix + secrets.token_urlsafe(48), encoding="utf-8")
+        value = (
+            "sk_test_staging_placeholder_replace_me"
+            if name == "stripe_secret_key"
+            else "staging_" + secrets.token_urlsafe(48)
+        )
+        path.write_text(value, encoding="utf-8")
         path.chmod(0o600)
         print(f"[created] {path}")
     print("[ok] staging-only secrets initialized; existing files were preserved")
