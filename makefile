@@ -158,6 +158,7 @@ staging-ensure: ensure-observability-network
 
 staging-up: staging-ensure
 	$(STAGING_COMPOSE) up -d --build --wait
+	@$(MAKE) --no-print-directory staging-public-url STAGING_ENV_FILE=$(STAGING_ENV_FILE)
 
 staging-down:
 	$(STAGING_COMPOSE) down --remove-orphans
@@ -169,8 +170,15 @@ staging-logs:
 	$(STAGING_COMPOSE) logs -f --tail=100
 
 staging-public-url:
-	@$(STAGING_COMPOSE) logs --no-color quick-tunnel | grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' | tail -n 1 || \
-		(echo "[error] Quick Tunnel ainda não emitiu uma URL; consulte 'make staging-logs'"; exit 2)
+	@base=""; attempt=0; \
+		while [ -z "$$base" ] && [ $$attempt -lt 20 ]; do \
+			base="$$($(STAGING_COMPOSE) logs --no-color quick-tunnel 2>/dev/null | grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' | tail -n 1)"; \
+			[ -n "$$base" ] || sleep 1; \
+			attempt=$$((attempt + 1)); \
+		done; \
+		test -n "$$base" || (echo "[error] Quick Tunnel ainda não emitiu uma URL; consulte 'make staging-logs'"; exit 2); \
+		echo "[ok] Rubrica staging: $$base"; \
+		echo "[ok] Contas de teste: $$base/test-accounts/"
 
 staging-docs-url:
 	@base="$$($(STAGING_COMPOSE) logs --no-color quick-tunnel | grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' | tail -n 1)"; \
