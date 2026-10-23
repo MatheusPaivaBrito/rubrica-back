@@ -5,7 +5,7 @@ import httpx
 from core_api.infrastructure.auth_context import AuthContext, authenticated_context
 from core_api.infrastructure.settings import settings
 from core_api.modules.signature_request.serproid_service import finish_authorization, start_authorization
-from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled
+from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled, timestamp_required
 from core_api.modules.signature_request.workflow_schema import SignCommand
 from core_api.modules.signature_request.workflow_service import WorkflowError
 
@@ -14,12 +14,13 @@ router = APIRouter(tags=["certificate signatures"])
 
 @router.get("/signing/serproid/config")
 def serproid_config() -> dict[str, bool]:
-    return {"enabled": bool(settings.SERPROID_CLIENT_ID and settings.SERPROID_CLIENT_SECRET)}
+    enabled = bool(settings.SERPROID_CLIENT_ID and settings.SERPROID_CLIENT_SECRET)
+    return {"enabled": enabled, "simulated": not enabled and settings.ENVIRONMENT.lower() != "production"}
 
 
 @router.get("/signing/timestamp/config")
 def timestamp_config() -> dict[str, bool]:
-    return {"enabled": timestamp_enabled()}
+    return {"enabled": timestamp_enabled(), "required": timestamp_required()}
 
 
 @router.post("/signing/links/{token}/serproid/start")

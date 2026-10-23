@@ -9,6 +9,8 @@ from io import BytesIO
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from core_api.infrastructure.settings import settings
+
 
 def _normalized_png_data_url(value: str | None) -> str | None:
     if value is None:
@@ -114,7 +116,7 @@ class OpenSignatureRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_trusted_timestamp(self) -> "OpenSignatureRequest":
-        if self.signature_mode == SignatureMode.EVIDENCE:
+        if settings.ENVIRONMENT.lower() == "production" and self.signature_mode == SignatureMode.EVIDENCE:
             raise ValueError("New signature requests require a SERPRO trusted timestamp")
         return self
 
@@ -155,6 +157,7 @@ class SignerRead(BaseModel):
     participant_role: ParticipantRole = ParticipantRole.EXTERNAL_SIGNER
     represented_tenant_id: UUID | None = None
     representation_snapshot: dict[str, object] | None = None
+    signature_mode: SignatureMode = SignatureMode.SERPRO_TIMESTAMP
 
 
 class SignerContactRead(BaseModel):
@@ -184,6 +187,7 @@ class StampPosition(BaseModel):
 
 class StampCustomization(BaseModel):
     template: Literal["standard", "business", "representative"] = "standard"
+    display_variant: Literal["full", "minimal"] = "full"
     primary_color: str = Field(default="#187A66", pattern=r"^#[0-9A-Fa-f]{6}$")
     show_logo: bool = False
     logo_png_data_url: str | None = Field(default=None, max_length=400_000)
@@ -198,6 +202,7 @@ class StampCustomization(BaseModel):
 class StampConfiguration(BaseModel):
     placements: list[StampPosition] = Field(default_factory=list, max_length=500)
     customization: StampCustomization | None = None
+    signer_signature_modes: dict[UUID, Literal["serpro_timestamp", "serproid"]] = Field(default_factory=dict)
 
 
 class ClientEvidence(BaseModel):

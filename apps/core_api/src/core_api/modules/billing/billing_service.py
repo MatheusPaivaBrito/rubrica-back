@@ -989,9 +989,14 @@ class BillingService:
         )
         return bool(
             account
-            and BillingService._normalize_product_code(account.current_product_code)
-            in {"rubrica_base", *BillingService.BUSINESS_PRODUCT_CODES}
-            and BillingService._paid_access_enabled(account)
+            and (
+                getattr(account, "complimentary_lifetime", False)
+                or (
+                    BillingService._normalize_product_code(account.current_product_code)
+                    in {"rubrica_base", *BillingService.BUSINESS_PRODUCT_CODES}
+                    and BillingService._paid_access_enabled(account)
+                )
+            )
         )
 
     @staticmethod

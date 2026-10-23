@@ -57,12 +57,10 @@ def start_authorization(token: str, subject: str, command: SignCommand, ip: str,
     if identity_summary(subject).identifier_type not in {"BR_CPF", "BR_CNPJ"}:
         raise WorkflowError("A Brazilian CPF or CNPJ is required for Serpro ID signing", 409)
     context = database_workflow_service.signing_context(token, subject)
-    if context.request.signature_mode != SignatureMode.SERPROID:
+    if context.signer.signature_mode != SignatureMode.SERPROID:
         raise WorkflowError("This request does not use Serpro ID", 409)
     if context.request.status != RequestStatus.OPEN or context.signer.status not in {SignerStatus.PENDING, SignerStatus.VIEWED}:
         raise WorkflowError("Signature request is not open", 409)
-    if context.request.signer_count - context.request.signed_count != 1:
-        raise WorkflowError("Certificate signing must be the final signature on this PDF", 409)
     state = token_urlsafe(32)
     verifier = token_urlsafe(64)
     challenge = base64.urlsafe_b64encode(sha256(verifier.encode()).digest()).rstrip(b"=").decode()
@@ -159,6 +157,7 @@ def finish_authorization(state: str, code: str | None, error: str | None, subjec
 
 
 async def _sign_pdf_with_serpro(unsigned_pdf: bytes, client: httpx.Client, access_token: str, certificate_der: bytes) -> bytes:
+    previous_signature_count = len(PdfFileReader(BytesIO(unsigned_pdf)).embedded_signatures)
     writer = IncrementalPdfFileWriter(BytesIO(unsigned_pdf))
     pdf_signer = signers.PdfSigner(
         signers.PdfSignatureMetadata(field_name=f"RubricaSerproID{uuid4().hex}", md_algorithm="sha256",
@@ -188,11 +187,11 @@ async def _sign_pdf_with_serpro(unsigned_pdf: bytes, client: httpx.Client, acces
     await PdfTBSDocument.async_finish_signing(output, digest, cms_object)
     result = output.getvalue()
     signatures_in_pdf = PdfFileReader(BytesIO(result)).embedded_signatures
-    if len(signatures_in_pdf) != 1:
+    if len(signatures_in_pdf) != previous_signature_count + 1:
         raise WorkflowError("PDF does not contain the expected certificate signature", 502)
-    if signatures_in_pdf[0].signer_cert.dump() != certificate_der:
+    if signatures_in_pdf[-1].signer_cert.dump() != certificate_der:
         raise WorkflowError("Signed PDF certificate differs from the authorized certificate", 502)
-    verification = await async_validate_pdf_signature(signatures_in_pdf[0])
+    verification = await async_validate_pdf_signature(signatures_in_pdf[-1])
     if not verification.intact or not verification.valid:
         raise WorkflowError("Certificate signature failed PDF verification", 502)
     return result

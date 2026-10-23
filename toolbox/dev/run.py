@@ -52,7 +52,10 @@ def main() -> None:
     env = {**read_env(env_file), **os.environ}
     env["PYTHONPATH"] = PYTHONPATH
     env.setdefault("DOCUMENT_STORAGE_PATH", str(ROOT / ".runtime" / "documents"))
-    env.setdefault("STRIPE_WEBHOOK_SECRET_FILE", str(ROOT / ".runtime" / "stripe" / "stripe_webhook_secret"))
+    if env.get("BILLING_PROVIDER") == "stripe":
+        env.setdefault("STRIPE_WEBHOOK_SECRET_FILE", str(ROOT / ".runtime" / "stripe" / "stripe_webhook_secret"))
+    else:
+        env.pop("STRIPE_WEBHOOK_SECRET_FILE", None)
     Path(env["DOCUMENT_STORAGE_PATH"]).mkdir(parents=True, exist_ok=True)
     processes: list[subprocess.Popen[bytes]] = []
     commands = [

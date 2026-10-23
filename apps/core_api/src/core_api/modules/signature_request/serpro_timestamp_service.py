@@ -29,6 +29,10 @@ def timestamp_enabled() -> bool:
     )
 
 
+def timestamp_required() -> bool:
+    return settings.ENVIRONMENT.lower() == "production"
+
+
 def _accepted_policy_oids() -> set[str]:
     return {
         value.strip()

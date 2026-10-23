@@ -2,6 +2,7 @@ LOCAL_ENV_FILE ?= .env
 DEV_ENV_FILE ?= $(LOCAL_ENV_FILE)
 STAGING_ENV_FILE ?= .env.staging
 PRODUCTION_ENV_FILE ?= .env.production
+DOCS_ENV_FILE ?= $(if $(wildcard $(DEV_ENV_FILE)),$(DEV_ENV_FILE),.env.example)
 -include $(LOCAL_ENV_FILE)
 export
 
@@ -26,6 +27,7 @@ PRODUCTION_R2_COMPOSE_FILE ?= compose/features/r2-documents.yml
 PRODUCTION_TIMESTAMP_COMPOSE_FILE ?= compose/features/serpro-timestamp.yml
 LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_FILE)
 DEV_COMPOSE = docker compose --env-file $(DEV_ENV_FILE) -f $(DEV_COMPOSE_FILE)
+DOCS_COMPOSE = docker compose --env-file $(DOCS_ENV_FILE) -f $(DEV_COMPOSE_FILE)
 STAGING_COMPOSE = docker compose --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE)
 PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
 LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
@@ -56,7 +58,7 @@ help:
 	@echo "  make dev-seed                  Cria/atualiza as contas locais de teste"
 	@echo ""
 	@echo "Ferramentas opcionais de desenvolvimento"
-	@echo "  make docs                      Valida .env e abre MkDocs em http://127.0.0.1:7190"
+	@echo "  make docs                      Abre MkDocs em http://127.0.0.1:7190 (.env é opcional)"
 	@echo "  make docs-logs                 Acompanha os logs do MkDocs"
 	@echo "  make stripe-up                 Inicia Stripe CLI"
 	@echo "  make quick-tunnel-up           Inicia Cloudflare Quick Tunnel"
@@ -216,15 +218,15 @@ lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
 docs:
-	@test -f "$(DEV_ENV_FILE)" || (echo "[error] $(DEV_ENV_FILE) não existe; execute 'cp .env.example $(DEV_ENV_FILE)' ou 'make dev-bootstrap'"; exit 2)
-	@$(DEV_COMPOSE) config --quiet || (echo "[error] $(DEV_ENV_FILE) ou o Compose de desenvolvimento é inválido"; exit 2)
-	$(DEV_COMPOSE) up -d --build --wait docs
+	@test -f "$(DOCS_ENV_FILE)" || (echo "[error] arquivo de ambiente do MkDocs não encontrado: $(DOCS_ENV_FILE)"; exit 2)
+	@$(DOCS_COMPOSE) config --quiet || (echo "[error] $(DOCS_ENV_FILE) ou o Compose do MkDocs é inválido"; exit 2)
+	$(DOCS_COMPOSE) up -d --build --wait docs
 	@echo "[ok] Development docs available at http://127.0.0.1:$${DOCS_HOST_PORT:-7190}"
 
 docs-up: docs
 
 docs-logs:
-	$(DEV_COMPOSE) logs -f --tail=100 docs
+	$(DOCS_COMPOSE) logs -f --tail=100 docs
 
 telemetry-up:
 	DEV_ENV_FILE=$(DEV_ENV_FILE) poetry run python toolbox/dev/dependencies.py loki

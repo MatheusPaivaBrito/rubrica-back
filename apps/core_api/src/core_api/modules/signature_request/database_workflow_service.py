@@ -494,6 +494,7 @@ class DatabaseSignatureWorkflowService:
             return StampConfiguration(
                 placements=request.stamp_placements or [],
                 customization=request.stamp_customization_snapshot,
+                signer_signature_modes={item.id: item.signature_mode for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all()},
             )
 
     def save_stamp_configuration(
@@ -526,6 +527,8 @@ class DatabaseSignatureWorkflowService:
             signer_ids = set(db.scalars(select(SignerEntity.id).where(
                 SignerEntity.signature_request_id == request.id
             )).all())
+            if set(payload.signer_signature_modes) - signer_ids:
+                raise WorkflowError("Every signature mode must belong to a request signer", 422)
             positions = sorted(payload.placements, key=lambda item: (item.order, item.page))
             for position in positions:
                 if position.signer_id not in signer_ids:
@@ -537,8 +540,10 @@ class DatabaseSignatureWorkflowService:
                 raise WorkflowError("Professional business plan with CNPJ required for stamp branding", 403)
             request.stamp_placements = [item.model_dump(mode="json") for item in positions] or None
             request.stamp_customization_snapshot = payload.customization.model_dump(mode="json") if payload.customization else None
+            for signer in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all():
+                signer.signature_mode = payload.signer_signature_modes.get(signer.id, SignatureMode.SERPRO_TIMESTAMP.value)
             self._audit(db, request.id, actor_id, "signature_request.stamp_configuration_saved", "signature_request", request.id, {"position_count": len(positions), "customized": payload.customization is not None})
-            return StampConfiguration(placements=positions, customization=payload.customization)
+            return StampConfiguration(placements=positions, customization=payload.customization, signer_signature_modes={item.id: item.signature_mode for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all()})
 
     def tenant_stamp_customization(
         self, tenant_id: UUID, actor_id: str
@@ -603,21 +608,18 @@ class DatabaseSignatureWorkflowService:
                 raise WorkflowError("Only a draft request can be opened", 409)
             if request.base_artifact_storage_key != base_key or request.base_artifact_sha256 != base_digest:
                 raise WorkflowError("Signature round base artifact changed", 409)
-            signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id)) or 0
-            if not signer_count:
+            signers = db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all()
+            if not signers:
                 raise WorkflowError("At least one signer is required", 409)
-            if signature_mode in {SignatureMode.SERPRO_TIMESTAMP, SignatureMode.SERPROID}:
-                from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled
-                if not timestamp_enabled():
-                    raise WorkflowError("SERPRO timestamp is not configured", 409)
-            if signature_mode == SignatureMode.SERPROID:
-                if not settings.SERPROID_CLIENT_ID or not settings.SERPROID_CLIENT_SECRET:
+            from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled, timestamp_required
+            if timestamp_required() and not timestamp_enabled():
+                raise WorkflowError("SERPRO timestamp is not configured", 409)
+            serproid_signers = [signer for signer in signers if signer.signature_mode == SignatureMode.SERPROID.value]
+            if serproid_signers:
+                if timestamp_required() and (not settings.SERPROID_CLIENT_ID or not settings.SERPROID_CLIENT_SECRET):
                     raise WorkflowError("Serpro ID is not configured", 409)
-                if signer_count != 1:
-                    raise WorkflowError("Serpro ID requests currently require exactly one signer", 409)
-                signer = db.scalar(select(SignerEntity).where(SignerEntity.signature_request_id == request.id).limit(1))
-                if signer is None or identity_summary(signer.email).identifier_type not in {"BR_CPF", "BR_CNPJ"}:
-                    raise WorkflowError("The Serpro ID signer must have a Brazilian CPF or CNPJ", 409)
+                if any(identity_summary(signer.email).identifier_type not in {"BR_CPF", "BR_CNPJ"} for signer in serproid_signers):
+                    raise WorkflowError("Every Serpro ID signer must have a Brazilian CPF or CNPJ", 409)
             document = self._document(db, str(request.document_id))
             if request.stamp_placements and not billing_service.custom_stamp_placement_enabled(db, document.tenant_id):
                 raise WorkflowError("Active paid plan required for custom stamp placement", 403)
@@ -738,22 +740,17 @@ class DatabaseSignatureWorkflowService:
                 filename=prepared["original_filename"],
                 content_type="application/pdf",
             )
-            if certificate_signer is not None:
-                from pyhanko.pdf_utils.reader import PdfFileReader
-
-                if PdfFileReader(BytesIO(original)).embedded_signatures:
-                    raise WorkflowError("Uploaded PDF already has certificate signatures; this workflow cannot rewrite it safely", 409)
             artifact = generate_signed_pdf(
                 original,
-                stamps=prepared["stamp_records"],
+                stamps=prepared["stamp_records"][-1:],
                 metadata=prepared["metadata"],
             )
             if certificate_signer is not None:
                 artifact = certificate_signer(artifact)
-            from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
+            from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp, timestamp_required
 
             artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
-            if trusted_timestamp is None:
+            if trusted_timestamp is None and timestamp_required():
                 raise WorkflowError("SERPRO timestamp is required for every signature", 503)
             artifact_hash = sha256(artifact).hexdigest()
             artifact_key, _ = self.storage.put(
@@ -838,16 +835,13 @@ class DatabaseSignatureWorkflowService:
                     409,
                     code="signature_request_busy",
                 )
-            if request.signature_mode == SignatureMode.SERPROID.value and not certificate_required:
+            if signer.signature_mode == SignatureMode.SERPROID.value and not certificate_required and settings.ENVIRONMENT.lower() == "production":
                 raise WorkflowError("This request requires a Serpro ID certificate signature", 409)
-            if request.signature_mode != SignatureMode.SERPROID.value and certificate_required:
+            if signer.signature_mode != SignatureMode.SERPROID.value and certificate_required:
                 raise WorkflowError("This request does not accept a Serpro ID certificate signature", 409)
             if certificate_required:
                 if signer.status not in {SignerStatus.PENDING.value, SignerStatus.VIEWED.value}:
                     raise WorkflowError("Signer cannot authorize a certificate signature in the current state", 409)
-                remaining = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == request.id, SignerEntity.status != SignerStatus.SIGNED.value))
-                if remaining != 1:
-                    raise WorkflowError("Certificate signing must be the final signature on this PDF", 409)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
             if version is None or version.sha256 != request.document_sha256:
                 raise WorkflowError("Document hash does not match the frozen request", 409)
@@ -901,7 +895,7 @@ class DatabaseSignatureWorkflowService:
                     customization,
                     drawn_signature_png_data_url,
                 )
-                evidence["signature_mode"] = request.signature_mode
+                evidence["signature_mode"] = signer.signature_mode
                 if certificate_info is not None:
                     evidence["certificate_signature"] = certificate_info
                 evidence_hash = evidence_sha256(evidence)
@@ -1347,7 +1341,7 @@ class DatabaseSignatureWorkflowService:
 
     @staticmethod
     def _signer_read(x: SignerEntity) -> SignerRead:
-        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, preferred_locale=x.preferred_locale, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at, participant_role=x.participant_role, represented_tenant_id=x.represented_tenant_id, representation_snapshot=x.representation_snapshot)
+        return SignerRead(id=x.id, signature_request_id=x.signature_request_id, auth_user_id=x.auth_user_id, name=x.name, email=x.email, preferred_locale=x.preferred_locale, status=x.status, token_expires_at=x.token_expires_at, link_revoked_at=x.link_revoked_at, signed_at=x.signed_at, participant_role=x.participant_role, represented_tenant_id=x.represented_tenant_id, representation_snapshot=x.representation_snapshot, signature_mode=x.signature_mode)
 
     @staticmethod
     def _signing_url(request_id: str) -> str:

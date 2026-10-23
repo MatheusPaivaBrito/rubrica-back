@@ -31,11 +31,10 @@ def generate_signed_pdf(
     stamps: list[dict[str, Any]],
     metadata: dict[str, str],
 ) -> bytes:
-    reader = PdfReader(BytesIO(original))
-    writer = PdfWriter()
-    for page_number, page in enumerate(reader.pages, start=1):
-        writer.add_page(page)
-        output_page = writer.pages[-1]
+    source = BytesIO(original)
+    reader = PdfReader(source)
+    writer = PdfWriter(source, incremental=True)
+    for page_number, output_page in enumerate(writer.pages, start=1):
         page_stamps: list[dict[str, Any]] = []
         for item in stamps:
             for position in item.get("stamp_positions") or [item["stamp"]]:
@@ -73,6 +72,12 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     canvas = Canvas(stream, pagesize=(width, height), pageCompression=1)
     canvas.setFillColor(white)
     customization = item.get("stamp_customization") or {}
+    minimal = customization.get("display_variant") == "minimal"
+    if minimal:
+        box_width = min(box_width, 210.0)
+        box_height = 42.0
+        left = min(max(4.0, center_x - box_width / 2), width - box_width - 4.0)
+        bottom = min(max(4.0, center_y - box_height / 2), height - box_height - 4.0)
     primary_color = str(customization.get("primary_color") or "#187A66")
     canvas.setStrokeColor(HexColor(primary_color))
     canvas.setLineWidth(1.5)
@@ -85,7 +90,7 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
         _draw_country_flag(
             canvas,
             left + box_width - flag_width - 6,
-            bottom + 49,
+            bottom + (9 if minimal else 49),
             country_code,
         )
     locale = str(stamp.get("locale", "en"))
@@ -101,18 +106,20 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     text_width = box_width - flag_width - 16
     canvas.setFont(bold_font, 7 if japanese else 6)
     content_offset = 24.0 if company_representation else 0.0
-    canvas.drawString(left + 7, bottom + 58 + content_offset, _fit_text(label, bold_font, 7 if japanese else 6, text_width))
+    label_y = bottom + (25 if minimal else 58 + content_offset)
+    canvas.drawString(left + 7, label_y, _fit_text(label, bold_font, 7 if japanese else 6, text_width))
     canvas.setFont(bold_font, 9)
-    canvas.drawString(left + 7, bottom + 43 + content_offset, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
+    name_y = bottom + (10 if minimal else 43 + content_offset)
+    canvas.drawString(left + 7, name_y, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
     identity_type = str(item.get("identity_document_type") or "").replace("BR_", "").replace("PT_", "")
     identity_masked = str(item.get("identity_document_masked") or "")
     identity_prefix = _alpha3_country_code(identity_country)
     identity_value = f"{identity_type}: {identity_masked}" if identity_type and identity_masked else ""
     identity_text = " · ".join(value for value in (identity_prefix, identity_value) if value)
     canvas.setFont(regular_font, 7)
-    if identity_text:
+    if identity_text and not minimal:
         canvas.drawString(left + 7, bottom + 30 + content_offset, _fit_text(identity_text, regular_font, 7, box_width - 14))
-    if company_representation:
+    if company_representation and not minimal:
         legal_name = str(
             representation.get("legal_name")
             or representation.get("display_name")
@@ -129,8 +136,9 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     evidence_label = {"pt-BR": "evidência", "en": "evidence", "es": "evidencia", "ja-JP": "証拠"}.get(locale, "evidence")
     timezone = str(stamp.get("timezone", "UTC"))[:32]
     canvas.setFont(regular_font, 6.5)
-    canvas.drawString(left + 7, bottom + 18, _fit_text(f'{item["signed_at"]} · {timezone}', regular_font, 6.5, box_width - 14))
-    canvas.drawString(left + 7, bottom + 7, _fit_text(f'{evidence_label}: {item["evidence_sha256"][:16]}', regular_font, 6.5, box_width - 14))
+    if not minimal:
+        canvas.drawString(left + 7, bottom + 18, _fit_text(f'{item["signed_at"]} · {timezone}', regular_font, 6.5, box_width - 14))
+        canvas.drawString(left + 7, bottom + 7, _fit_text(f'{evidence_label}: {item["evidence_sha256"][:16]}', regular_font, 6.5, box_width - 14))
     for data_url, image_left in (
         (customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - 42),
         (item.get("drawn_signature_png_data_url"), left + box_width * 0.55),

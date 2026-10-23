@@ -52,6 +52,7 @@ class SignerEntity(BaseEntity):
     participant_role: Mapped[str] = mapped_column(String(32), nullable=False, default="external_signer", server_default="external_signer", index=True)
     represented_tenant_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), index=True)
     representation_snapshot: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    signature_mode: Mapped[str] = mapped_column(String(30), nullable=False, default="serpro_timestamp", server_default="serpro_timestamp")
 
 
 class SignatureEntity(BaseEntity):
