@@ -8,14 +8,17 @@ from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONA
 
 
 def main() -> None:
-    if os.getenv("ENVIRONMENT", "development").lower() not in {"local", "development"}:
-        raise RuntimeError("Account documentation is exclusive to local development")
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    if environment not in {"local", "development", "staging"}:
+        raise RuntimeError("Account documentation is exclusive to development and staging")
+    environment_label = "STAGING" if environment == "staging" else "AMBIENTE LOCAL"
+    account_title = "Contas de staging" if environment == "staging" else "Contas de desenvolvimento"
     raw_password = os.getenv("LOCAL_TEST_ACCOUNT_PASSWORD", "RubricaLocal123!")
     password = html.escape(raw_password)
     lines = [
         '<section class="accounts-hero">',
-        '<span class="eyebrow">AMBIENTE LOCAL</span>',
-        "# Contas de desenvolvimento",
+        f'<span class="eyebrow">{environment_label}</span>',
+        f"# {account_title}",
         "<p>Copie uma conta completa e cole no primeiro campo do login do Rubrica.</p>",
         f'<div class="summary"><strong>5 tenants</strong><span>14 contas</span><code>{password}</code></div>',
         "</section>",

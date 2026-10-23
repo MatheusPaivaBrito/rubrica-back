@@ -28,10 +28,36 @@ services:
     extends: {file: ./services/notification-api.yml, service: production}
   web:
     extends: {file: ./services/web.yml, service: production}
+  docs:
+    build:
+      context: ..
+      dockerfile: apps/core_api/dockerfile
+    restart: unless-stopped
+    command: sh -c "python -m toolbox.docs.local_accounts && mkdocs serve -f mkdocs.local.yml --dev-addr 0.0.0.0:8000"
+    working_dir: /app
+    environment:
+      ENVIRONMENT: staging
+      LOCAL_TEST_ACCOUNT_PASSWORD: ${LOCAL_TEST_ACCOUNT_PASSWORD:-RubricaLocal123!}
+    volumes:
+      - ../:/app
+      - ${RUBRICA_WEB_CONTEXT:-../../../rubrica-front}:/rubrica-web:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - rubrica_internal
   gateway:
     extends: {file: ./services/gateway.yml, service: production}
     ports:
       - "127.0.0.1:${STAGING_GATEWAY_HOST_PORT:-7271}:8080"
+    volumes:
+      - ../infra/gateway/nginx.staging.conf:/etc/nginx/conf.d/default.conf:ro
+      - ../infra/gateway/proxy_params:/etc/nginx/proxy_params:ro
+    depends_on:
+      docs:
+        condition: service_healthy
     networks:
       - rubrica_internal
       - rubrica_external

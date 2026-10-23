@@ -21,7 +21,7 @@ def validate(level: str, config: dict[str, object]) -> list[str]:
         if "cloudflared" not in services or "gateway" not in services:
             errors.append("production requires cloudflared and gateway")
     elif level == "staging":
-        forbidden = {"cloudflared", "docs", "seed"} & services.keys()
+        forbidden = {"cloudflared", "seed"} & services.keys()
         if forbidden:
             errors.append(f"staging contains forbidden services: {', '.join(sorted(forbidden))}")
         for name, service in services.items():
