@@ -7,6 +7,9 @@ from pathlib import Path
 from toolbox.checks.production_readiness import read_env
 
 
+ROOT = Path(__file__).resolve().parents[2]
+COMPOSE_ROOT = ROOT / "compose"
+
 REQUIRED_SECRETS = (
     "postgres_password", "auth_seed_admin_password", "auth_mfa_encryption_key",
     "auth_identity_encryption_key", "auth_identity_hmac_key",
@@ -16,6 +19,11 @@ REQUIRED_SECRETS = (
     "serproid_client_secret", "platform_grafana_service_token",
     "observability_internal_service_key",
 )
+
+
+def staging_secrets_dir(value: str) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else (COMPOSE_ROOT / path).resolve()
 
 
 def main() -> int:
@@ -31,7 +39,7 @@ def main() -> int:
         errors.append("staging must use local document storage")
     if values.get("BILLING_PROVIDER") != "fake":
         errors.append("staging must use the fake billing provider by default")
-    secrets_dir = Path(values.get("SECRETS_DIR", ".secrets/staging"))
+    secrets_dir = staging_secrets_dir(values.get("SECRETS_DIR", "../.secrets/staging"))
     for name in REQUIRED_SECRETS:
         path = secrets_dir / name
         if not path.is_file() or not path.read_text(encoding="utf-8").strip():

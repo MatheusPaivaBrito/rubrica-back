@@ -21,15 +21,20 @@ def main() -> None:
         "</section>",
         '<p class="local-note">Contas confirmadas pelo seed, sem Microsoft Authenticator. '
         "No login, cole no campo de e-mail: o Rubrica separa e-mail e senha automaticamente.</p>",
-        '<section class="plan-card seed-commands"><h2>Recriar o ambiente local</h2>',
-        '<p>Para apagar os bancos locais, reaplicar todas as migrações, executar o seed e subir o Rubrica novamente:</p>',
-        '<div class="seed-command"><code>make local-reset</code><button type="button" '
-        'data-copy-command="make local-reset">Copiar comando</button></div>',
-        '<p><strong>Esse comando apaga todos os dados dos volumes locais.</strong> Ele é bloqueado quando '
-        '<code>environment=production</code>.</p>',
-        '<p>Para apenas reaplicar o seed sem apagar os cenários existentes:</p>',
-        '<div class="seed-command"><code>make seed-local-users</code><button type="button" '
-        'data-copy-command="make seed-local-users">Copiar comando</button></div>',
+        '<section class="plan-card seed-commands"><h2>Preparar contas de teste</h2>',
+        '<p>Na primeira preparação do desenvolvimento, crie a configuração, aplique migrations, '
+        'execute o seed e inicie o Rubrica:</p>',
+        '<div class="seed-command"><code>make dev-bootstrap</code><button type="button" '
+        'data-copy-command="make dev-bootstrap">Copiar comando</button></div>',
+        '<p>Para reaplicar apenas as mesmas fixtures no banco de desenvolvimento:</p>',
+        '<div class="seed-command"><code>make dev-seed</code><button type="button" '
+        'data-copy-command="make dev-seed">Copiar comando</button></div>',
+        '<p>O bootstrap de staging aplica migrations, executa o mesmo catálogo no banco isolado e '
+        'sobe a stack completa. O seed nunca é habilitado em produção.</p>',
+        '<div class="seed-command"><code>make staging-bootstrap</code><button type="button" '
+        'data-copy-command="make staging-bootstrap">Copiar comando</button></div>',
+        '<div class="seed-command"><code>make staging-seed</code><button type="button" '
+        'data-copy-command="make staging-seed">Copiar comando</button></div>',
         '</section>',
     ]
     for title, accounts in (("Gratuito — 1 conta", ACCOUNTS[:1]),

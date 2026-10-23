@@ -132,8 +132,8 @@ services:
       CONTACT_INBOX_EMAIL: ${CONTACT_INBOX_EMAIL:-contact@rubricasignature.com}
       CONTACT_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
       CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
-      SIGNING_APP_URL: https://${RUBRICA_DOMAIN:-rubricasignature.com}/signing
-      PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:-rubricasignature.com}
+      SIGNING_APP_URL: ${SIGNING_APP_URL:-https://rubricasignature.com/signing}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://rubricasignature.com}
       SERPROID_CLIENT_ID: ${SERPROID_CLIENT_ID:-}
       SERPROID_ENVIRONMENT: ${SERPROID_ENVIRONMENT:-production}
       SERPROID_CLIENT_SECRET_FILE: /run/secrets/serproid_client_secret

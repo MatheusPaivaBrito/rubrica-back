@@ -34,6 +34,7 @@ DEV_MAINTENANCE = $(DEV_COMPOSE) -f compose/services/alembic.yml
 DEV_SEED = $(DEV_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 STAGING_MAINTENANCE = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
+STAGING_SEED = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f compose/services/seed-staging.yml
 BACKUP_ROOT ?= backups
 ECNPJ_DOCUMENT_DIR ?= /srv/rubrica-ecnpj
 ECNPJ_PFX_FILE ?= /etc/rubrica/secrets/empresa-ecnpj-a1.pfx
@@ -41,29 +42,55 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-migrate staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
-	@echo "Rubrica environment commands"
+	@echo "Rúbrica — comandos por ambiente"
 	@echo "============================================================"
-	@echo "Development (applications bare metal, hot reload)"
-	@echo "  make dev                              Start no infrastructure"
-	@echo "  make dev-docker                       Start PostgreSQL/Redis, then apps"
+	@echo "Desenvolvimento — aplicações bare metal com hot reload"
+	@echo "  make dev                       Inicia frontend e APIs; não inicia infraestrutura"
+	@echo "  make dev-docker                Inicia PostgreSQL/Redis e depois as aplicações"
 	@echo "  make dev-docker services=postgres,loki"
-	@echo "  make dev-bootstrap                    First-time migrate, seed and start"
-	@echo "  make dev-migrate|dev-seed             Explicit data operations"
-	@echo "  make docs|stripe-up|quick-tunnel-up|telemetry-up"
+	@echo "  make dev-bootstrap             Primeira preparação: .env, banco, migrations e seed"
+	@echo "  make dev-migrate               Aplica migrations no banco de desenvolvimento"
+	@echo "  make dev-seed                  Cria/atualiza as contas locais de teste"
 	@echo ""
-	@echo "Staging (full Docker, staging-only secrets)"
-	@echo "  make staging-secrets-init"
-	@echo "  make staging-ensure|staging-bootstrap|staging-up|staging-smoke"
+	@echo "Ferramentas opcionais de desenvolvimento"
+	@echo "  make docs                      Valida .env e abre MkDocs em http://127.0.0.1:7190"
+	@echo "  make docs-logs                 Acompanha os logs do MkDocs"
+	@echo "  make stripe-up                 Inicia Stripe CLI"
+	@echo "  make quick-tunnel-up           Inicia Cloudflare Quick Tunnel"
+	@echo "  make telemetry-up              Inicia Loki local"
 	@echo ""
-	@echo "Checks"
-	@echo "  make doctor|lint|test-unit|test-integration"
+	@echo "Staging — aplicação completa em Docker"
+	@echo "  make staging-secrets-init      Cria somente os secrets isolados de staging"
+	@echo "  make staging-bootstrap         Executa migrations, sobe tudo e roda o smoke"
+	@echo "  make staging-up                Sobe/reconstrói a stack sem migration ou seed"
+	@echo "  make staging-migrate           Aplica migrations nos cinco bancos de staging"
+	@echo "  make staging-seed              Cria/atualiza as mesmas contas de teste no staging"
+	@echo "  make staging-status            Exibe todos os contêineres"
+	@echo "  make staging-smoke             Valida stack e gateway"
+	@echo "  make staging-logs              Acompanha os logs"
+	@echo "  make staging-down              Encerra preservando volumes"
 	@echo ""
-	@echo "Production (server-only)"
-	@echo "  make production-ensure|production-migrate|production-up"
-	@echo "  make production-bootstrap|production-provider-check"
+	@echo "Qualidade"
+	@echo "  make doctor                    Verifica ferramentas e configuração de dev"
+	@echo "  make lint                      Executa Ruff"
+	@echo "  make test-unit                 Executa testes unitários"
+	@echo "  make test-integration          Executa testes reais com PostgreSQL/Redis"
+	@echo ""
+	@echo "Produção — resumo; use 'make help-production' para operações avançadas"
+	@echo "  make production-ensure        Valida ambiente sem alterar produção"
+	@echo "  make production-migrate       Aplica migrations explicitamente"
+	@echo "  make production-up            Constrói e sobe a stack"
+	@echo "  make production-status        Exibe o estado dos serviços"
+	@echo "  make production-provider-check Verifica providers seguros"
+
+help-production:
+	@echo "Rúbrica — operações avançadas de produção"
+	@echo "============================================================"
+	@echo "  make production-bootstrap"
+	@echo "  make production-logs"
 	@echo "  make production-sign-ecnpj input=documento.pdf output=documento_assinado.pdf"
 	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
 	@echo "  sudo make production-create-lifetime-tenant owner_email=... member_email=... legal_name='...' actor=EMAIL reason='...'"
@@ -139,12 +166,15 @@ staging-migrate: staging-ensure
 	$(STAGING_COMPOSE) exec -T postgres bash /docker-entrypoint-initdb.d/init-multiple-databases.sh
 	$(STAGING_MAINTENANCE) run --rm --build alembic python toolbox/database/migrate.py all
 
+staging-seed: staging-migrate
+	$(STAGING_SEED) run --rm --build seed
+
 staging-smoke: staging-ensure
 	$(STAGING_COMPOSE) ps --status running
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
 	@echo "[ok] staging gateway and containers are operational"
 
-staging-bootstrap: staging-migrate
+staging-bootstrap: staging-seed
 	$(MAKE) --no-print-directory staging-up STAGING_ENV_FILE=$(STAGING_ENV_FILE)
 	$(MAKE) --no-print-directory staging-smoke STAGING_ENV_FILE=$(STAGING_ENV_FILE)
 
@@ -166,6 +196,8 @@ lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
 docs:
+	@test -f "$(DEV_ENV_FILE)" || (echo "[error] $(DEV_ENV_FILE) não existe; execute 'cp .env.example $(DEV_ENV_FILE)' ou 'make dev-bootstrap'"; exit 2)
+	@$(DEV_COMPOSE) config --quiet || (echo "[error] $(DEV_ENV_FILE) ou o Compose de desenvolvimento é inválido"; exit 2)
 	$(DEV_COMPOSE) up -d --build --wait docs
 	@echo "[ok] Development docs available at http://127.0.0.1:$${DOCS_HOST_PORT:-7190}"
 

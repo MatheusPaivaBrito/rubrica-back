@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from toolbox.checks.compose_contract import validate
+from toolbox.checks.staging_readiness import ROOT, staging_secrets_dir
 from toolbox.dev.dependencies import parse_services
 
 
@@ -29,3 +30,7 @@ def test_staging_contract_allows_only_gateway_host_port() -> None:
     assert validate("staging", {"services": {"gateway": {}, "core-api": {"ports": [{"published": "8100"}]}}}) == [
         "only staging gateway may publish a host port: core-api"
     ]
+
+
+def test_staging_secret_path_matches_compose_relative_resolution() -> None:
+    assert staging_secrets_dir("../.secrets/staging") == ROOT / ".secrets" / "staging"

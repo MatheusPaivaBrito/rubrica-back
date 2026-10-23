@@ -7,14 +7,14 @@ import os
 from pathlib import Path
 
 from toolbox.checks.production_readiness import read_env
-from toolbox.checks.staging_readiness import REQUIRED_SECRETS
+from toolbox.checks.staging_readiness import REQUIRED_SECRETS, staging_secrets_dir
 
 
 def main() -> None:
     env_path = Path(os.environ.get("STAGING_ENV_FILE", ".env.staging"))
     if not env_path.is_file():
         raise SystemExit("[error] .env.staging is missing; copy .env.staging.example first")
-    root = Path(read_env(env_path).get("SECRETS_DIR", ".secrets/staging"))
+    root = staging_secrets_dir(read_env(env_path).get("SECRETS_DIR", "../.secrets/staging"))
     root.mkdir(parents=True, exist_ok=True)
     root.chmod(0o700)
     for name in REQUIRED_SECRETS:

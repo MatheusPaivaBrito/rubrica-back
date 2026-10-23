@@ -27,6 +27,9 @@ services:
     extends: {file: ./services/gateway.yml, service: production}
     ports:
       - "127.0.0.1:${STAGING_GATEWAY_HOST_PORT:-7271}:8080"
+    networks:
+      - rubrica_internal
+      - rubrica_external
 
 volumes:
   postgres_data:

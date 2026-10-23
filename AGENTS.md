@@ -11,7 +11,7 @@ Never use `.env.production`, production secrets, production buckets or productio
 
 ## Canonical workflow
 
-Run `make help` before suggesting commands. Use `make dev-bootstrap` once, then `make dev` or `make dev-docker`. Migrations and seed are explicit through `dev-migrate` and `dev-seed`. Staging must pass `staging-ensure` and `staging-smoke` before production work.
+Run `make help` before suggesting commands. Use `make dev-bootstrap` once, then `make dev` or `make dev-docker`. Migrations and seed are explicit through `dev-migrate` and `dev-seed`. `staging-bootstrap` applies migrations and the staging-authorized test seed before starting and smoking the stack; `staging-up` does neither. Staging must pass `staging-ensure` and `staging-smoke` before production work.
 
 Production changes require `production-ensure`, explicit migrations and `production-up`. `production-provider-check` is non-paid/non-mutating; paid or externally mutating probes require explicit user authorization.
 

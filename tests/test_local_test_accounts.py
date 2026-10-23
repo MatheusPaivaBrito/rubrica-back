@@ -8,7 +8,7 @@ from toolbox.seeds import lifetime_account as lifetime_module
 from core_api.modules.tenant import tenant_service as tenant_module
 
 
-@pytest.mark.parametrize("environment", [None, "production", "prod", "staging", "test"])
+@pytest.mark.parametrize("environment", [None, "production", "prod", "test"])
 def test_seed_rejects_nonlocal_environment(monkeypatch, environment):
     monkeypatch.setenv("ALLOW_LOCAL_TEST_SEED", "1")
     if environment is None:
@@ -23,6 +23,14 @@ def test_seed_requires_explicit_opt_in(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("ALLOW_LOCAL_TEST_SEED", raising=False)
     with pytest.raises(RuntimeError, match="ALLOW_LOCAL_TEST_SEED"):
+        seed.main()
+
+
+def test_staging_seed_requires_staging_opt_in(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("ALLOW_LOCAL_TEST_SEED", "1")
+    monkeypatch.delenv("ALLOW_STAGING_TEST_SEED", raising=False)
+    with pytest.raises(RuntimeError, match="ALLOW_STAGING_TEST_SEED"):
         seed.main()
 
 

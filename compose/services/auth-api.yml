@@ -59,7 +59,7 @@ services:
       REDIS_PORT: "6379"
       AUTH_SEED_ADMIN_EMAIL: ${AUTH_SEED_ADMIN_EMAIL:-admin@rubricasignature.com}
       AUTH_SEED_ADMIN_PASSWORD_FILE: /run/secrets/auth_seed_admin_password
-      AUTH_PUBLIC_WEB_URL: https://${RUBRICA_DOMAIN:-rubricasignature.com}
+      AUTH_PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://rubricasignature.com}
       AUTH_TURNSTILE_SITE_KEY: ${CONTACT_TURNSTILE_SITE_KEY:-}
       AUTH_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
       CORE_API_URL: http://core-api:8000

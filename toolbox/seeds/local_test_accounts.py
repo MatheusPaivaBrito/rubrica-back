@@ -1,4 +1,4 @@
-"""Create local plan fixtures without resetting existing billing scenarios."""
+"""Create development/staging fixtures without resetting existing scenarios."""
 
 import os
 from uuid import UUID
@@ -23,15 +23,22 @@ from toolbox.seeds.lifetime_account import change_lifetime_access
 from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, TEAM
 
 
-def require_local_environment() -> None:
-    if os.getenv("ENVIRONMENT", "").lower() not in {"local", "development"}:
-        raise RuntimeError("Seed requires an explicit local/development ENVIRONMENT")
-    if os.getenv("ALLOW_LOCAL_TEST_SEED") != "1":
-        raise RuntimeError("Seed requires ALLOW_LOCAL_TEST_SEED=1")
+def require_test_environment() -> str:
+    environment = os.getenv("ENVIRONMENT", "").lower()
+    expected_opt_in = {
+        "local": "ALLOW_LOCAL_TEST_SEED",
+        "development": "ALLOW_LOCAL_TEST_SEED",
+        "staging": "ALLOW_STAGING_TEST_SEED",
+    }.get(environment)
+    if expected_opt_in is None:
+        raise RuntimeError("Seed requires an explicit local/development/staging ENVIRONMENT")
+    if os.getenv(expected_opt_in) != "1":
+        raise RuntimeError(f"Seed requires {expected_opt_in}=1")
     from auth_api.infrastructure.settings import settings as auth_settings
     from core_api.infrastructure.settings import settings as core_settings
-    if any(s.ENVIRONMENT.lower() not in {"local", "development"} for s in (auth_settings, core_settings)):
-        raise RuntimeError("Local test accounts cannot be created in production")
+    if any(s.ENVIRONMENT.lower() != environment for s in (auth_settings, core_settings)):
+        raise RuntimeError("Seed target does not match the application environment")
+    return environment
 
 
 def _auth_users(password: str) -> dict[str, UUID]:
@@ -224,7 +231,7 @@ def _archive_empty_legacy_personal_tenants(users: dict[str, UUID]) -> None:
 
 
 def main() -> None:
-    require_local_environment()
+    environment = require_test_environment()
     password = os.getenv("LOCAL_TEST_ACCOUNT_PASSWORD", "RubricaLocal123!")
     if len(password) < 12:
         raise ValueError("LOCAL_TEST_ACCOUNT_PASSWORD must contain at least 12 characters")
@@ -235,7 +242,10 @@ def main() -> None:
     _business_tenant(users, TEAM, "11.222.333/0001-81", "Equipe Local de Testes Ltda.", "rubrica_team")
     _lifetime_tenant(users)
     _archive_empty_legacy_personal_tenants(users)
-    print(f"[ok] {len(ACCOUNTS)} local test accounts are ready (free, essential, professional 3, team 6, lifetime 3)")
+    print(
+        f"[ok] {len(ACCOUNTS)} {environment} test accounts are ready "
+        "(free, essential, professional 3, team 6, lifetime 3)"
+    )
     for email, _ in ACCOUNTS:
         print(f"  {email}")
 

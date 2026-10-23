@@ -111,6 +111,11 @@ make staging-bootstrap
 make staging-smoke
 ```
 
+`staging-bootstrap` applies migrations, executes the same idempotent 14-account
+fixture catalog used in development, starts the stack and runs the smoke. Use
+`make staging-seed` to reapply only those fixtures explicitly; production never
+runs test-account seeds.
+
 See [AGENTS.md](AGENTS.md) and `make help` for the complete contract.
 
 

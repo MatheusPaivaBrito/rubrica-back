@@ -1,0 +1,33 @@
+# Explicit staging-only fixture overlay. Never include in runtime or production.
+services:
+  seed:
+    extends:
+      file: ./services/alembic.yml
+      service: alembic
+    profiles: [maintenance]
+    build:
+      context: ..
+      dockerfile: apps/core_api/dockerfile
+    command: [python, toolbox/seeds/local_test_accounts.py]
+    environment:
+      ENVIRONMENT: staging
+      ALLOW_STAGING_TEST_SEED: "1"
+      LOCAL_TEST_ACCOUNT_PASSWORD: ${LOCAL_TEST_ACCOUNT_PASSWORD:-RubricaLocal123!}
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      AUTH_MFA_ENCRYPTION_KEY_FILE: /run/secrets/auth_mfa_encryption_key
+      AUTH_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/auth_identity_encryption_key
+      AUTH_IDENTITY_HMAC_KEY_FILE: /run/secrets/auth_identity_hmac_key
+      TENANT_IDENTITY_ENCRYPTION_KEY_FILE: /run/secrets/tenant_identity_encryption_key
+      TENANT_IDENTITY_HMAC_KEY_FILE: /run/secrets/tenant_identity_hmac_key
+      EVIDENCE_SECRET_FILE: /run/secrets/evidence_secret
+    secrets:
+      - postgres_password
+      - auth_mfa_encryption_key
+      - auth_identity_encryption_key
+      - auth_identity_hmac_key
+      - tenant_identity_encryption_key
+      - tenant_identity_hmac_key
+      - evidence_secret
+    networks:
+      - rubrica_internal
