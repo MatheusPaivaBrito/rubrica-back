@@ -116,11 +116,12 @@ fixture catalog used in development, starts the stack and runs the smoke. Use
 `make staging-seed` to reapply only those fixtures explicitly; production never
 runs test-account seeds.
 
-Remote staging also starts a Cloudflare Quick Tunnel and Stripe CLI in test
-mode. Configure a real `sk_test_...` value in the staging `stripe_secret_key`
-Docker Secret, run `make staging-public-url`, then set `PUBLIC_WEB_URL` and
-`SIGNING_APP_URL` to that emitted `trycloudflare.com` URL and rerun
-`make staging-up`. `make staging-stripe-logs` confirms webhook forwarding.
+Remote staging starts a Cloudflare Quick Tunnel by default. Stripe, Resend and
+their configuration remain optional: billing uses the fake provider and email
+uses `local_ack` until an integration is deliberately tested. For Stripe, add
+a real `sk_test_...` secret and test Price IDs, switch `BILLING_PROVIDER`, then
+run `make staging-stripe-up`; `make staging-stripe-logs` confirms forwarding.
+Use `make staging-public-url` to retrieve the emitted `trycloudflare.com` URL.
 
 See [AGENTS.md](AGENTS.md) and `make help` for the complete contract.
 

@@ -37,8 +37,8 @@ def main() -> int:
         errors.append("ENVIRONMENT must be staging")
     if values.get("DOCUMENT_STORAGE_PROVIDER") != "local":
         errors.append("staging must use local document storage")
-    if values.get("BILLING_PROVIDER") != "stripe":
-        errors.append("remote staging must use Stripe test mode")
+    if values.get("BILLING_PROVIDER") not in {"fake", "stripe"}:
+        errors.append("staging BILLING_PROVIDER must be fake or stripe")
     secrets_dir = staging_secrets_dir(values.get("SECRETS_DIR", "../.secrets/staging"))
     for name in REQUIRED_SECRETS:
         path = secrets_dir / name
@@ -46,11 +46,6 @@ def main() -> int:
             errors.append(f"missing or empty staging secret: {path}")
         elif stat.S_IMODE(path.stat().st_mode) & 0o077:
             errors.append(f"staging secret must use mode 0600: {path}")
-    stripe_key_path = secrets_dir / "stripe_secret_key"
-    if stripe_key_path.is_file():
-        stripe_key = stripe_key_path.read_text(encoding="utf-8").strip()
-        if not stripe_key.startswith("sk_test_") or stripe_key.startswith("sk_test_staging_"):
-            errors.append("staging stripe_secret_key must contain a real Stripe test-mode sk_test_ key")
     for error in errors:
         print(f"[error] {error}")
     if errors:

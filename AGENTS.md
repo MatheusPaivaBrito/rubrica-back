@@ -4,7 +4,7 @@
 
 - `make dev`: frontend and all Rubrica APIs run bare metal with hot reload. It validates `.env` but never starts or repairs infrastructure.
 - `make dev-docker`: starts the default Docker dependencies, then runs the applications bare metal. Select dependencies with `make dev-docker services=postgres,redis,loki`.
-- `make staging-*`: remote full-Docker topology using `.env.staging`, staging-only Docker Secrets, a Quick Tunnel and Stripe CLI test-mode forwarding.
+- `make staging-*`: relaxed remote full-Docker topology using `.env.staging`, staging-only Docker Secrets and a Quick Tunnel; Stripe CLI/test providers are opt-in.
 - `make production-*`: server-only flow using `.env.production`, `/etc/rubrica/secrets`, R2 and Cloudflare Tunnel.
 
 Never use `.env.production`, production secrets, production buckets or production providers in dev/staging. Never run seed, MkDocs, Stripe CLI or Quick Tunnel in production.

@@ -27,7 +27,7 @@ def validate(level: str, config: dict[str, object]) -> list[str]:
         for name, service in services.items():
             if name != "gateway" and service.get("ports"):
                 errors.append(f"only staging gateway may publish a host port: {name}")
-        for required in ("gateway", "quick-tunnel", "stripe-cli"):
+        for required in ("gateway", "quick-tunnel"):
             if required not in services:
                 errors.append(f"remote staging requires service: {required}")
     else:
