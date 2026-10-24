@@ -1,4 +1,4 @@
-site_name: Seeds — Rubrica
+site_name: Desenvolvimento — Rubrica
 docs_dir: .artifacts/local-docs
 site_dir: .artifacts/local-docs-site
 theme:
@@ -13,7 +13,23 @@ theme:
   features:
     - navigation.tabs
 nav:
-  - Contas de desenvolvimento: index.md
+  - Início: index.md
+  - Contas de desenvolvimento: accounts.md
+  - Arquitetura: architecture.md
+  - Operação:
+      - Produção: production.md
+      - Segurança de borda: edge-security.md
+      - Observabilidade: observability.md
+      - Backup externo: offsite-backup.md
+  - Provedores:
+      - Carimbo do tempo SERPRO: serpro-timestamp.md
+      - Serpro ID: serpro-id.md
+      - Cloudflare R2: cloudflare-r2.md
+      - Stripe local: stripe-local.md
+  - Produto:
+      - Assinatura e-CNPJ: ecnpj-signing.md
+      - Cobrança e e-mail: billing-and-email.md
+      - Contato e busca: contact-and-search.md
 plugins: []
 extra_css:
   - assets/local_accounts.css

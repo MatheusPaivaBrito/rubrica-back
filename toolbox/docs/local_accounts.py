@@ -7,6 +7,34 @@ from shutil import copyfile
 from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, TEAM
 
 
+DOCUMENT_ROUTES = {
+    "ARCHITECTURE.md": "architecture.md",
+    "PRODUCTION_MVP_SETUP.md": "production.md",
+    "SERPRO_TIMESTAMP_SETUP.md": "serpro-timestamp.md",
+    "SERPROID_SETUP.md": "serpro-id.md",
+    "CLOUDFLARE_R2.md": "cloudflare-r2.md",
+    "EDGE_SECURITY.md": "edge-security.md",
+    "OBSERVABILITY.md": "observability.md",
+    "OFFSITE_BACKUP_B2.md": "offsite-backup.md",
+    "CONTACT_AND_SEARCH_SETUP.md": "contact-and-search.md",
+    "ECNPJ_PDF_SIGNING.md": "ecnpj-signing.md",
+    "MVP_TENANT_BILLING_EMAIL_FLOW.md": "billing-and-email.md",
+    "stripe-local.md": "stripe-local.md",
+}
+
+
+def _copy_documentation(target: Path) -> None:
+    source = Path("docs")
+    replacements = {
+        f"({original})": f"({route})" for original, route in DOCUMENT_ROUTES.items()
+    }
+    for original, route in DOCUMENT_ROUTES.items():
+        content = (source / original).read_text(encoding="utf-8")
+        for old_link, new_link in replacements.items():
+            content = content.replace(old_link, new_link)
+        (target / route).write_text(content, encoding="utf-8")
+
+
 def main() -> None:
     environment = os.getenv("ENVIRONMENT", "development").lower()
     if environment not in {"local", "development", "staging"}:
@@ -73,7 +101,21 @@ def main() -> None:
         Path("../rubrica-web/public/icons/rubrica-brand/mark/48x48/rubrica-mark-primary-48x48.png"),
         assets / "rubrica-favicon.png",
     )
-    page = target / "index.md"
+    _copy_documentation(target)
+    home = target / "index.md"
+    home.write_text(
+        "# Portal de desenvolvimento Rubrica\n\n"
+        "Documentação técnica e referências locais em um único lugar.\n\n"
+        "- [Contas de desenvolvimento](accounts.md)\n"
+        "- [Arquitetura](architecture.md)\n"
+        "- [Preparação de produção](production.md)\n"
+        "- [Carimbo do tempo SERPRO](serpro-timestamp.md)\n"
+        "- [Serpro ID](serpro-id.md)\n"
+        "- [Cloudflare R2](cloudflare-r2.md)\n",
+        encoding="utf-8",
+    )
+    home.chmod(0o600)
+    page = target / "accounts.md"
     page.write_text("\n\n".join(lines) + "\n", encoding="utf-8")
     page.chmod(0o600)
 
