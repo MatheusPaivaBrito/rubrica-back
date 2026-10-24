@@ -64,3 +64,15 @@ def test_positions_on_different_pages_do_not_overlap() -> None:
     ]
 
     DatabaseSignatureWorkflowService._reject_overlapping_positions(positions)
+
+
+def test_stamp_variant_is_stored_per_position() -> None:
+    full = StampPosition(page=1, x=0.5, y=0.5, display_variant="full")
+    minimal = StampPosition(page=2, x=0.5, y=0.5, display_variant="minimal")
+    drawn = StampPosition(page=3, x=0.5, y=0.5, display_variant="drawn")
+
+    assert [full.display_variant, minimal.display_variant, drawn.display_variant] == [
+        "full",
+        "minimal",
+        "drawn",
+    ]

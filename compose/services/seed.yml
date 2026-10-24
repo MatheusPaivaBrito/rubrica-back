@@ -13,3 +13,6 @@ services:
       LOCAL_TEST_ACCOUNT_PASSWORD: ${LOCAL_TEST_ACCOUNT_PASSWORD:-RubricaLocal123!}
       TENANT_IDENTITY_ENCRYPTION_KEY: ${TENANT_IDENTITY_ENCRYPTION_KEY:-rubrica-development-tenant-encryption-key-change-me}
       TENANT_IDENTITY_HMAC_KEY: ${TENANT_IDENTITY_HMAC_KEY:-rubrica-development-tenant-hmac-key-change-me}
+      DOCUMENT_STORAGE_PATH: /var/lib/rubrica/documents
+    volumes:
+      - ../../.runtime/documents:/var/lib/rubrica/documents

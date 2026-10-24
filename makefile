@@ -28,8 +28,11 @@ PRODUCTION_TIMESTAMP_COMPOSE_FILE ?= compose/features/serpro-timestamp.yml
 LOCAL_COMPOSE = docker compose --env-file $(LOCAL_ENV_FILE) -f $(LOCAL_COMPOSE_FILE)
 DEV_COMPOSE = docker compose --env-file $(DEV_ENV_FILE) -f $(DEV_COMPOSE_FILE)
 DOCS_COMPOSE = docker compose --env-file $(DOCS_ENV_FILE) -f $(DEV_COMPOSE_FILE)
-STAGING_COMPOSE = docker compose --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE)
-PRODUCTION_COMPOSE = docker compose --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
+# Prevent values exported from the development .env above from overriding the
+# explicit staging/production env files (shell variables outrank --env-file).
+ISOLATED_COMPOSE = env -i PATH="$(PATH)" HOME="$(HOME)" docker compose
+STAGING_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE)
+PRODUCTION_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
 LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
 LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
 DEV_MAINTENANCE = $(DEV_COMPOSE) -f compose/services/alembic.yml

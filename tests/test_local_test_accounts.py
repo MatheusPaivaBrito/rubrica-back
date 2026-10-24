@@ -47,6 +47,7 @@ def test_seed_preserves_downgrade_and_membership_state(monkeypatch):
     monkeypatch.setattr(seed, "CoreSessionLocal", core)
     monkeypatch.setattr(lifetime_module, "SessionLocal", core)
     monkeypatch.setattr(tenant_module, "SessionLocal", core)
+    monkeypatch.setattr(seed, "_expired_signature_request_fixture", lambda: None)
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("ALLOW_LOCAL_TEST_SEED", "1")
     seed.main()

@@ -93,6 +93,7 @@ class SignatureRequestRead(BaseModel):
     expires_at: datetime
     created_by: str
     created_at: datetime
+    opened_at: datetime | None = None
     completed_at: datetime | None = None
     signer_count: int = 0
     signed_count: int = 0
@@ -183,6 +184,7 @@ class StampPosition(BaseModel):
     width: float = Field(default=0.4, ge=0.15, le=0.8)
     height: float = Field(default=0.12, ge=0.06, le=0.35)
     order: int = Field(default=0, ge=0, le=1000)
+    display_variant: Literal["full", "minimal", "drawn"] | None = None
 
 
 class StampCustomization(BaseModel):

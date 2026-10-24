@@ -187,6 +187,17 @@ def test_database_workflow_round_trip(
         assert service.signing_signed_document(token, "second@example.com")[2].startswith(b"%PDF")
         service.sign(token, "second@example.com", True, StampPosition(page=1, x=0.35, y=0.7))
         assert trusted_timestamp["count"] == 3
+        consolidated = service.signing_signed_document(token, "second@example.com")[2]
+        consolidated_text = "\n".join((page.extract_text() or "") for page in PdfReader(BytesIO(consolidated)).pages)
+        assert "Database User" in consolidated_text
+        assert "Second User" in consolidated_text
+        with SessionLocal() as db:
+            signatures = list(db.scalars(
+                select(SignatureEntity)
+                .where(SignatureEntity.signature_request_id == request.id)
+                .order_by(SignatureEntity.signed_at, SignatureEntity.id)
+            ).all())
+            assert signatures[1].document_sha256 == signatures[0].artifact_sha256
 
         completed_request = service.get_request(request.id, "operator")
         assert completed_request.status == RequestStatus.COMPLETED

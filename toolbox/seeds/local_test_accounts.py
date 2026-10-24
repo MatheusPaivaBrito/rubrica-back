@@ -1,17 +1,26 @@
 """Create development/staging fixtures without resetting existing scenarios."""
 
 import os
+from hashlib import sha256
+from io import BytesIO
 from uuid import UUID
 from datetime import timedelta
 
+from pypdf import PdfWriter
 from sqlalchemy import MetaData, Table, func, inspect, select
 
 from auth_api.infrastructure.database.connection import SessionLocal as AuthSessionLocal
 from auth_api.modules.access_control.access_control_entity import UserRoleEntity
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import UserEntity
+from core_api.infrastructure.auth_context import AuthContext, _active_auth_context
 from core_api.infrastructure.database.connection import SessionLocal as CoreSessionLocal
 from core_api.modules.billing.billing_entity import BillingAccountEntity
+from core_api.modules.document.document_entity import DocumentEntity
+from core_api.modules.document.document_schema import DocumentCreate
+from core_api.modules.signature_request.database_workflow_service import database_workflow_service
+from core_api.modules.signature_request.signature_request_entity import SignatureRequestEntity, SignerEntity
+from core_api.modules.signature_request.workflow_schema import SignatureRequestCreate
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_identity import protect_cnpj
 from core_api.modules.tenant.tenant_schema import TenantProvision
@@ -230,6 +239,93 @@ def _archive_empty_legacy_personal_tenants(users: dict[str, UUID]) -> None:
                 billing.deleted_at = now
 
 
+def _expired_signature_request_fixture() -> None:
+    """Create one immutable expired round for exercising the reopen workflow."""
+    owner_email = "local.vitalicio.admin@example.local"
+    title = "Contrato com prazo vencido"
+    with CoreSessionLocal() as database:
+        row = database.execute(
+            select(TenantEntity, TenantMemberEntity)
+            .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
+            .where(
+                TenantEntity.legal_name == "Conta Vitalícia Local Ltda.",
+                TenantMemberEntity.auth_user_id == owner_email,
+                TenantMemberEntity.role == "admin",
+            )
+        ).one_or_none()
+        if row is None:
+            raise RuntimeError("Lifetime fixture tenant was not created")
+        tenant, member = row
+        tenant_id, tenant_slug = tenant.id, tenant.slug
+        owner_user_id = member.auth_user_uuid
+        existing = database.scalar(
+            select(DocumentEntity).where(
+                DocumentEntity.tenant_id == tenant_id,
+                DocumentEntity.title == title,
+                DocumentEntity.created_by == owner_email,
+                DocumentEntity.deleted_at.is_(None),
+            )
+        )
+    if existing is not None:
+        return
+
+    previous_context = _active_auth_context.get()
+    try:
+        AuthContext(
+            subject=owner_email,
+            user_id=str(owner_user_id),
+            email=owner_email,
+            roles=frozenset({"user"}),
+            permission_keys=frozenset(),
+        )
+        source = BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=595, height=842)
+        writer.add_metadata({"/Title": title, "/Subject": "Fixture de solicitação vencida"})
+        writer.write(source)
+        document = database_workflow_service.create_document(
+            DocumentCreate(
+                organization_id=tenant_slug,
+                title=title,
+                original_filename="contrato-prazo-vencido.pdf",
+                content_type="application/pdf",
+                created_by=owner_email,
+            ),
+            source.getvalue(),
+        )
+        request = database_workflow_service.create_request(
+            SignatureRequestCreate(
+                document_id=document.id,
+                expires_at=DateTimeService.utc_now() + timedelta(hours=1),
+                created_by=owner_email,
+            )
+        )
+    finally:
+        _active_auth_context.set(previous_context)
+    now = DateTimeService.utc_now()
+    with CoreSessionLocal.begin() as database:
+        entity = database.get(SignatureRequestEntity, request.id)
+        entity.status = "open"
+        entity.expires_at = now - timedelta(days=7)
+        token = f"expired-fixture:{request.id}"
+        database.add(
+            SignerEntity(
+                signature_request_id=request.id,
+                auth_user_id=owner_email,
+                name="Administrador Vitalício",
+                email=owner_email,
+                preferred_locale="pt-BR",
+                signing_token_hash=sha256(token.encode()).hexdigest(),
+                token_expires_at=entity.expires_at,
+                status="pending",
+                participant_role="company_representative",
+                represented_tenant_id=tenant_id,
+                representation_snapshot=entity.issuer_snapshot,
+                signature_mode="serpro_timestamp",
+            )
+        )
+
+
 def main() -> None:
     environment = require_test_environment()
     password = os.getenv("LOCAL_TEST_ACCOUNT_PASSWORD", "RubricaLocal123!")
@@ -242,6 +338,7 @@ def main() -> None:
     _business_tenant(users, TEAM, "11.222.333/0001-81", "Equipe Local de Testes Ltda.", "rubrica_team")
     _lifetime_tenant(users)
     _archive_empty_legacy_personal_tenants(users)
+    _expired_signature_request_fixture()
     print(
         f"[ok] {len(ACCOUNTS)} {environment} test accounts are ready "
         "(free, essential, professional 3, team 6, lifetime 3)"

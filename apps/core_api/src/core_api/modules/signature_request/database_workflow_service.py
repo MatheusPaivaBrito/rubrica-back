@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from hashlib import sha256
 from hmac import new as hmac_new
@@ -26,12 +27,15 @@ from core_api.modules.document.storage import (
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureEntity, SignatureOperationEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.notification_client import send_signature_invitation
 from core_api.modules.signature_request.identity_client import IdentitySummary, identity_summary
-from core_api.modules.signature_request.signed_pdf import canonical_json, evidence_sha256, generate_signed_pdf
+from core_api.modules.signature_request.signed_pdf import _stamp_locale_for_country, canonical_json, evidence_sha256, generate_signed_pdf
 from core_api.modules.signature_request.workflow_schema import AuditEventRead, ClientEvidence, GeolocationEvidence, ParticipantRole, ReopenSignatureRequest, RequestStatus, SignatureEvidenceRead, SignatureMode, SignatureRequestCreate, SignatureRequestRead, SignerContactRead, SignerCreate, SignerRead, SignerStatus, SigningLinkRead, SigningRead, StampConfiguration, StampCustomization, StampPosition
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.time.datetime_service import DateTimeService
+
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseSignatureWorkflowService:
@@ -252,7 +256,7 @@ class DatabaseSignatureWorkflowService:
             latest_signature = db.scalar(select(SignatureEntity).where(
                 SignatureEntity.signature_request_id == parent.id,
                 SignatureEntity.artifact_storage_key.is_not(None),
-            ).order_by(SignatureEntity.id.desc()).limit(1))
+            ).order_by(SignatureEntity.signed_at.desc(), SignatureEntity.id.desc()).limit(1))
             base_key = latest_signature.artifact_storage_key if latest_signature else parent.base_artifact_storage_key
             base_digest = latest_signature.artifact_sha256 if latest_signature else parent.base_artifact_sha256
             preserved_count = parent.preserved_signature_count + current_signature_count
@@ -628,6 +632,7 @@ class DatabaseSignatureWorkflowService:
             if document.version != request.document_version or document.sha256 != request.document_sha256:
                 raise WorkflowError("Document changed after request creation", 409)
             request.status = RequestStatus.OPEN.value
+            request.opened_at = DateTimeService.utc_now()
             request.signature_mode = signature_mode.value
             self._audit(db, request.id, actor_id, "signature_request.opened", "signature_request", request.id, {"signature_mode": signature_mode.value})
             db.flush()
@@ -769,6 +774,13 @@ class DatabaseSignatureWorkflowService:
             artifact_recorded = True
             return self._finalize_signature_operation(operation_id, auth_user_id)
         except Exception as exc:
+            logger.exception(
+                "Signature artifact processing failed",
+                extra={
+                    "signature_operation_id": str(operation_id),
+                    "signature_request_id": str(prepared["request_id"]),
+                },
+            )
             if artifact_key and not artifact_recorded:
                 self.storage.discard_uncommitted(artifact_key)
             self._fail_signature_operation(operation_id, exc)
@@ -845,8 +857,22 @@ class DatabaseSignatureWorkflowService:
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == request.document_version))
             if version is None or version.sha256 != request.document_sha256:
                 raise WorkflowError("Document hash does not match the frozen request", 409)
-            input_storage_key = request.base_artifact_storage_key or version.storage_key
-            input_sha256 = request.base_artifact_sha256 or version.sha256
+            existing = list(db.scalars(
+                select(SignatureEntity)
+                .where(SignatureEntity.signature_request_id == request.id)
+                .order_by(SignatureEntity.signed_at, SignatureEntity.id)
+            ).all())
+            latest_signature = existing[-1] if existing else None
+            input_storage_key = (
+                latest_signature.artifact_storage_key
+                if latest_signature and latest_signature.artifact_storage_key
+                else request.base_artifact_storage_key or version.storage_key
+            )
+            input_sha256 = (
+                latest_signature.artifact_sha256
+                if latest_signature and latest_signature.artifact_sha256
+                else request.base_artifact_sha256 or version.sha256
+            )
             document = db.get(DocumentEntity, request.document_id)
             if document is None or document.deleted_at is not None:
                 raise WorkflowError("Document not found", 404)
@@ -861,7 +887,8 @@ class DatabaseSignatureWorkflowService:
             elif stamp is None:
                 raise WorkflowError("A stamp position is required", 422)
             customization = request.stamp_customization_snapshot
-            if customization and customization.get("require_drawn_signature") and not drawn_signature_png_data_url:
+            requires_drawing = any(position.display_variant == "drawn" for position in configured_positions)
+            if (requires_drawing or (customization and customization.get("require_drawn_signature"))) and not drawn_signature_png_data_url:
                 raise WorkflowError("A drawn signature is required for this request", 422)
             if signer.participant_role == ParticipantRole.COMPANY_REPRESENTATIVE.value:
                 active_representation = db.scalar(
@@ -875,7 +902,6 @@ class DatabaseSignatureWorkflowService:
                 )
                 if active_representation is None:
                     raise WorkflowError("Company representation authorization is no longer active", 403)
-            existing = list(db.scalars(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id).order_by(SignatureEntity.id)).all())
             inherited = self._ancestor_signatures(db, request)
             if operation is None:
                 evidence = self._signature_evidence(
@@ -983,7 +1009,7 @@ class DatabaseSignatureWorkflowService:
         auth_user_id: str,
         artifact_key: str,
         artifact_hash: str,
-        trusted_timestamp: dict[str, object],
+        trusted_timestamp: dict[str, object] | None,
     ) -> None:
         with SessionLocal.begin() as db:
             operation = db.scalar(
@@ -1017,17 +1043,34 @@ class DatabaseSignatureWorkflowService:
             signer = self._signer(db, str(operation.signer_id), request.id, lock=True)
             if operation.status == "completed" and signer.status == SignerStatus.SIGNED.value:
                 return self._signer_read(signer)
-            if operation.status != "artifact_ready" or not operation.artifact_storage_key or not operation.artifact_sha256 or operation.trusted_timestamp_json is None:
+            from core_api.modules.signature_request.serpro_timestamp_service import timestamp_required
+
+            if (
+                operation.status != "artifact_ready"
+                or not operation.artifact_storage_key
+                or not operation.artifact_sha256
+                or (timestamp_required() and operation.trusted_timestamp_json is None)
+            ):
                 raise WorkflowError("Signature operation artifact is not ready", 409)
             if request.status != RequestStatus.OPEN.value:
                 raise WorkflowError("Signature request is not open", 409)
             if signer.status == SignerStatus.SIGNED.value:
                 raise WorkflowError("Signer has already signed", 409)
             version = db.scalar(select(DocumentVersionEntity).where(DocumentVersionEntity.document_id == request.document_id, DocumentVersionEntity.version == operation.document_version))
-            expected_input_sha256 = request.base_artifact_sha256 or request.document_sha256
+            existing_signatures = list(db.scalars(
+                select(SignatureEntity)
+                .where(SignatureEntity.signature_request_id == request.id)
+                .order_by(SignatureEntity.signed_at, SignatureEntity.id)
+            ).all())
+            latest_signature = existing_signatures[-1] if existing_signatures else None
+            expected_input_sha256 = (
+                latest_signature.artifact_sha256
+                if latest_signature and latest_signature.artifact_sha256
+                else request.base_artifact_sha256 or request.document_sha256
+            )
             if version is None or version.sha256 != request.document_sha256 or operation.document_sha256 != expected_input_sha256:
                 raise WorkflowError("Document changed before signature confirmation", 409)
-            existing_count = db.scalar(select(func.count()).select_from(SignatureEntity).where(SignatureEntity.signature_request_id == request.id)) or 0
+            existing_count = len(existing_signatures)
             if existing_count != operation.expected_signature_count:
                 raise WorkflowError("Signature request changed before confirmation", 409)
             document = db.get(DocumentEntity, request.document_id)
@@ -1101,7 +1144,7 @@ class DatabaseSignatureWorkflowService:
             request = self._request(db, request_id)
             if actor_id is not None:
                 self._require_request_access(db, request, actor_id)
-            signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.artifact_storage_key.is_not(None)).order_by(SignatureEntity.id.desc()).limit(1))
+            signature = db.scalar(select(SignatureEntity).where(SignatureEntity.signature_request_id == request.id, SignatureEntity.artifact_storage_key.is_not(None)).order_by(SignatureEntity.signed_at.desc(), SignatureEntity.id.desc()).limit(1))
             if signature is None or not signature.artifact_storage_key or not signature.artifact_sha256:
                 raise WorkflowError("Signed document is not available", 404)
             key, digest = signature.artifact_storage_key, signature.artifact_sha256
@@ -1183,14 +1226,22 @@ class DatabaseSignatureWorkflowService:
         lowered = normalized_agent.lower()
         device_type = "mobile" if any(value in lowered for value in ("mobile", "android", "iphone")) else "tablet" if "ipad" in lowered else "desktop"
         evidence_country = (identity.issuing_country if identity else None) or tenant_country
-        stamp_payload = stamp.model_dump()
+        # Positions configured per signer contain UUID values. Evidence is
+        # canonical JSON, so normalize Pydantic's rich types before hashing it.
+        stamp_payload = stamp.model_dump(mode="json")
         stamp_payload["country_code"] = evidence_country
         stamp_payload["show_flag"] = bool(evidence_country)
         stamp_payload["template"] = evidence_country if evidence_country in {"BR", "JP"} else "INTL"
+        stamp_payload["locale"] = _stamp_locale_for_country(evidence_country, stamp_payload.get("locale"))
         position_payloads = []
         for position in stamp_positions or [stamp]:
             payload = position.model_dump(mode="json")
-            payload.update({"country_code": evidence_country, "show_flag": bool(evidence_country), "template": stamp_payload["template"]})
+            payload.update({
+                "country_code": evidence_country,
+                "show_flag": bool(evidence_country),
+                "template": stamp_payload["template"],
+                "locale": _stamp_locale_for_country(evidence_country, payload.get("locale")),
+            })
             position_payloads.append(payload)
         drawn_signature_hash = None
         if drawn_signature_png_data_url:
@@ -1326,7 +1377,7 @@ class DatabaseSignatureWorkflowService:
         document = db.get(DocumentEntity, item.document_id)
         effective_status = RequestStatus.EXPIRED.value if item.status == RequestStatus.OPEN.value and item.expires_at <= DateTimeService.utc_now() else item.status
         child_request_id = db.scalar(select(SignatureRequestEntity.id).where(SignatureRequestEntity.parent_request_id == item.id, SignatureRequestEntity.deleted_at.is_(None)))
-        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=effective_status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, completed_at=item.completed_at, signer_count=signer_count + item.preserved_signature_count, signed_count=signed_count + item.preserved_signature_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot, has_custom_stamp_placement=bool(item.stamp_placements), has_custom_stamp_branding=bool(item.stamp_customization_snapshot), parent_request_id=item.parent_request_id, round_number=item.round_number, reopened_reason=item.reopened_reason, reopened_by=item.reopened_by, reopened_at=item.reopened_at, preserved_signature_count=item.preserved_signature_count, child_request_id=child_request_id)
+        return SignatureRequestRead(id=item.id, document_id=item.document_id, document_version=item.document_version, document_sha256=item.document_sha256, status=effective_status, expires_at=item.expires_at, created_by=item.created_by, created_at=item.created_at, opened_at=item.opened_at, completed_at=item.completed_at, signer_count=signer_count + item.preserved_signature_count, signed_count=signed_count + item.preserved_signature_count, document_title=document.title if document else "", original_filename=document.original_filename if document else "", signature_mode=item.signature_mode, issuer_snapshot=item.issuer_snapshot, has_custom_stamp_placement=bool(item.stamp_placements), has_custom_stamp_branding=bool(item.stamp_customization_snapshot), parent_request_id=item.parent_request_id, round_number=item.round_number, reopened_reason=item.reopened_reason, reopened_by=item.reopened_by, reopened_at=item.reopened_at, preserved_signature_count=item.preserved_signature_count, child_request_id=child_request_id)
 
     @staticmethod
     def _document_read(db, x: DocumentEntity) -> DocumentRead:

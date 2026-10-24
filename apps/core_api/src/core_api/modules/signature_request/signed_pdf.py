@@ -56,13 +56,13 @@ def generate_signed_pdf(
 def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO:
     stamp = item["stamp"]
     representation = item.get("representation_snapshot")
-    company_representation = (
-        item.get("participant_role") == "company_representative"
-        and isinstance(representation, dict)
-    )
+    organization = representation if isinstance(representation, dict) else item.get("issuer_snapshot")
+    has_organization = isinstance(organization, dict)
     box_width = min(320.0, width * float(stamp.get("width", 0.4)))
     box_height = max(54.0, height * float(stamp.get("height", 0.12)))
-    if company_representation:
+    customization = item.get("stamp_customization") or {}
+    variant = stamp.get("display_variant") or customization.get("display_variant") or "full"
+    if has_organization and variant == "full":
         box_height = max(box_height, 96.0)
     center_x = float(stamp["x"]) * width
     center_y = (1 - float(stamp["y"])) * height
@@ -70,14 +70,32 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     bottom = min(max(4.0, center_y - box_height / 2), height - box_height - 4.0)
     stream = BytesIO()
     canvas = Canvas(stream, pagesize=(width, height), pageCompression=1)
-    canvas.setFillColor(white)
-    customization = item.get("stamp_customization") or {}
-    minimal = customization.get("display_variant") == "minimal"
+    minimal = variant == "minimal"
+    drawn = variant == "drawn"
     if minimal:
         box_width = min(box_width, 210.0)
         box_height = 42.0
         left = min(max(4.0, center_x - box_width / 2), width - box_width - 4.0)
         bottom = min(max(4.0, center_y - box_height / 2), height - box_height - 4.0)
+    elif drawn:
+        box_height = max(58.0, height * float(stamp.get("height", 0.12)))
+        bottom = min(max(4.0, center_y - box_height / 2), height - box_height - 4.0)
+        data_url = item.get("drawn_signature_png_data_url")
+        if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
+            canvas.drawImage(
+                ImageReader(BytesIO(b64decode(data_url.split(",", 1)[1]))),
+                left,
+                bottom,
+                width=box_width,
+                height=box_height,
+                preserveAspectRatio=True,
+                anchor="c",
+                mask="auto",
+            )
+        canvas.save()
+        stream.seek(0)
+        return stream
+    canvas.setFillColor(white)
     primary_color = str(customization.get("primary_color") or "#187A66")
     canvas.setStrokeColor(HexColor(primary_color))
     canvas.setLineWidth(1.5)
@@ -105,11 +123,11 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     regular_font = "HeiseiMin-W3" if japanese else "Helvetica"
     text_width = box_width - flag_width - 16
     canvas.setFont(bold_font, 7 if japanese else 6)
-    content_offset = 24.0 if company_representation else 0.0
-    label_y = bottom + (25 if minimal else 58 + content_offset)
+    content_offset = 24.0 if has_organization and variant == "full" else 0.0
+    label_y = bottom + (25 if minimal else 40 if drawn else 58 + content_offset)
     canvas.drawString(left + 7, label_y, _fit_text(label, bold_font, 7 if japanese else 6, text_width))
     canvas.setFont(bold_font, 9)
-    name_y = bottom + (10 if minimal else 43 + content_offset)
+    name_y = bottom + (10 if minimal else 10 if drawn else 43 + content_offset)
     canvas.drawString(left + 7, name_y, _fit_text(str(item["signer_name"]), bold_font, 9, text_width))
     identity_type = str(item.get("identity_document_type") or "").replace("BR_", "").replace("PT_", "")
     identity_masked = str(item.get("identity_document_masked") or "")
@@ -117,16 +135,16 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     identity_value = f"{identity_type}: {identity_masked}" if identity_type and identity_masked else ""
     identity_text = " · ".join(value for value in (identity_prefix, identity_value) if value)
     canvas.setFont(regular_font, 7)
-    if identity_text and not minimal:
+    if identity_text and variant == "full":
         canvas.drawString(left + 7, bottom + 30 + content_offset, _fit_text(identity_text, regular_font, 7, box_width - 14))
-    if company_representation and not minimal:
+    if has_organization and variant == "full":
         legal_name = str(
-            representation.get("legal_name")
-            or representation.get("display_name")
+            organization.get("legal_name")
+            or organization.get("display_name")
             or ""
         )
-        registration_type = str(representation.get("registration_type") or "").replace("BR_", "")
-        registration_masked = str(representation.get("registration_masked") or "")
+        registration_type = str(organization.get("registration_type") or "").replace("BR_", "")
+        registration_masked = str(organization.get("registration_masked") or "")
         canvas.setFont(bold_font, 7)
         canvas.drawString(left + 7, bottom + 41, _fit_text(legal_name, bold_font, 7, box_width - 14))
         canvas.setFont(regular_font, 7)
@@ -136,13 +154,10 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     evidence_label = {"pt-BR": "evidência", "en": "evidence", "es": "evidencia", "ja-JP": "証拠"}.get(locale, "evidence")
     timezone = str(stamp.get("timezone", "UTC"))[:32]
     canvas.setFont(regular_font, 6.5)
-    if not minimal:
+    if variant == "full":
         canvas.drawString(left + 7, bottom + 18, _fit_text(f'{item["signed_at"]} · {timezone}', regular_font, 6.5, box_width - 14))
         canvas.drawString(left + 7, bottom + 7, _fit_text(f'{evidence_label}: {item["evidence_sha256"][:16]}', regular_font, 6.5, box_width - 14))
-    for data_url, image_left in (
-        (customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - 42),
-        (item.get("drawn_signature_png_data_url"), left + box_width * 0.55),
-    ):
+    for data_url, image_left in ((customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - 42),):
         if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
             try:
                 canvas.drawImage(ImageReader(BytesIO(b64decode(data_url.split(",", 1)[1]))), image_left, bottom + 8, width=min(36, box_width * 0.35), height=min(24, box_height * 0.3), preserveAspectRatio=True, mask="auto")
@@ -171,6 +186,16 @@ def _alpha3_country_code(country_code: str) -> str:
         "ES": "ESP",
         "US": "USA",
     }.get(country_code.upper(), country_code.upper())
+
+
+def _stamp_locale_for_country(country_code: str | None, fallback: object = "en") -> str:
+    return {
+        "BR": "pt-BR",
+        "PT": "pt-BR",
+        "ES": "es",
+        "JP": "ja-JP",
+        "US": "en",
+    }.get(str(country_code or "").upper(), str(fallback or "en"))
 
 
 def _draw_country_flag(canvas: Canvas, left: float, bottom: float, country_code: str) -> None:

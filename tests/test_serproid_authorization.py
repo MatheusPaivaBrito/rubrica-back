@@ -20,7 +20,7 @@ def test_serpro_authorization_binds_one_signer_and_uses_pkce(monkeypatch) -> Non
     request_id, signer_id = uuid4(), uuid4()
     context = SimpleNamespace(
         request=SimpleNamespace(id=request_id, status="open", signer_count=1, signed_count=0, document_sha256="a" * 64, signature_mode=SignatureMode.SERPROID),
-        signer=SimpleNamespace(id=signer_id, status="pending"),
+        signer=SimpleNamespace(id=signer_id, status="pending", signature_mode=SignatureMode.SERPROID),
     )
     monkeypatch.setattr(serproid_service.database_workflow_service, "signing_context", lambda *_args: context)
 
@@ -48,7 +48,7 @@ def test_serpro_authorization_binds_one_signer_and_uses_pkce(monkeypatch) -> Non
     assert attempt["signer_id"] == str(signer_id)
     assert attempt["document_sha256"] == "a" * 64
 
-    context.request.signature_mode = SignatureMode.EVIDENCE
+    context.signer.signature_mode = SignatureMode.EVIDENCE
     with pytest.raises(WorkflowError, match="does not use Serpro ID"):
         serproid_service.start_authorization("signing-token", "signer@example.com", command, "127.0.0.1", "test-browser")
 
