@@ -40,6 +40,8 @@ DEV_SEED = $(DEV_COMPOSE) -f compose/services/seed.yml
 PRODUCTION_MAINTENANCE = $(PRODUCTION_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 STAGING_MAINTENANCE = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f compose/services/alembic-production.yml
 STAGING_SEED = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f compose/services/seed-staging.yml
+STAGING_TOOLS_IMAGE ?= rubrica-staging-tools:local
+STAGING_TOOLS = docker run --rm -i --volume "$(CURDIR):/app" --workdir /app $(STAGING_TOOLS_IMAGE)
 BACKUP_ROOT ?= backups
 ECNPJ_DOCUMENT_DIR ?= /srv/rubrica-ecnpj
 ECNPJ_PFX_FILE ?= /etc/rubrica/secrets/empresa-ecnpj-a1.pfx
@@ -150,14 +152,18 @@ dev-bootstrap:
 	$(MAKE) --no-print-directory dev-seed DEV_ENV_FILE=$(DEV_ENV_FILE) LOCAL_ENV_FILE=$(DEV_ENV_FILE)
 	$(MAKE) --no-print-directory dev-docker DEV_ENV_FILE=$(DEV_ENV_FILE) services="$(services)"
 
-staging-secrets-init:
-	@test -f "$(STAGING_ENV_FILE)" || cp .env.staging.example "$(STAGING_ENV_FILE)"
-	STAGING_ENV_FILE=$(STAGING_ENV_FILE) poetry run python -m toolbox.dev.init_staging_secrets
+.PHONY: staging-tools-build
+staging-tools-build:
+	docker build --tag $(STAGING_TOOLS_IMAGE) --file apps/core_api/dockerfile .
 
-staging-ensure: ensure-observability-network
-	poetry run python -m toolbox.checks.staging_readiness "$(STAGING_ENV_FILE)"
+staging-secrets-init: staging-tools-build
+	@test -f "$(STAGING_ENV_FILE)" || cp .env.staging.example "$(STAGING_ENV_FILE)"
+	docker run --rm -i --volume "$(CURDIR):/app" --workdir /app --env STAGING_ENV_FILE=$(STAGING_ENV_FILE) $(STAGING_TOOLS_IMAGE) python -m toolbox.dev.init_staging_secrets
+
+staging-ensure: ensure-observability-network staging-tools-build
+	$(STAGING_TOOLS) python -m toolbox.checks.staging_readiness "$(STAGING_ENV_FILE)"
 	$(STAGING_COMPOSE) config --quiet
-	@$(STAGING_COMPOSE) config --format json | poetry run python toolbox/checks/compose_contract.py staging
+	@$(STAGING_COMPOSE) config --format json | $(STAGING_TOOLS) python toolbox/checks/compose_contract.py staging
 
 staging-up: staging-ensure
 	$(STAGING_COMPOSE) up -d --build --wait
