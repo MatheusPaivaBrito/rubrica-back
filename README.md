@@ -120,11 +120,12 @@ Remote staging uses a dedicated remotely managed Cloudflare Tunnel published at
 `https://staging.rubricasignature.com`. Configure the tunnel's public hostname
 with the service origin `http://gateway:8080` and store its dedicated token in
 the staging secret `cloudflare_tunnel_token`. Do not reuse the production
-tunnel token. Stripe, Resend and
-their configuration remain optional: billing uses the fake provider and email
-uses `local_ack` until an integration is deliberately tested. For Stripe, add
-a real `sk_test_...` secret and test Price IDs, switch `BILLING_PROVIDER`, then
-run `make staging-stripe-up`; `make staging-stripe-logs` confirms forwarding.
+tunnel token. Stripe, Resend and their configuration remain optional: billing
+uses the fake provider and email uses `local_ack` until an integration is
+deliberately tested. For Stripe, register the HTTPS staging webhook in test
+mode, store its `sk_test_...` key and endpoint-specific `whsec_...` secret as
+staging Docker Secrets, configure the test Price IDs, and switch
+`BILLING_PROVIDER` to `stripe`. Stripe CLI remains a development-only tool.
 Use `make staging-public-url` to display the configured stable URL.
 
 See [AGENTS.md](AGENTS.md) and `make help` for the complete contract.

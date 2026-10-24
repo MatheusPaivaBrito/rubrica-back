@@ -49,7 +49,7 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-public-url staging-docs-url staging-stripe-up staging-stripe-down staging-stripe-logs staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-public-url staging-docs-url staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 
 help:
 	@echo "Rúbrica — comandos por ambiente"
@@ -80,9 +80,6 @@ help:
 	@echo "  make staging-logs              Acompanha os logs"
 	@echo "  make staging-public-url        Mostra a URL pública estável do staging"
 	@echo "  make staging-docs-url          Mostra a URL pública das contas de teste"
-	@echo "  make staging-stripe-up         Inicia Stripe CLI opcional em test mode"
-	@echo "  make staging-stripe-down       Encerra somente o Stripe CLI"
-	@echo "  make staging-stripe-logs       Acompanha listener e webhooks Stripe test"
 	@echo "  make staging-down              Encerra preservando volumes"
 	@echo ""
 	@echo "Qualidade"
@@ -188,17 +185,6 @@ staging-docs-url:
 	@base="$$(sed -n 's/^PUBLIC_WEB_URL=//p' "$(STAGING_ENV_FILE)" | tail -n 1)"; \
 		test -n "$$base" || (echo "[error] PUBLIC_WEB_URL não está configurada em $(STAGING_ENV_FILE)"; exit 2); \
 		echo "$$base/test-accounts/"
-
-staging-stripe-logs:
-	$(STAGING_COMPOSE) --profile staging-stripe logs -f --tail=100 stripe-cli
-
-staging-stripe-up: staging-ensure
-	@key="$$(tr -d '\r\n' < .secrets/staging/stripe_secret_key)"; \
-		case "$$key" in sk_test_staging_placeholder_*|sk_live_*|"") echo "[error] configure a real sk_test_ key in .secrets/staging/stripe_secret_key"; exit 2;; sk_test_*) ;; *) echo "[error] staging accepts only a Stripe sk_test_ key"; exit 2;; esac
-	$(STAGING_COMPOSE) --profile staging-stripe up -d --wait stripe-cli
-
-staging-stripe-down:
-	$(STAGING_COMPOSE) --profile staging-stripe stop stripe-cli
 
 staging-migrate: staging-ensure
 	$(STAGING_COMPOSE) up -d --wait postgres

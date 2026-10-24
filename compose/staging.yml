@@ -15,11 +15,8 @@ services:
     extends: {file: ./services/auth-api.yml, service: production}
   core-api:
     extends: {file: ./services/core-api.yml, service: production}
-    environment:
-      STRIPE_RUNTIME_WEBHOOK_SECRET_FILE: /run/rubrica/stripe/stripe_webhook_secret
     volumes:
       - document_storage:/var/lib/rubrica/documents
-      - stripe_webhook_runtime:/run/rubrica/stripe:ro
   eventing-api:
     extends: {file: ./services/eventing-api.yml, service: production}
   observability-api:
@@ -65,46 +62,10 @@ services:
   cloudflared:
     extends: {file: ./services/cloudflared.yml, service: production}
 
-  stripe-cli:
-    image: stripe/stripe-cli:latest
-    profiles: ["staging-stripe"]
-    restart: unless-stopped
-    entrypoint: ["/bin/sh", "-ec"]
-    command:
-      - |
-        api_key="$$(tr -d '\r\n' < /run/secrets/stripe_secret_key)"
-        /bin/stripe listen \
-          --api-key "$$api_key" \
-          --device-name rubrica-staging \
-          --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed \
-          --forward-to http://core-api:8000/billing/webhooks/stripe 2>&1 | \
-        while IFS= read -r line; do
-          webhook_secret="$$(printf '%s\n' "$$line" | sed -n 's/.*\(whsec_[[:alnum:]]*\).*/\1/p')"
-          if [ -n "$$webhook_secret" ]; then
-            umask 077
-            printf '%s' "$$webhook_secret" > /runtime/stripe_webhook_secret.tmp
-            mv /runtime/stripe_webhook_secret.tmp /runtime/stripe_webhook_secret
-            echo "Ready! Stripe test webhook secret synchronized with Core."
-          else
-            printf '%s\n' "$$line"
-          fi
-        done
-    secrets:
-      - stripe_secret_key
-    volumes:
-      - stripe_webhook_runtime:/runtime
-    depends_on:
-      core-api:
-        condition: service_healthy
-    networks:
-      - rubrica_internal
-      - rubrica_external
-
 volumes:
   postgres_data:
   redis_data:
   document_storage:
-  stripe_webhook_runtime:
 
 networks:
   rubrica_internal:
