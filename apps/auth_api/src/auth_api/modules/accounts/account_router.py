@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 
 from auth_api.modules.accounts.account_schema import (
     AccountActionAccepted,
@@ -50,12 +51,22 @@ async def request_email_verification(
 @router.post("/verify-email", response_model=AccountActionAccepted)
 async def verify_email(payload: EmailVerification) -> AccountActionAccepted:
     try:
-        account_service.verify_email(payload.token, payload.new_password)
+        account_service.verify_email(
+            payload.token,
+            payload.new_password,
+            identity_document_type=payload.identity_document_type,
+            identity_document_country=payload.identity_document_country,
+            identity_document_value=payload.identity_document_value,
+        )
     except InvalidAccountTokenError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Verification token is invalid or expired",
         ) from exc
+    except AccountConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="E-mail or identity document is already registered") from exc
     return AccountActionAccepted()
 
 

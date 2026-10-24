@@ -474,6 +474,24 @@ class DatabaseSignatureWorkflowService:
             self._require_request_access(db, request, actor_id)
             return [self._signer_read(item) for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id).order_by(SignerEntity.id)).all()]
 
+    def invite_signer_account(self, request_id: str, signer_id: str, actor_id: str) -> bool:
+        from core_api.modules.tenant.user_client import invite_signer_account
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            self._require_request_access(db, request, actor_id)
+            if request.status != RequestStatus.DRAFT.value:
+                raise WorkflowError("Signer accounts can only be invited while the request is a draft", 409)
+            signer = db.get(SignerEntity, signer_id)
+            if signer is None or signer.signature_request_id != request.id:
+                raise WorkflowError("Signer not found", 404)
+            if identity_summary(signer.email).identifier_type in {"BR_CPF", "BR_CNPJ"}:
+                raise WorkflowError("Signer already has a Serpro ID eligible identity", 409)
+            name, email, locale = signer.name, signer.email, signer.preferred_locale
+        sent = invite_signer_account(name=name, email=email, locale=locale)
+        if not sent:
+            raise WorkflowError("This e-mail already belongs to an active Rubrica account", 409)
+        return True
+
     def list_signer_contacts(self, tenant_id: UUID, actor_id: str, query: str = "") -> list[SignerContactRead]:
         search = query.strip().lower()
         with SessionLocal() as db:

@@ -128,12 +128,35 @@ class AccountService:
             locale=user.preferred_locale,
         )
 
-    def verify_email(self, raw_token: str, new_password: str) -> None:
+    def invite_signer(self, payload) -> InternalMemberInvitationResult:
         with SessionLocal.begin() as database:
-            token = self._consume_token(database, raw_token, "verify_email")
+            user = self._user_by_email(database, payload.email)
+            if user is not None and user.is_active:
+                return InternalMemberInvitationResult(user_id=str(user.id), email=user.email, activation_sent=False)
+            if user is None:
+                user = UserEntity(
+                    name=payload.name.strip(), email=payload.email.strip().lower(),
+                    password_hash=hash_password(token_urlsafe(48)),
+                    preferred_locale=payload.preferred_locale,
+                    email_verified=False, is_active=False,
+                )
+                database.add(user)
+                database.flush()
+                database.add(UserRoleEntity(user_id=user.id, role="signature_operator"))
+            token = self._issue_token(database, user, "verify_signer_email", settings.AUTH_EMAIL_VERIFICATION_TTL_SECONDS)
+        self._send_verification(user.email, token, name=user.name, locale=user.preferred_locale, identity_required=True)
+        return InternalMemberInvitationResult(user_id=str(user.id), email=user.email, activation_sent=True)
+
+    def verify_email(self, raw_token: str, new_password: str, *, identity_document_type: str | None = None, identity_document_country: str | None = None, identity_document_value: str | None = None) -> None:
+        with SessionLocal.begin() as database:
+            token = self._consume_token(database, raw_token, ("verify_email", "verify_signer_email"))
             user = database.get(UserEntity, token.user_id)
             if user is None:
                 raise InvalidAccountTokenError
+            if token.purpose == "verify_signer_email":
+                if not identity_document_type or not identity_document_country or not identity_document_value:
+                    raise AccountConflictError("CPF is required to activate a Serpro ID signer account")
+                add_identifier(database, user_id=user.id, issuing_country=identity_document_country, identifier_type=identity_document_type, value=identity_document_value)
             user.password_hash = hash_password(new_password)
             user.email_verified = True
             user.is_active = True
@@ -180,8 +203,9 @@ class AccountService:
         *,
         name: str | None = None,
         locale: str = "en",
+        identity_required: bool = False,
     ) -> None:
-        query = urlencode({"token": token, **({"returnUrl": return_url} if return_url else {})})
+        query = urlencode({"token": token, **({"returnUrl": return_url} if return_url else {}), **({"identity": "required"} if identity_required else {})})
         url = f"{settings.AUTH_PUBLIC_WEB_URL.rstrip('/')}/verify-email?{query}"
         request_account_email(
             recipient=email,
@@ -217,12 +241,13 @@ class AccountService:
         return raw_token
 
     @staticmethod
-    def _consume_token(database, raw_token: str, purpose: str) -> AccountTokenEntity:
+    def _consume_token(database, raw_token: str, purpose: str | tuple[str, ...]) -> AccountTokenEntity:
+        purposes = (purpose,) if isinstance(purpose, str) else purpose
         token = database.scalar(
             select(AccountTokenEntity)
             .where(
                 AccountTokenEntity.token_hash == AccountService._digest(raw_token),
-                AccountTokenEntity.purpose == purpose,
+                AccountTokenEntity.purpose.in_(purposes),
                 AccountTokenEntity.consumed_at.is_(None),
                 AccountTokenEntity.expires_at > DateTimeService.utc_now(),
                 AccountTokenEntity.deleted_at.is_(None),

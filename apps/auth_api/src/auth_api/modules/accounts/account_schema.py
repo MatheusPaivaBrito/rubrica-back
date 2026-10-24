@@ -128,11 +128,37 @@ class InternalMemberInvitationResult(BaseModel):
     activation_sent: bool
 
 
+class InternalSignerInvitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=2, max_length=180)
+    email: str = Field(min_length=5, max_length=255, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    preferred_locale: SupportedLocale = "pt-BR"
+
+    @field_validator("preferred_locale", mode="before")
+    @classmethod
+    def normalize_signer_locale(cls, value: object) -> SupportedLocale:
+        return normalize_locale(value)
+
+
 class EmailVerification(BaseModel):
     token: str = Field(min_length=32, max_length=255)
     new_password: str = Field(min_length=8, max_length=128)
+    identity_document_type: IdentityDocumentType | None = None
+    identity_document_country: str | None = None
+    identity_document_value: str | None = Field(default=None, min_length=4, max_length=80)
 
     _validate_new_password = field_validator("new_password")(validate_new_password)
+
+    @model_validator(mode="after")
+    def validate_activation_identity(self) -> "EmailVerification":
+        provided = (self.identity_document_type, self.identity_document_country, self.identity_document_value)
+        if any(provided) and not all(provided):
+            raise ValueError("identity document type, country, and value must be provided together")
+        if self.identity_document_type and self.identity_document_value:
+            self.identity_document_type = normalize_identifier_type(self.identity_document_type)
+            validate_identifier(self.identity_document_type, self.identity_document_value)
+        return self
 
 
 class EmailVerificationRequest(BaseModel):

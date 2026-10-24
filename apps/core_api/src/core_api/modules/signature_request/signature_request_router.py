@@ -78,6 +78,12 @@ async def add_signer(request_id: UUID, payload: SignerCreate, context: AuthConte
     return workflow_service.add_signer(request_id, payload, context.subject)
 
 
+@router.post("/signature-requests/{request_id}/signers/{signer_id}/account-invitation", status_code=status.HTTP_204_NO_CONTENT, tags=["signature requests - command"])
+async def invite_signer_account(request_id: UUID, signer_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> Response:
+    workflow_service.invite_signer_account(str(request_id), str(signer_id), context.subject)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/signature-requests/{request_id}/stamp-configuration", response_model=StampConfiguration, tags=["signature requests - query"])
 async def stamp_configuration(request_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:read"))) -> StampConfiguration:
     return workflow_service.stamp_configuration(request_id, context.subject)

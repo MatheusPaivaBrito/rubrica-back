@@ -23,7 +23,7 @@ from auth_api.modules.users.user_schema import (
     UserPreferencesUpdate,
     UserRead,
 )
-from auth_api.modules.accounts.account_schema import InternalMemberInvitation, InternalMemberInvitationResult
+from auth_api.modules.accounts.account_schema import InternalMemberInvitation, InternalMemberInvitationResult, InternalSignerInvitation
 from auth_api.modules.accounts.account_service import AccountConflictError, account_service
 from auth_api.modules.accounts.notification_client import AccountEmailDeliveryError
 
@@ -54,6 +54,24 @@ async def internal_member_invite(
         raise HTTPException(status_code=403, detail="Service authentication failed")
     try:
         return account_service.invite_member(payload)
+    except IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="E-mail or identity document is already registered") from exc
+    except (AccountConflictError, AccountEmailDeliveryError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.post("/internal/invite-signer", response_model=InternalMemberInvitationResult, include_in_schema=False)
+async def internal_signer_invite(
+    payload: InternalSignerInvitation,
+    x_rubrica_service: str | None = Header(default=None),
+    x_rubrica_service_key: str | None = Header(default=None),
+) -> InternalMemberInvitationResult:
+    from auth_api.infrastructure.settings import settings
+    from shared_kernel.security.service_tokens import verify_service_token
+    if x_rubrica_service != "core_api" or not settings.CORE_INTERNAL_SERVICE_KEY or not verify_service_token(x_rubrica_service_key or "", settings.CORE_INTERNAL_SERVICE_KEY):
+        raise HTTPException(status_code=403, detail="Service authentication failed")
+    try:
+        return account_service.invite_signer(payload)
     except IntegrityError as exc:
         raise HTTPException(status_code=409, detail="E-mail or identity document is already registered") from exc
     except (AccountConflictError, AccountEmailDeliveryError) as exc:
