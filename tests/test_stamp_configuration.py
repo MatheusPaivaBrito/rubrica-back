@@ -7,6 +7,7 @@ from PIL import Image
 from pydantic import ValidationError
 
 from core_api.modules.signature_request.database_workflow_service import DatabaseSignatureWorkflowService, WorkflowError
+from core_api.modules.signature_request.signed_pdf import _trim_transparent_png
 from core_api.modules.signature_request.workflow_schema import (
     ClientEvidence,
     GeolocationEvidence,
@@ -36,6 +37,16 @@ def test_stamp_images_are_decoded_and_normalized_as_real_pngs() -> None:
 
     assert customization.logo_png_data_url.startswith("data:image/png;base64,")
     assert command.drawn_signature_png_data_url.startswith("data:image/png;base64,")
+
+
+def test_stamp_logo_transparent_padding_is_removed_before_rendering() -> None:
+    source = BytesIO()
+    image = Image.new("RGBA", (192, 192), (0, 0, 0, 0))
+    image.paste((168, 32, 53, 255), (24, 72, 168, 120))
+    image.save(source, format="PNG")
+
+    with Image.open(_trim_transparent_png(source.getvalue())) as trimmed:
+        assert trimmed.size == (144, 48)
 
 
 def test_stamp_images_reject_fake_png_headers() -> None:

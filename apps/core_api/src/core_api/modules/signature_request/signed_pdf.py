@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any
 
 from pypdf import PdfReader, PdfWriter
+from PIL import Image
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib.utils import ImageReader
@@ -162,12 +163,26 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     for data_url, image_left in ((customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - logo_width - 7),):
         if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
             try:
-                canvas.drawImage(ImageReader(BytesIO(b64decode(data_url.split(",", 1)[1]))), image_left, bottom + 7, width=logo_width, height=logo_height, preserveAspectRatio=True, anchor="se", mask="auto")
+                logo = _trim_transparent_png(b64decode(data_url.split(",", 1)[1]))
+                canvas.drawImage(ImageReader(logo), image_left, bottom + 7, width=logo_width, height=logo_height, preserveAspectRatio=True, anchor="se", mask="auto")
             except Exception:
                 pass
     canvas.save()
     stream.seek(0)
     return stream
+
+
+def _trim_transparent_png(content: bytes) -> BytesIO:
+    """Remove transparent padding so the visible brand fills its stamp area."""
+    with Image.open(BytesIO(content)) as source:
+        image = source.convert("RGBA")
+        alpha_bounds = image.getchannel("A").getbbox()
+        if alpha_bounds:
+            image = image.crop(alpha_bounds)
+        output = BytesIO()
+        image.save(output, format="PNG", optimize=True)
+        output.seek(0)
+        return output
 
 
 def _fit_text(value: str, font_name: str, font_size: float, max_width: float) -> str:
