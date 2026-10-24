@@ -17,7 +17,7 @@ REQUIRED_SECRETS = (
     "evidence_secret", "tenant_identity_encryption_key", "tenant_identity_hmac_key",
     "stripe_secret_key", "stripe_webhook_secret", "contact_turnstile_secret_key",
     "serproid_client_secret", "platform_grafana_service_token",
-    "observability_internal_service_key",
+    "observability_internal_service_key", "cloudflare_tunnel_token",
 )
 
 
@@ -39,6 +39,10 @@ def main() -> int:
         errors.append("staging must use local document storage")
     if values.get("BILLING_PROVIDER") not in {"fake", "stripe"}:
         errors.append("staging BILLING_PROVIDER must be fake or stripe")
+    if values.get("PUBLIC_WEB_URL") != "https://staging.rubricasignature.com":
+        errors.append("staging PUBLIC_WEB_URL must use https://staging.rubricasignature.com")
+    if values.get("SIGNING_APP_URL") != "https://staging.rubricasignature.com/signing":
+        errors.append("staging SIGNING_APP_URL must use the stable staging hostname")
     secrets_dir = staging_secrets_dir(values.get("SECRETS_DIR", "../.secrets/staging"))
     for name in REQUIRED_SECRETS:
         path = secrets_dir / name

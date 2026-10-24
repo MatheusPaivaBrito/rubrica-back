@@ -116,12 +116,16 @@ fixture catalog used in development, starts the stack and runs the smoke. Use
 `make staging-seed` to reapply only those fixtures explicitly; production never
 runs test-account seeds.
 
-Remote staging starts a Cloudflare Quick Tunnel by default. Stripe, Resend and
+Remote staging uses a dedicated remotely managed Cloudflare Tunnel published at
+`https://staging.rubricasignature.com`. Configure the tunnel's public hostname
+with the service origin `http://gateway:8080` and store its dedicated token in
+the staging secret `cloudflare_tunnel_token`. Do not reuse the production
+tunnel token. Stripe, Resend and
 their configuration remain optional: billing uses the fake provider and email
 uses `local_ack` until an integration is deliberately tested. For Stripe, add
 a real `sk_test_...` secret and test Price IDs, switch `BILLING_PROVIDER`, then
 run `make staging-stripe-up`; `make staging-stripe-logs` confirms forwarding.
-Use `make staging-public-url` to retrieve the emitted `trycloudflare.com` URL.
+Use `make staging-public-url` to display the configured stable URL.
 
 See [AGENTS.md](AGENTS.md) and `make help` for the complete contract.
 

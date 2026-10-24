@@ -72,13 +72,13 @@ help:
 	@echo "Staging — aplicação completa em Docker"
 	@echo "  make staging-secrets-init      Cria somente os secrets isolados de staging"
 	@echo "  make staging-bootstrap         Executa migrations, seed, stack completa e smoke"
-	@echo "  make staging-up                Sobe stack e Quick Tunnel sem migration/seed"
+	@echo "  make staging-up                Sobe stack e túnel Cloudflare nomeado sem migration/seed"
 	@echo "  make staging-migrate           Aplica migrations nos cinco bancos de staging"
 	@echo "  make staging-seed              Cria/atualiza as mesmas contas de teste no staging"
 	@echo "  make staging-status            Exibe todos os contêineres"
 	@echo "  make staging-smoke             Valida stack e gateway"
 	@echo "  make staging-logs              Acompanha os logs"
-	@echo "  make staging-public-url        Mostra a URL pública emitida pelo Quick Tunnel"
+	@echo "  make staging-public-url        Mostra a URL pública estável do staging"
 	@echo "  make staging-docs-url          Mostra a URL pública das contas de teste"
 	@echo "  make staging-stripe-up         Inicia Stripe CLI opcional em test mode"
 	@echo "  make staging-stripe-down       Encerra somente o Stripe CLI"
@@ -179,19 +179,14 @@ staging-logs:
 	$(STAGING_COMPOSE) logs -f --tail=100
 
 staging-public-url:
-	@base=""; attempt=0; \
-		while [ -z "$$base" ] && [ $$attempt -lt 20 ]; do \
-			base="$$($(STAGING_COMPOSE) logs --no-color quick-tunnel 2>/dev/null | grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' | tail -n 1)"; \
-			[ -n "$$base" ] || sleep 1; \
-			attempt=$$((attempt + 1)); \
-		done; \
-		test -n "$$base" || (echo "[error] Quick Tunnel ainda não emitiu uma URL; consulte 'make staging-logs'"; exit 2); \
+	@base="$$(sed -n 's/^PUBLIC_WEB_URL=//p' "$(STAGING_ENV_FILE)" | tail -n 1)"; \
+		test -n "$$base" || (echo "[error] PUBLIC_WEB_URL não está configurada em $(STAGING_ENV_FILE)"; exit 2); \
 		echo "[ok] Rubrica staging: $$base"; \
 		echo "[ok] Contas de teste: $$base/test-accounts/"
 
 staging-docs-url:
-	@base="$$($(STAGING_COMPOSE) logs --no-color quick-tunnel | grep -Eo 'https://[-a-z0-9]+\.trycloudflare\.com' | tail -n 1)"; \
-		test -n "$$base" || (echo "[error] Quick Tunnel ainda não emitiu uma URL; consulte 'make staging-logs'"; exit 2); \
+	@base="$$(sed -n 's/^PUBLIC_WEB_URL=//p' "$(STAGING_ENV_FILE)" | tail -n 1)"; \
+		test -n "$$base" || (echo "[error] PUBLIC_WEB_URL não está configurada em $(STAGING_ENV_FILE)"; exit 2); \
 		echo "$$base/test-accounts/"
 
 staging-stripe-logs:
@@ -215,10 +210,10 @@ staging-seed: staging-migrate
 
 staging-smoke: staging-ensure
 	$(STAGING_COMPOSE) ps --status running
-	@test -n "$$($(STAGING_COMPOSE) ps --services --status running quick-tunnel)" || (echo "[error] staging Quick Tunnel is not running"; exit 2)
+	@test -n "$$($(STAGING_COMPOSE) ps --services --status running cloudflared)" || (echo "[error] staging named Cloudflare Tunnel is not running"; exit 2)
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/test-accounts/" >/dev/null
-	@echo "[ok] staging gateway, test accounts, Quick Tunnel and required containers are operational"
+	@echo "[ok] staging gateway, test accounts, named Cloudflare Tunnel and required containers are operational"
 
 staging-bootstrap: staging-seed
 	$(MAKE) --no-print-directory staging-up STAGING_ENV_FILE=$(STAGING_ENV_FILE)

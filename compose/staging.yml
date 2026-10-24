@@ -62,6 +62,9 @@ services:
       - rubrica_internal
       - rubrica_external
 
+  cloudflared:
+    extends: {file: ./services/cloudflared.yml, service: production}
+
   stripe-cli:
     image: stripe/stripe-cli:latest
     profiles: ["staging-stripe"]
@@ -92,17 +95,6 @@ services:
       - stripe_webhook_runtime:/runtime
     depends_on:
       core-api:
-        condition: service_healthy
-    networks:
-      - rubrica_internal
-      - rubrica_external
-
-  quick-tunnel:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "--url", "http://gateway:8080"]
-    depends_on:
-      gateway:
         condition: service_healthy
     networks:
       - rubrica_internal

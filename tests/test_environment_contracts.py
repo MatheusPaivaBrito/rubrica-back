@@ -26,7 +26,7 @@ def test_production_contract_rejects_host_ports_and_dev_tools() -> None:
 
 
 def test_staging_contract_allows_only_gateway_host_port() -> None:
-    edge = {"quick-tunnel": {}, "stripe-cli": {}}
+    edge = {"cloudflared": {}, "stripe-cli": {}}
     assert validate(
         "staging",
         {"services": {"gateway": {"ports": [{"published": "7271"}]}, "core-api": {}, **edge}},
