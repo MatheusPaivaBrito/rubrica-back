@@ -157,10 +157,12 @@ def _stamp_overlay(width: float, height: float, item: dict[str, Any]) -> BytesIO
     if variant == "full":
         canvas.drawString(left + 7, bottom + 18, _fit_text(f'{item["signed_at"]} · {timezone}', regular_font, 6.5, box_width - 14))
         canvas.drawString(left + 7, bottom + 7, _fit_text(f'{evidence_label}: {item["evidence_sha256"][:16]}', regular_font, 6.5, box_width - 14))
-    for data_url, image_left in ((customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - 42),):
+    logo_width = min(72, box_width * 0.28)
+    logo_height = min(36, box_height * 0.46)
+    for data_url, image_left in ((customization.get("logo_png_data_url") if customization.get("show_logo") else None, left + box_width - logo_width - 7),):
         if isinstance(data_url, str) and data_url.startswith("data:image/png;base64,"):
             try:
-                canvas.drawImage(ImageReader(BytesIO(b64decode(data_url.split(",", 1)[1]))), image_left, bottom + 8, width=min(36, box_width * 0.35), height=min(24, box_height * 0.3), preserveAspectRatio=True, mask="auto")
+                canvas.drawImage(ImageReader(BytesIO(b64decode(data_url.split(",", 1)[1]))), image_left, bottom + 7, width=logo_width, height=logo_height, preserveAspectRatio=True, anchor="se", mask="auto")
             except Exception:
                 pass
     canvas.save()
