@@ -224,8 +224,7 @@ staging-clone-core-from-production:
 		$(STAGING_COMPOSE) stop core-api auth-api eventing-api notification-api observability-api gateway web docs cloudflared >/dev/null; \
 		$(PRODUCTION_COMPOSE) exec -T postgres sh -c 'pg_dump -U "$$POSTGRES_USER" -Fc "$$1"' _ "$$production_core_db" >"$$dump_file"; \
 		test -s "$$dump_file"; \
-		$(STAGING_COMPOSE) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -v core_db="$$1" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=:'"'"'core_db'"'"' AND pid <> pg_backend_pid()" >/dev/null' _ "$$staging_core_db"; \
-		$(STAGING_COMPOSE) exec -T postgres sh -c 'dropdb -U "$$POSTGRES_USER" --if-exists "$$1" && createdb -U "$$POSTGRES_USER" "$$1"' _ "$$staging_core_db"; \
+		$(STAGING_COMPOSE) exec -T postgres sh -c 'dropdb --force -U "$$POSTGRES_USER" --if-exists "$$1" && createdb -U "$$POSTGRES_USER" "$$1"' _ "$$staging_core_db"; \
 		$(STAGING_COMPOSE) exec -T postgres sh -c 'pg_restore -U "$$POSTGRES_USER" -d "$$1" --no-owner --no-privileges --exit-on-error' _ "$$staging_core_db" <"$$dump_file"; \
 		echo "[ok] rubrica_core restaurado no PostgreSQL isolado de staging; aplicação e integrações permanecem paradas"
 
@@ -269,8 +268,8 @@ test-integration: ensure-integration-services
 lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
 
-document-crypto-benchmark:
-	PYTHONPATH=$(TEST_PYTHONPATH) poetry run python -m toolbox.benchmark.document_crypto_benchmark $(if $(sizes),--sizes-mib $(sizes),) $(if $(repetitions),--repetitions $(repetitions),)
+document-crypto-benchmark: staging-tools-build
+	$(STAGING_TOOLS) python -m toolbox.benchmark.document_crypto_benchmark $(if $(sizes),--sizes-mib $(sizes),) $(if $(repetitions),--repetitions $(repetitions),)
 
 docs:
 	@test -f "$(DOCS_ENV_FILE)" || (echo "[error] arquivo de ambiente do MkDocs não encontrado: $(DOCS_ENV_FILE)"; exit 2)
