@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi.responses import StreamingResponse
 from uuid import UUID
 
 from core_api.modules.document.document_schema import DocumentCreate, DocumentRead
@@ -30,14 +31,14 @@ async def delete_document(document_id: UUID, force: bool = Query(False), context
 
 @router.get("/{document_id}/download", tags=["documents - query"])
 async def download_document(document_id: UUID, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
-    metadata, content = workflow_service.get_content(document_id, version, context.subject)
-    return Response(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename, attachment=True), "X-Content-Type-Options": "nosniff", "X-Document-SHA256": metadata.sha256})
+    metadata, content = workflow_service.get_content_stream(document_id, version, context.subject)
+    return StreamingResponse(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename, attachment=True), "X-Content-Type-Options": "nosniff", "X-Document-SHA256": metadata.sha256, "Cache-Control": "private, no-store", "X-Accel-Buffering": "no"})
 
 
 @router.get("/{document_id}/preview", tags=["documents - query"])
 async def preview_document(document_id: UUID, version: int | None = None, context: AuthContext = Depends(require_permission("documents:read"))) -> Response:
-    metadata, content = workflow_service.get_content(document_id, version, context.subject)
-    return Response(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename), "X-Content-Type-Options": "nosniff", "X-Document-SHA256": metadata.sha256})
+    metadata, content = workflow_service.get_content_stream(document_id, version, context.subject)
+    return StreamingResponse(content, media_type="application/pdf", headers={"Content-Disposition": pdf_content_disposition(metadata.original_filename), "X-Content-Type-Options": "nosniff", "X-Document-SHA256": metadata.sha256, "Cache-Control": "private, no-store", "X-Accel-Buffering": "no"})
 
 
 @router.post("", response_model=DocumentRead, status_code=status.HTTP_201_CREATED, tags=["documents - command"])

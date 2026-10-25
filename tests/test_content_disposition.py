@@ -29,15 +29,24 @@ def test_ascii_filename_and_attachment_are_preserved() -> None:
 def test_signing_document_route_returns_unicode_filename_without_server_error(monkeypatch) -> None:
     filename = "Proposta JOA\u0303O.pdf"
     metadata = SimpleNamespace(original_filename=filename, content_type="application/pdf", sha256="digest")
+
+    async def streamed_content():
+        yield b"%PDF-1.4\n"
+
     monkeypatch.setattr(
         signature_request_router.workflow_service,
-        "signing_document",
-        lambda token, subject, administrator=False: (metadata, b"%PDF-1.4\n"),
+        "signing_document_stream",
+        lambda token, subject, administrator=False: (metadata, streamed_content()),
     )
     context = AuthContext(subject="signer@example.com", roles=frozenset(), permission_keys=frozenset())
 
-    response = asyncio.run(signature_request_router.signing_document("token", context))
+    async def request_and_read():
+        response = await signature_request_router.signing_document("token", context)
+        content = b"".join([chunk async for chunk in response.body_iterator])
+        return response, content
+
+    response, content = asyncio.run(request_and_read())
 
     assert response.status_code == 200
-    assert response.body.startswith(b"%PDF")
+    assert content.startswith(b"%PDF")
     assert "JOA%CC%83O.pdf" in response.headers["content-disposition"]

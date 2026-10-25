@@ -6,7 +6,7 @@ from hashlib import sha256
 from hmac import new as hmac_new
 from io import BytesIO
 from secrets import token_urlsafe
-from typing import Callable
+from typing import Callable, Iterator
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from sqlalchemy import func, or_, select
@@ -41,6 +41,22 @@ logger = logging.getLogger(__name__)
 class DatabaseSignatureWorkflowService:
     def __init__(self, storage: DocumentStorage) -> None:
         self.storage = storage
+
+    def _verified_storage_stream(
+        self,
+        storage_key: str,
+        expected_sha256: str,
+        *,
+        chunk_size: int = 256 * 1024,
+    ) -> Iterator[bytes]:
+        """Stream authenticated bytes and verify the canonical plaintext digest."""
+        digest = sha256()
+        with self.storage.get(storage_key) as stream:
+            while chunk := stream.read(chunk_size):
+                digest.update(chunk)
+                yield chunk
+        if digest.hexdigest() != expected_sha256:
+            raise WorkflowError("Stored document integrity check failed", 409)
 
     def create_document(self, payload: DocumentCreate, content: bytes) -> DocumentRead:
         if not content:
@@ -204,6 +220,28 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Stored document integrity check failed", 409)
         validate_pdf_upload(content, filename=metadata.original_filename, content_type="application/pdf")
         return metadata, content
+
+    def get_content_stream(
+        self,
+        document_id: str,
+        version: int | None = None,
+        actor_id: str | None = None,
+    ) -> tuple[DocumentVersionRead, Iterator[bytes]]:
+        with SessionLocal() as db:
+            document = self._document(db, document_id)
+            if actor_id is not None:
+                self._require_document_access(db, document, actor_id)
+            item = db.scalar(
+                select(DocumentVersionEntity).where(
+                    DocumentVersionEntity.document_id == document.id,
+                    DocumentVersionEntity.version == (version or document.version),
+                )
+            )
+            if item is None:
+                raise WorkflowError("Document version not found", 404)
+            metadata = self._version_read(item)
+            storage_key = item.storage_key
+        return metadata, self._verified_storage_stream(storage_key, metadata.sha256)
 
     def create_request(self, payload: SignatureRequestCreate) -> SignatureRequestRead:
         now = DateTimeService.utc_now()
@@ -737,6 +775,43 @@ class DatabaseSignatureWorkflowService:
         validate_pdf_upload(content, filename=metadata.original_filename, content_type="application/pdf")
         return metadata, content
 
+    def signing_document_stream(
+        self,
+        token: str,
+        auth_user_id: str,
+        *,
+        administrator: bool = False,
+    ) -> tuple[DocumentVersionRead, Iterator[bytes]]:
+        with SessionLocal() as db:
+            request = (
+                self._request_from_token(db, token)
+                if administrator
+                else self._resolve_request(db, token, auth_user_id, allow_completed=True)[1]
+            )
+            if administrator:
+                signer = db.scalar(
+                    select(SignerEntity).where(
+                        SignerEntity.signature_request_id == request.id,
+                        SignerEntity.auth_user_id == auth_user_id.lower(),
+                    )
+                )
+                if signer is None:
+                    self._require_request_access(db, request, auth_user_id)
+            version = db.scalar(
+                select(DocumentVersionEntity).where(
+                    DocumentVersionEntity.document_id == request.document_id,
+                    DocumentVersionEntity.version == request.document_version,
+                )
+            )
+            if version is None:
+                raise WorkflowError("Document version not found", 404)
+            metadata = self._version_read(version)
+            storage_key = request.base_artifact_storage_key or version.storage_key
+            expected_sha256 = request.base_artifact_sha256 or version.sha256
+            if request.base_artifact_sha256:
+                metadata = metadata.model_copy(update={"sha256": expected_sha256})
+        return metadata, self._verified_storage_stream(storage_key, expected_sha256)
+
     def view(self, token: str, auth_user_id: str) -> SignerRead:
         with SessionLocal.begin() as db:
             signer, request = self._resolve_request(db, token, auth_user_id, lock=True)
@@ -1196,6 +1271,33 @@ class DatabaseSignatureWorkflowService:
             raise WorkflowError("Signed document integrity check failed", 409)
         return f"rubrica-request-{request_id}-signed.pdf", digest, content
 
+    def signed_document_stream(
+        self,
+        request_id: str,
+        actor_id: str | None = None,
+    ) -> tuple[str, str, Iterator[bytes]]:
+        with SessionLocal() as db:
+            request = self._request(db, request_id)
+            if actor_id is not None:
+                self._require_request_access(db, request, actor_id)
+            signature = db.scalar(
+                select(SignatureEntity)
+                .where(
+                    SignatureEntity.signature_request_id == request.id,
+                    SignatureEntity.artifact_storage_key.is_not(None),
+                )
+                .order_by(SignatureEntity.signed_at.desc(), SignatureEntity.id.desc())
+                .limit(1)
+            )
+            if signature is None or not signature.artifact_storage_key or not signature.artifact_sha256:
+                raise WorkflowError("Signed document is not available", 404)
+            key, digest = signature.artifact_storage_key, signature.artifact_sha256
+        return (
+            f"rubrica-request-{request_id}-signed.pdf",
+            digest,
+            self._verified_storage_stream(key, digest),
+        )
+
     def signing_signed_document(self, token: str, auth_user_id: str, *, administrator: bool = False) -> tuple[str, str, bytes]:
         with SessionLocal() as db:
             if administrator:
@@ -1207,6 +1309,34 @@ class DatabaseSignatureWorkflowService:
                 _, request = self._resolve_request(db, token, auth_user_id, allow_completed=True)
             request_id = str(request.id)
         return self.signed_document(request_id)
+
+    def signing_signed_document_stream(
+        self,
+        token: str,
+        auth_user_id: str,
+        *,
+        administrator: bool = False,
+    ) -> tuple[str, str, Iterator[bytes]]:
+        with SessionLocal() as db:
+            if administrator:
+                request = self._request_from_token(db, token)
+                signer = db.scalar(
+                    select(SignerEntity).where(
+                        SignerEntity.signature_request_id == request.id,
+                        SignerEntity.auth_user_id == auth_user_id.lower(),
+                    )
+                )
+                if signer is None:
+                    self._require_request_access(db, request, auth_user_id)
+            else:
+                _, request = self._resolve_request(
+                    db,
+                    token,
+                    auth_user_id,
+                    allow_completed=True,
+                )
+            request_id = str(request.id)
+        return self.signed_document_stream(request_id)
 
     def signature_evidence(self, request_id: str, actor_id: str) -> list[SignatureEvidenceRead]:
         with SessionLocal() as db:

@@ -30,6 +30,7 @@ services:
       R2_DOCUMENTS_PREFIX: ${R2_DOCUMENTS_PREFIX-}
       DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/document_storage_encryption_key
       DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: ${DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT:-true}
+      DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES: ${DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES:-4194304}
     secrets:
       - postgres_password
       - auth_mfa_encryption_key

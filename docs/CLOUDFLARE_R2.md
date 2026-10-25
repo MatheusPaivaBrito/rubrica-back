@@ -37,11 +37,19 @@ Os alvos `make production-config`, `make production-migrate` e
 `make production-up` incluem esse overlay. Assim, a produção não volta
 acidentalmente ao volume local.
 
-O banco continua guardando somente a chave opaca do objeto. Antes do upload, o
-Core cifra cada PDF com AES-256-GCM e um nonce exclusivo. O R2 recebe apenas
-`application/octet-stream`; baixar um objeto diretamente pelo painel Cloudflare
-não produz um PDF legível. Upload, leitura, exclusão e backup passam pelo Core; o
-navegador não recebe credenciais, chave criptográfica nem URL pública.
+O banco continua guardando somente a chave opaca e o SHA-256 canônico do objeto.
+Antes do upload, o Core usa envelope encryption v2. A raiz do ambiente deriva os
+contextos independentes do tenant e do documento; cada objeto recebe uma DEK
+aleatória, embrulhada pelo contexto do documento. O conteúdo é cifrado com
+AES-256-GCM em chunks autenticados, atualmente de 4 MiB, e inclui storage key,
+contexto e ordinal como AAD. Troca de tenant, reordenação, adulteração ou
+truncamento falham de forma fechada.
+
+O R2 recebe somente `application/octet-stream`. Baixar um objeto diretamente
+pelo painel Cloudflare, por backup ou com uma credencial exclusiva do storage não
+produz PDF legível. O Core reutiliza o cliente/pool HTTP do R2 e entrega respostas
+autorizadas em streaming, autenticando e descriptografando chunks sem criar uma
+segunda cópia integral na memória. A senha do usuário nunca é material de chave.
 
 Durante uma migração controlada, `DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT=true`
 permite ler os objetos históricos. Primeiro faça o dry-run e depois aplique:
@@ -51,9 +59,53 @@ make production-encrypt-r2-documents
 make production-encrypt-r2-documents apply=1
 ```
 
-Depois que o segundo dry-run informar zero objetos legados, defina
+O leitor reconhece o formato v1 inicialmente implantado e plaintext somente
+durante a janela de migração. O migrador sempre grava o formato v2. Depois que o
+segundo dry-run informar zero objetos legados, defina
 `DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT=false` e recrie o Core. Nunca remova ou
 substitua a chave sem uma rotação/migração verificada.
+
+## Ensaio da migração em staging
+
+O ensaio usa somente o banco Core e o bucket descartável de staging. Produção é
+origem somente leitura. Primeiro substitua o banco Core de staging por um dump
+verificado de produção; o comando exige confirmação literal e deixa o Core parado:
+
+```bash
+make staging-clone-core-from-production \
+  confirm=CLONE_PRODUCTION_CORE_TO_STAGING
+```
+
+O copiador R2 consulta somente as keys referenciadas pelo banco clonado, recusa
+buckets iguais ou destino sem `staging`, não sobrescreve e nunca imprime keys. Faça
+o inventário e depois a cópia:
+
+```bash
+make staging-clone-r2-documents
+make staging-clone-r2-documents apply=1
+```
+
+Valide os SHA-256 do plaintext e migre o clone. Esses comandos operam apenas no
+bucket configurado nos secrets de staging:
+
+```bash
+make staging-encrypt-r2-documents
+make staging-encrypt-r2-documents apply=1
+make staging-encrypt-r2-documents
+```
+
+O último comando precisa informar zero objetos legados e zero divergências. Só
+então suba o Core de staging com o fallback plaintext desligado. Durante o clone,
+serviços capazes de enviar e-mail, cobrar ou chamar provedores permanecem parados.
+
+Para isolar CPU/memória da latência de rede:
+
+```bash
+make document-crypto-benchmark
+```
+
+O aceite final também mede o R2 e o navegador reais; o benchmark isolado não
+substitui o ensaio ponta a ponta.
 Antes de habilitar isso no servidor, os objetos do volume atual devem ser
 copiados preservando as chaves e conferidos pelo SHA-256 registrado no banco.
 Com o ambiente em janela de manutenção, faça primeiro a conferência e depois a

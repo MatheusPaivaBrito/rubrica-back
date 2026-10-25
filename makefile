@@ -42,6 +42,8 @@ STAGING_MAINTENANCE = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f comp
 STAGING_SEED = $(STAGING_COMPOSE) -f compose/services/alembic.yml -f compose/services/seed-staging.yml
 STAGING_TOOLS_IMAGE ?= rubrica-staging-tools:local
 STAGING_TOOLS = docker run --rm -i --volume "$(CURDIR):/app" --workdir /app $(STAGING_TOOLS_IMAGE)
+PRODUCTION_SECRETS_DIR ?= /etc/rubrica/secrets
+STAGING_SECRETS_DIR ?= $(CURDIR)/.secrets/staging
 BACKUP_ROOT ?= backups
 ECNPJ_DOCUMENT_DIR ?= /srv/rubrica-ecnpj
 ECNPJ_PFX_FILE ?= /etc/rubrica/secrets/empresa-ecnpj-a1.pfx
@@ -50,6 +52,7 @@ ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
 .PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-public-url staging-docs-url staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: staging-clone-core-from-production staging-clone-r2-documents staging-encrypt-r2-documents document-crypto-benchmark
 
 help:
 	@echo "Rúbrica — comandos por ambiente"
@@ -81,12 +84,16 @@ help:
 	@echo "  make staging-public-url        Mostra a URL pública estável do staging"
 	@echo "  make staging-docs-url          Mostra a URL pública das contas de teste"
 	@echo "  make staging-down              Encerra preservando volumes"
+	@echo "  make staging-clone-core-from-production confirm=CLONE_PRODUCTION_CORE_TO_STAGING"
+	@echo "  make staging-clone-r2-documents [apply=1]  Clona objetos referenciados"
+	@echo "  make staging-encrypt-r2-documents [apply=1] Audita/migra criptografia"
 	@echo ""
 	@echo "Qualidade"
 	@echo "  make doctor                    Verifica ferramentas e configuração de dev"
 	@echo "  make lint                      Executa Ruff"
 	@echo "  make test-unit                 Executa testes unitários"
 	@echo "  make test-integration          Executa testes reais com PostgreSQL/Redis"
+	@echo "  make document-crypto-benchmark Mede criptografia em chunks sem a rede R2"
 	@echo ""
 	@echo "Produção — resumo; use 'make help-production' para operações avançadas"
 	@echo "  make production-ensure        Valida ambiente sem alterar produção"
@@ -203,7 +210,43 @@ staging-smoke: staging-ensure
 
 .PHONY: staging-encrypt-r2-documents
 staging-encrypt-r2-documents: staging-ensure
-	$(STAGING_COMPOSE) exec -T core-api python -m toolbox.operations.encrypt_r2_documents $(if $(apply),--apply,)
+	$(STAGING_MAINTENANCE) run --rm --build alembic python -m toolbox.operations.encrypt_r2_documents $(if $(apply),--apply,)
+
+staging-clone-core-from-production:
+	@test "$(confirm)" = "CLONE_PRODUCTION_CORE_TO_STAGING" || (echo "[error] esta operação substitui somente o banco Core de staging; use confirm=CLONE_PRODUCTION_CORE_TO_STAGING"; exit 2)
+	@set -eu; \
+		dump_file="$$(mktemp /tmp/rubrica-core-clone.XXXXXX.dump)"; \
+		production_core_db="$$(sed -n 's/^CORE_POSTGRES_DB=//p' "$(PRODUCTION_ENV_FILE)" | tail -n 1)"; \
+		staging_core_db="$$(sed -n 's/^CORE_POSTGRES_DB=//p' "$(STAGING_ENV_FILE)" | tail -n 1)"; \
+		production_core_db="$${production_core_db:-rubrica_core}"; \
+		staging_core_db="$${staging_core_db:-rubrica_core}"; \
+		trap 'rm -f "$$dump_file"' EXIT; \
+		$(STAGING_COMPOSE) stop core-api auth-api eventing-api notification-api observability-api gateway web docs cloudflared >/dev/null; \
+		$(PRODUCTION_COMPOSE) exec -T postgres sh -c 'pg_dump -U "$$POSTGRES_USER" -Fc "$$1"' _ "$$production_core_db" >"$$dump_file"; \
+		test -s "$$dump_file"; \
+		$(STAGING_COMPOSE) exec -T postgres sh -c 'psql -U "$$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 -v core_db="$$1" -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=:'"'"'core_db'"'"' AND pid <> pg_backend_pid()" >/dev/null' _ "$$staging_core_db"; \
+		$(STAGING_COMPOSE) exec -T postgres sh -c 'dropdb -U "$$POSTGRES_USER" --if-exists "$$1" && createdb -U "$$POSTGRES_USER" "$$1"' _ "$$staging_core_db"; \
+		$(STAGING_COMPOSE) exec -T postgres sh -c 'pg_restore -U "$$POSTGRES_USER" -d "$$1" --no-owner --no-privileges --exit-on-error' _ "$$staging_core_db" <"$$dump_file"; \
+		echo "[ok] rubrica_core restaurado no PostgreSQL isolado de staging; aplicação e integrações permanecem paradas"
+
+staging-clone-r2-documents: staging-ensure
+	@test -d "$(PRODUCTION_SECRETS_DIR)" || (echo "[error] diretório de secrets de produção ausente"; exit 2)
+	@test -d "$(STAGING_SECRETS_DIR)" || (echo "[error] diretório de secrets de staging ausente"; exit 2)
+	$(STAGING_MAINTENANCE) run --rm --build \
+		-v "$(PRODUCTION_SECRETS_DIR):/run/production-r2:ro" \
+		-v "$(STAGING_SECRETS_DIR):/run/staging-r2:ro" \
+		alembic python -m toolbox.operations.clone_r2_documents_to_staging \
+		--source-endpoint-file /run/production-r2/r2_documents_endpoint \
+		--source-access-key-id-file /run/production-r2/r2_documents_access_key_id \
+		--source-secret-access-key-file /run/production-r2/r2_documents_secret_access_key \
+		--source-bucket-file /run/production-r2/r2_documents_bucket \
+		--destination-endpoint-file /run/staging-r2/r2_documents_endpoint \
+		--destination-access-key-id-file /run/staging-r2/r2_documents_access_key_id \
+		--destination-secret-access-key-file /run/staging-r2/r2_documents_secret_access_key \
+		--destination-bucket-file /run/staging-r2/r2_documents_bucket \
+		--source-prefix "$$(sed -n 's/^R2_DOCUMENTS_PREFIX=//p' "$(PRODUCTION_ENV_FILE)" | tail -n 1)" \
+		--destination-prefix "$$(sed -n 's/^R2_DOCUMENTS_PREFIX=//p' "$(STAGING_ENV_FILE)" | tail -n 1)" \
+		$(if $(apply),--apply,)
 
 staging-bootstrap: staging-seed
 	$(MAKE) --no-print-directory staging-up STAGING_ENV_FILE=$(STAGING_ENV_FILE)
@@ -225,6 +268,9 @@ test-integration: ensure-integration-services
 
 lint:
 	PYTHONPATH=$(TEST_PYTHONPATH) poetry run ruff check .
+
+document-crypto-benchmark:
+	PYTHONPATH=$(TEST_PYTHONPATH) poetry run python -m toolbox.benchmark.document_crypto_benchmark $(if $(sizes),--sizes-mib $(sizes),) $(if $(repetitions),--repetitions $(repetitions),)
 
 docs:
 	@test -f "$(DOCS_ENV_FILE)" || (echo "[error] arquivo de ambiente do MkDocs não encontrado: $(DOCS_ENV_FILE)"; exit 2)

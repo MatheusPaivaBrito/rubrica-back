@@ -1,5 +1,6 @@
 from io import BytesIO
 from hashlib import sha256
+import os
 
 import pytest
 from botocore.exceptions import ClientError
@@ -23,7 +24,7 @@ class FakeS3Client:
                 },
                 "PutObject",
             )
-        self.objects[(Bucket, Key)] = Body
+        self.objects[(Bucket, Key)] = Body.read() if hasattr(Body, "read") else Body
         self.metadata[(Bucket, Key)] = Metadata or {}
 
     def get_object(self, *, Bucket, Key):
@@ -48,14 +49,20 @@ class FakeS3Client:
         self.objects.pop((Bucket, Key), None)
 
 
-def storage(*, encryption_key: str = "test-document-encryption-key-with-32-bytes") -> R2DocumentStorage:
+def storage(
+    *,
+    encryption_key: str = "test-document-encryption-key-with-32-bytes",
+    client=None,
+    chunk_size: int = 64 * 1024,
+) -> R2DocumentStorage:
     return R2DocumentStorage(
         endpoint="https://account.r2.cloudflarestorage.com",
         access_key_id="key-id",
         secret_access_key="secret",
         bucket="rubrica-documents",
         encryption_key=encryption_key,
-        client=FakeS3Client(),
+        encryption_chunk_bytes=chunk_size,
+        client=client or FakeS3Client(),
     )
 
 
@@ -69,7 +76,7 @@ def test_r2_storage_round_trip_and_discard_uncommitted() -> None:
     assert size == 12
     assert target.get(key).read() == b"%PDF-content"
     assert target.client.metadata[(target.bucket, key)] == {
-        "rubrica-encryption": "aes-256-gcm-v1",
+        "rubrica-encryption": "aes-256-gcm-chunked-v2",
         "rubrica-sha256": digest,
     }
     assert not target.client.objects[(target.bucket, key)].startswith(b"%PDF")
@@ -131,7 +138,46 @@ def test_r2_storage_rejects_tampered_ciphertext() -> None:
     target.client.objects[(target.bucket, key)] = raw[:-1] + bytes([raw[-1] ^ 1])
 
     with pytest.raises(DocumentDecryptionError, match="authentication failed"):
-        target.get(key)
+        target.get(key).read()
+
+
+def test_r2_storage_streams_multiple_authenticated_chunks() -> None:
+    target = storage()
+    content = b"%PDF-" + os.urandom(180_000)
+    key, size = target.put(BytesIO(content), filename="large.pdf")
+
+    with target.get(key) as stream:
+        pieces = []
+        while piece := stream.read(8191):
+            pieces.append(piece)
+
+    assert size == len(content)
+    assert b"".join(pieces) == content
+
+
+def test_r2_storage_rejects_truncated_object_at_chunk_boundary() -> None:
+    target = storage()
+    key, _ = target.put(BytesIO(b"%PDF-secret"), filename="secret.pdf")
+    raw = target.client.objects[(target.bucket, key)]
+    # Remove the authenticated terminal record, not merely bytes inside a chunk.
+    target.client.objects[(target.bucket, key)] = raw[:-32]
+
+    with pytest.raises(DocumentDecryptionError, match="truncated|terminator|authentication"):
+        target.get(key).read()
+
+
+def test_r2_storage_binds_ciphertext_to_tenant_and_document_path() -> None:
+    client = FakeS3Client()
+    target = storage(client=client)
+    original = (
+        "tenants/tenant-a/accounts/account-a/documents/document-a/versions/object-a"
+    )
+    moved = "tenants/tenant-b/accounts/account-a/documents/document-a/versions/object-a"
+    target.put_existing(original, BytesIO(b"%PDF-secret"))
+    client.objects[(target.bucket, moved)] = client.objects[(target.bucket, original)]
+
+    with pytest.raises(DocumentDecryptionError):
+        target.get(moved)
 
 
 def test_r2_storage_rejects_a_different_application_key() -> None:
@@ -183,6 +229,28 @@ def test_legacy_plaintext_requires_explicit_migration_window() -> None:
     assert compatible.get("legacy123").read() == b"%PDF-legacy"
     with pytest.raises(DocumentDecryptionError, match="disabled"):
         strict.get("legacy123")
+
+
+def test_v1_ciphertext_remains_readable_and_migrates_to_v2() -> None:
+    target = storage()
+    key = "legacy-v1"
+    plaintext = b"%PDF-v1"
+    digest = sha256(plaintext).hexdigest()
+    target.client.objects[(target.bucket, key)] = target._encrypt_v1(key, plaintext)
+
+    assert target.get(key).read() == plaintext
+    assert target.migrate_legacy_object(
+        key,
+        expected_sha256=digest,
+        apply=False,
+    ) == "legacy"
+    assert target.migrate_legacy_object(
+        key,
+        expected_sha256=digest,
+        apply=True,
+    ) == "migrated"
+    assert target.client.objects[(target.bucket, key)].startswith(b"RUBRICA-DOC\x00\x02")
+    assert target.get(key).read() == plaintext
 
 
 def test_legacy_object_migration_is_verified_and_idempotent() -> None:

@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     DOCUMENT_STORAGE_ENCRYPTION_KEY: str = "rubrica-development-document-storage-key-change-me"
     DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: str | None = None
     DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: bool = True
+    DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES: int = Field(
+        default=4 * 1024 * 1024,
+        ge=64 * 1024,
+        le=16 * 1024 * 1024,
+    )
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"

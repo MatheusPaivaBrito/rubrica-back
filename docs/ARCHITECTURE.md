@@ -172,8 +172,12 @@ Production      -> R2DocumentStorage    -> encrypted private operational bucket
 Automated tests -> LocalDocumentStorage -> isolated temporary directory
 ```
 
-R2 objects are encrypted by the Core with AES-256-GCM before upload. Tenant
-authorization is enforced before object lookup, and the plaintext SHA-256 stored
+R2 objects are encrypted by the Core with versioned envelope encryption before
+upload. Root, tenant and document contexts wrap a random per-object DEK; document
+bytes use chunked AES-256-GCM so reads can be authenticated and streamed with
+bounded memory. Tenant/document/storage-key context is authenticated, and direct
+R2 or backup access exposes only opaque ciphertext. Tenant authorization is
+enforced before object lookup, and the plaintext SHA-256 stored
 in PostgreSQL is verified after authenticated decryption. Cloud storage operators
 can list and download ciphertext but cannot interpret document contents without
 the application encryption key.

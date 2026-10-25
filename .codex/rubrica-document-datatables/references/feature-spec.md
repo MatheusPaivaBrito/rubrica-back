@@ -4,7 +4,7 @@
 
 - Especificação em construção.
 - Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 e 12.
-- Partes 1, 2, 3, 5, 6, 7, 9, 11 e 12 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas e Parte 10 reservada para revisão posterior. A validação integral da Parte 12 ainda depende do runtime Docker de staging e do servidor de produção.
+- Partes 1, 2, 3, 5, 6, 7, 9, 11 e 12 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas. A Parte 10 foi autorizada em 2026-10-25 e está em andamento, priorizando confidencialidade criptográfica dos documentos e uma migração ensaiada integralmente em staging. A validação integral da Parte 12 ainda depende do runtime Docker de staging e do servidor de produção.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
 
@@ -14,7 +14,7 @@ Modernizar o fluxo de documentos e assinaturas do Rúbrica em uma branch exclusi
 
 ## Acompanhamento da implementação
 
-Última atualização do quadro: **2026-10-22**.
+Última atualização do quadro: **2026-10-25**.
 
 ### Legenda obrigatória
 
@@ -138,14 +138,16 @@ Regras:
 
 | ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
 |---|---|---|---|---|---|---|
-| 10A | Inventariar todos os arquivos, buckets, prefixes e metadados persistidos | backend/infra | nenhuma | `NÃO INICIADO` | Escopo registrado nesta Parte 10; nenhuma revisão executada | Mapear originais, versões, PDFs assinados, evidências, manifestos, ativos visuais, temporários e backups. |
-| 10B | Reconstruir o ciclo de vida completo entre banco, storage local e R2 | backend | 10A | `NÃO INICIADO` | Fluxos ainda não foram rastreados ponta a ponta | Documentar criação, leitura, versionamento, assinatura, substituição, migração, exclusão e recuperação. |
-| 10C | Revisar integridade, imutabilidade e vínculo criptográfico dos objetos | backend/segurança | 10A, 10B | `NÃO INICIADO` | Nenhuma conclusão registrada | Verificar hashes, checksums, version IDs, manifesto, evidências, prevenção de sobrescrita e detecção de adulteração. |
-| 10D | Revisar isolamento, autorização e exposição de arquivos | backend/segurança | 10A, 10B | `NÃO INICIADO` | Nenhuma conclusão registrada | Auditar tenant, autorização por objeto, URLs assinadas, duração, replay, enumeração, MIME e download seguro. |
-| 10E | Revisar retenção, exclusão, LGPD e preservação probatória | produto/backend/infra | 10A–10D, decisão jurídica/produto | `NÃO INICIADO` | Políticas consolidadas ainda não foram confrontadas com o código | Definir matriz por tipo de artefato, finalidade, prazo, legal hold, descarte e conflito entre apagamento e prova. |
-| 10F | Revisar backup, restauração, replicação e recuperação de desastre | infra/backend | 10A, 10B | `NÃO INICIADO` | Existem mecanismos de backup R2, mas o ciclo de restauração de documentos não foi comprovado nesta parte | Verificar cobertura, criptografia, credenciais separadas, RPO/RTO, teste de restore e perda parcial de banco ou objetos. |
-| 10G | Localizar objetos órfãos, referências quebradas e layouts legados | backend/infra | 10A–10C | `NÃO INICIADO` | Histórico já incluiu mudança de prefixo e migração de objetos | Definir auditoria somente leitura e reconciliação segura antes de qualquer correção ou remoção. |
-| 10H | Produzir relatório, matriz de riscos e plano mínimo de adequação | arquitetura/segurança | 10A–10G | `NÃO INICIADO` | Esta anotação define apenas o trabalho futuro | Separar fatos comprovados, hipóteses, riscos e mudanças recomendadas; nenhuma implementação automática. |
+| 10A | Inventariar arquivos, buckets, prefixes, referências e limites de acesso | backend/infra | nenhuma | `EM ANDAMENTO` | Storage, R2, banco e scripts operacionais já foram localizados; a matriz completa por artefato ainda não foi fechada | Concluir originais, versões, assinados, evidências, ativos visuais, temporários, órfãos e backups. |
+| 10B | Criar clone fiel e isolado de produção em staging para o ensaio | backend/infra | 10A, bucket exclusivo | `IMPLEMENTADO` | Comandos protegidos clonam somente `rubrica_core` e objetos referenciados; produção é origem read-only, destino precisa conter `staging`, dry-run é padrão e keys não são impressas | Executar no servidor e conferir os totais agregados. |
+| 10C | Criar reconciliação sanitizada e baseline antes da migração | backend/infra | 10B | `IMPLEMENTADO` | Migrador percorre somente referências do Core e valida SHA-256 do plaintext em dry-run sem emitir conteúdo ou keys | Executar contra o clone e registrar contagens, bytes, ausentes e divergências. |
+| 10D | Implementar envelope encryption por tenant, documento e objeto | backend/segurança | 10A–10C | `IMPLEMENTADO` | Formato v2 deriva contextos tenant/documento, gera DEK aleatória por objeto, embrulha a DEK e cifra chunks AES-256-GCM com AAD e terminador autenticado | Validar no R2 real e inspecionar que o download direto é opaco. |
+| 10E | Definir custódia, rotação e separação das chaves | backend/infra/segurança | 10D | `EM ANDAMENTO` | Root secret é separado do R2/banco; senha do usuário foi rejeitada; hierarquia e versão foram implementadas | Comprovar backup/restore da root, documentar rotação e avaliar migração futura para OCI Vault/KMS. |
+| 10F | Migrar o clone em staging com dual-read e new-write cifrado | backend/infra | 10C–10E | `IMPLEMENTADO` | New-write usa v2; leitor aceita v2, v1 e plaintext controlado; dry-run/aplicação são idempotentes e verificam o objeto relido | Executar o ensaio integral, interrupção/retomada e desligar o fallback no clone. |
+| 10G | Otimizar e medir o caminho R2 → Core → visualizador | ambos/infra | 10D–10F | `IMPLEMENTADO` | Core transmite chunks verificados via `StreamingResponse`, desliga buffering Nginx, reutiliza cliente R2, expõe histogramas por estágio e o dashboard reutiliza o último preview na sessão; smoke isolado de 1/10/25/50 MiB manteve pico Python em 16,5 MiB ao cifrar e 9,38 MiB ao decifrar | Repetir benchmark com amostras, concorrência e medição real do navegador/R2 no servidor. |
+| 10H | Validar confidencialidade, integridade, isolamento e falhas | backend/segurança | 10D–10G | `IMPLEMENTADO` | Testes cobrem round-trip em chunks, adulteração, truncamento, chave errada e troca de tenant/documento; 321 unitários backend passaram | Completar prova no bucket real, falha durante upload/migração e integração PostgreSQL. |
+| 10I | Validar backup, restauração, retenção e descarte criptográfico | backend/infra/produto | 10E–10H | `NÃO INICIADO` | Restic e buckets separados existem, mas a restauração conjunta ainda não foi comprovada | Testar restauração de banco+objetos+chaves, RPO/RTO, legal hold, rotação e perda controlada de chave. |
+| 10J | Planejar e executar rollout de produção com plaintext desativado | backend/infra | 10A–10I verificados | `NÃO INICIADO` | Produção permanece fora do ensaio | Aprovar janela, backup, dry-run, lotes, observação, reconciliação final e remoção definitiva do fallback plaintext. |
 
 ### Parte 11 — pacotes de trabalho
 
@@ -898,95 +900,204 @@ O secret nunca pode aparecer em `.env`, Git, Compose como valor literal, logs, d
 - Compose local e produção, migrations, lint, testes e smoke integrado passam com a plataforma ligada e desligada.
 - Existe runbook para criar/rotacionar/revogar o token Viewer, diagnosticar targets e operar o modo degradado.
 
-## Parte 10 — revisão do armazenamento de arquivos e R2
+## Parte 10 — confidencialidade, criptografia e migração dos arquivos no R2
 
-### Decisão de prioridade
+### Decisão de produto e prioridade
 
-Executar esta parte por último no ciclo atual. A revisão é um reforço de integridade, preservação e operação diante de uma provável migração futura do R2; neste momento não existe evidência de incidente crítico que justifique colocá-la à frente das Partes 6 e 7. A postergação não autoriza presumir que os controles já foram validados nem executar a migração sem a auditoria prevista aqui.
+Esta parte deixou de ser apenas uma revisão futura. Em 2026-10-25 foi constatado
+que uma pessoa com acesso administrativo ao bucket consegue baixar objetos e
+abri-los como PDFs. Keys opacas, prefixes por tenant, bucket privado e a
+criptografia em repouso fornecida pelo R2 não impedem que o operador do storage
+veja o conteúdo.
 
-### Objetivo
+A decisão de produto é inequívoca: documentos do cliente não devem ser legíveis
+no painel do Cloudflare, por download direto do R2, em backups de objetos ou por
+uma credencial que acesse somente o storage. O operador não deve inspecionar o
+conteúdo durante inventário, migração, suporte, backup ou recuperação normal.
+Por isso, a Parte 10 passa a ser prioridade ativa e inclui implementação,
+ensaio de migração e validação de desempenho.
 
-Realizar uma revisão técnica e operacional de como o Rúbrica recebe, identifica, transforma, armazena, recupera, preserva e exclui arquivos, com atenção especial ao Cloudflare R2. Esta parte começa exclusivamente como auditoria e documentação: não autoriza alterar código, banco, buckets, objetos, configurações, lifecycle rules ou dados existentes.
+### Limite de segurança declarado
 
-### Escopo da revisão
+O Rúbrica não é um sistema de conhecimento zero. O Core precisa processar o
+documento em claro por intervalos controlados para validar o PDF, gerar previews,
+aplicar assinaturas visuais e PAdES, obter Carimbo do Tempo, integrar o Serpro ID
+e entregar o resultado a usuários autorizados. Um invasor que controle ao mesmo
+tempo o runtime do Core e a raiz das chaves ainda pode provocar uma descriptografia.
 
-A revisão deve localizar e diferenciar, no mínimo:
+O objetivo desta parte é separação de poderes e minimização de exposição:
+
+- acesso somente ao R2, a um backup de objetos ou à credencial S3 não revela PDFs;
+- banco isolado, objeto isolado ou key opaca isolada não basta para descriptografar;
+- chaves de usuário não derivam de senha, CPF, e-mail ou outro dado recuperável;
+- plaintext existe apenas no processo autorizado e pelo menor tempo necessário;
+- acesso excepcional à raiz criptográfica é restrito, auditável e recuperável;
+- logs, erros, métricas e ferramentas operacionais nunca registram bytes, nomes
+  sensíveis, chaves completas nem material criptográfico.
+
+### Escopo dos artefatos
+
+A proteção abrange, no mínimo:
 
 - documento original enviado pelo usuário;
 - versões congeladas apresentadas aos signatários;
 - PDFs intermediários e PDFs finais assinados;
-- assinaturas CMS/PAdES e tokens de Carimbo do Tempo;
-- JSONs de evidência e manifestos consolidados;
-- logos, carimbos visuais e assinaturas desenhadas, quando existirem;
-- arquivos temporários, staging, uploads incompletos e artefatos de operações falhas;
+- assinaturas CMS/PAdES e tokens de Carimbo do Tempo quando persistidos fora do PDF;
+- JSONs de evidência e manifestos consolidados quando armazenados como objeto;
+- logos, carimbos visuais e assinaturas desenhadas quando persistidos fora do banco;
+- uploads incompletos e artefatos de operações falhas;
 - objetos legados em prefixes antigos e objetos migrados;
-- backups de banco, arquivos e repositórios Restic relacionados ao R2.
+- backups e pacotes de restauração que contenham documentos ou chaves embrulhadas.
 
-Para cada classe de arquivo, registrar bucket, prefix/key, proprietário lógico, tenant, tabela e coluna de referência, formato, tamanho máximo, hash/checksum, criptografia, versionamento, retenção, forma de acesso e regra de exclusão. Não confundir a key do R2 com identidade confiável do documento: o vínculo deve ser demonstrado por identificadores e hashes persistidos de modo consistente.
+Para cada classe devem ser conhecidos, sem revelar dados reais: bucket, prefix,
+tenant, proprietário lógico, tabela/coluna de referência, formato, limite de
+tamanho, hash do plaintext, versão criptográfica, retenção e regra de exclusão.
+A key do R2 nunca é tratada como segredo nem como prova de identidade.
 
-### Perguntas obrigatórias
+### Arquitetura criptográfica alvo
 
-1. Quais buckets e credenciais são usados para documentos operacionais e backups, e eles estão realmente separados?
-2. Como a key é construída e como tenant, documento, versão, solicitação e assinatura são relacionados sem permitir colisão ou acesso cruzado?
-3. O banco aponta para objetos imutáveis ou uma mesma key pode ser sobrescrita silenciosamente?
-4. Os bytes originais e cada versão assinada permanecem preservados exatamente como produzidos?
-5. Quais hashes são calculados, em qual momento e contra quais bytes? Eles são revalidados no download e antes/depois da assinatura?
-6. Evidência e manifesto possuem vínculo verificável por terceiros com o PDF correspondente?
-7. Versionamento, Object Lock, retenção ou outro controle impedem alterações administrativas não autorizadas? Se não impedem, alterações são ao menos detectáveis?
-8. URLs pré-assinadas possuem escopo mínimo, expiração adequada, método restrito e proteção contra reutilização indevida?
-9. Uploads validam tamanho, MIME real, estrutura PDF, conteúdo ativo e nome fornecido pelo usuário sem confiar apenas em extensão ou header?
-10. Falhas entre banco e R2 deixam objetos órfãos, registros sem objeto ou versões parcialmente confirmadas?
-11. Exclusão de conta/documento respeita LGPD sem destruir indevidamente evidências necessárias para exercício regular de direitos ou obrigações legais?
-12. Backups cobrem banco e objetos de forma consistente, e existe restauração testada que preserve a correspondência entre registros e arquivos?
-13. Mudanças de bucket ou prefix mantêm compatibilidade com documentos históricos e possuem reconciliação verificável?
-14. É possível exportar documento, evidências e manifesto e validá-los sem depender exclusivamente do banco ou de uma URL ativa do Rúbrica?
-15. Logs e métricas permitem detectar falhas, objetos ausentes, divergência de hash, crescimento anormal, custo e operações administrativas sem registrar conteúdo sensível?
+A implementação deve usar envelope encryption autenticada e versionada:
 
-### Segurança e conformidade
+1. Uma root KEK por ambiente permanece fora do R2 e fora do banco operacional,
+   preferencialmente em cofre/KMS com identidade de workload e trilha de auditoria.
+2. O contexto do tenant deriva ou desembrulha uma chave exclusiva do tenant.
+3. O contexto do documento deriva ou desembrulha uma chave exclusiva do documento.
+4. Cada objeto recebe uma DEK aleatória e nonce exclusivo; a DEK é embrulhada
+   pelo contexto do documento e nunca é persistida em claro.
+5. Os bytes são cifrados com AES-256-GCM em chunks autenticados. Tenant, documento,
+   storage key, versão do formato e ordinal do chunk participam como AAD.
+6. O cabeçalho guarda somente versões, nonces e chaves embrulhadas necessárias à
+   leitura. Troca de tenant, key, cabeçalho, chunk ou ordem deve falhar fechada.
+7. O SHA-256 canônico continua sendo calculado sobre o plaintext e revalidado nos
+   pontos de integridade, sem ser usado como chave criptográfica.
 
-- Confirmar isolamento por tenant e autorização por objeto em upload, visualização, download, assinatura e exclusão.
-- Revisar permissões das credenciais R2 pelo princípio do menor privilégio; documentos e backups não devem compartilhar acesso amplo sem justificativa.
-- Confirmar TLS em trânsito e a proteção em repouso oferecida/configurada, distinguindo criptografia do provedor de criptografia controlada pela aplicação.
-- Segredos permanecem em Docker Secrets ou mecanismo equivalente e nunca aparecem em Git, `.env` versionado, logs ou respostas.
-- Acesso administrativo, migração e recuperação devem deixar trilha auditável e não permitir substituir silenciosamente um documento histórico.
-- Definir retenção por finalidade e tipo de artefato, incluindo descarte seguro, legal hold e resposta a solicitações de titulares.
-- Não classificar automaticamente Object Lock, versionamento ou backup como requisito obrigatório: primeiro registrar o risco, a necessidade probatória e o custo, então recomendar a medida proporcional.
+Uma senha do usuário não pode proteger diretamente documentos: ela muda, pode ser
+redefinida e não atende equipes, signatários externos, workers e processos de
+assinatura sem sessão interativa. Chaves desembrulhadas podem permanecer apenas em
+cache curto e limitado na memória do processo; Redis e logs não podem recebê-las.
 
-### Método da revisão
+### Ensaio fiel em staging
 
-- Inspecionar código real, migrations, modelos, serviços de storage, Compose, Makefile, scripts operacionais, testes e documentação.
-- Reconstruir os fluxos de ponta a ponta e produzir uma tabela por artefato com evidências de arquivo e linha.
-- Comparar referências do banco com convenções de keys e prefixes, sem listar nomes reais que contenham dados pessoais.
-- Qualquer inventário no R2 deve começar em modo somente leitura e agregado. Não baixar documentos pessoais nem realizar chamadas potencialmente cobradas sem autorização específica.
-- Não apagar, mover, copiar, regravar ou corrigir objetos durante a auditoria.
-- Classificar achados em comprovado, risco potencial, hipótese e não verificável.
-- Separar correções necessárias de melhorias opcionais; evitar recomendar nova infraestrutura quando controles existentes forem suficientes.
+Antes de alterar produção, staging deve reproduzir o estado anterior à migração:
 
-### Entrega esperada
+1. Parar os consumidores de staging capazes de enviar e-mail, cobrar, assinar ou
+   chamar provedores usando registros copiados.
+2. Clonar somente o banco `rubrica_core` necessário às referências documentais;
+   Auth, Notification, Eventing e Observability não são necessários ao ensaio.
+3. Copiar objetos de `rubrica-documents` para `rubrica-documents-staging` byte a
+   byte, preservando keys e sem passar pela camada de storage que cifra uploads.
+4. Produção é origem estritamente somente leitura. Nenhum comando pode apagar,
+   mover, regravar ou alterar metadados no bucket ou banco de produção.
+5. O copiador inicia em dry-run, recusa buckets iguais, não sobrescreve por padrão,
+   exige `--apply` e emite somente contagens e totais sanitizados.
+6. A reconciliação confirma referências, tamanho e SHA-256 sem imprimir keys
+   completas, nomes, e-mails, identificadores pessoais ou conteúdo.
+7. O clone é dado pessoal de produção: continua privado, protegido pelo Cloudflare
+   Access, com acesso mínimo, prazo curto e descarte controlado ao final do ensaio.
 
-O relatório da Parte 10 deve conter:
+A autorização de mutação desta parte vale somente para os recursos isolados e
+descartáveis de staging. Ela não autoriza qualquer mutação em produção.
 
-- diagrama do ciclo de vida dos arquivos;
-- inventário de buckets, prefixes e classes de objetos sem revelar dados pessoais ou secrets;
-- matriz entre registros de banco, objects keys, hashes, versões e evidências;
-- avaliação de isolamento, autorização, integridade, imutabilidade, retenção e recuperação;
-- lista de objetos órfãos ou referências quebradas apenas em forma agregada e sanitizada;
-- riscos classificados por criticidade e impacto real;
-- plano de adequação mínimo, ordenado por dependência, com critérios objetivos de aceite;
-- indicação explícita do que já funciona, do que foi apenas inferido e do que não pôde ser verificado.
+### Estratégia de migração
+
+- O formato criptográfico possui identificador e versão explícitos.
+- Durante uma janela controlada, a leitura aceita legado plaintext e formato novo,
+  enquanto toda nova escrita usa exclusivamente o formato cifrado.
+- A migração é em lotes, idempotente, retomável e com checkpoint; nunca depende
+  de manter todos os objetos ou PDFs inteiros simultaneamente na memória.
+- Cada objeto é lido, validado contra o hash canônico, cifrado, escrito de forma
+  segura e relido/verificado antes de ser classificado como migrado.
+- Falha, encerramento ou retry não pode transformar objeto válido em ilegível nem
+  marcar migração incompleta como concluída.
+- Ao fim, um segundo dry-run deve informar zero legados e zero divergências. Somente
+  então o fallback plaintext pode ser desativado.
+- O rollout de produção exige backup verificado, janela aprovada, observação,
+  reconciliação final e procedimento de recuperação testado previamente.
+
+### Desempenho e capacidade
+
+Criptografia não pode introduzir leitura integral desnecessária nem crescimento de
+memória proporcional à concorrência vezes o tamanho máximo do documento. Upload,
+download e migração devem trabalhar em streaming com chunks inicialmente calibrados
+em torno de 4 MiB, ajustáveis por benchmark.
+
+O caminho de visualização deve observar estes requisitos:
+
+1. O Core lê o objeto do R2 e o entrega ao cliente em streaming, descriptografando
+   e autenticando chunks incrementalmente, sem montar uma segunda cópia integral
+   do PDF na memória ou no disco. Nenhum byte ainda não autenticado pode ser
+   entregue como conteúdo válido.
+2. O visualizador mantém e reutiliza a mesma instância/URL segura do documento ao
+   trocar de página e ao recolher ou reabrir o preview durante a mesma navegação.
+   Essas interações não podem iniciar um novo download completo do R2.
+3. Quando necessário, o cache contém somente bytes ainda cifrados, é privado,
+   possui limite de tamanho e TTL curto e não é compartilhado entre tenants.
+   PDF descriptografado não pode ser persistido em Redis, CDN, cache público ou
+   disco compartilhado. Respostas autenticadas usam política de cache que impeça
+   armazenamento indevido no navegador, proxy ou Cloudflare.
+4. O cliente S3/R2 e seus pools HTTP são reutilizados entre requisições do mesmo
+   processo. Não deve existir um novo cliente, resolução DNS ou handshake TLS por
+   chunk ou por acesso quando a conexão puder ser reutilizada com segurança.
+5. A instrumentação separa, sem labels de alta cardinalidade nem dados pessoais,
+   o tempo gasto aguardando/transferindo do R2, descriptografando, processando no
+   Core e carregando/renderizando no navegador. O tempo total sozinho não é
+   suficiente para atribuir regressões.
+
+O benchmark compara plaintext e envelope encryption com arquivos de 1, 10, 25 e
+50 MiB e concorrência 1, 5, 10 e 20. Deve registrar p50/p95, throughput, CPU,
+memória máxima, tempo de validação SHA-256, tempo até o primeiro byte autenticado,
+tempo separado de R2/descriptografia/Core/navegador e tempo total de migração.
+O teste do visualizador também conta requisições e bytes transferidos ao abrir,
+trocar página, recolher e reabrir o mesmo documento. A meta inicial é regressão
+inferior a 10% no tempo ponta a ponta; resultado superior pode ser aceito somente
+com medição, diagnóstico e justificativa. O limite inegociável é memória limitada
+por chunk, sem buffer integral por requisição.
+
+### Integridade, isolamento e operação
+
+- Toda leitura continua sujeita à autorização do Core por tenant, documento e papel;
+  criptografia não substitui autorização.
+- Objetos históricos são imutáveis. Escritas usam keys novas ou precondições que
+  impeçam sobrescrita silenciosa.
+- Acesso direto pelo painel R2 deve produzir apenas bytes opacos e autenticados.
+- Credenciais de documentos, backups e ambientes permanecem separadas e limitadas
+  ao menor conjunto de operações/buckets necessário.
+- Erro de tag, hash, cabeçalho, chave, tenant ou chunk falha fechado, gera telemetria
+  sanitizada e nunca devolve conteúdo parcial como documento válido.
+- Backup precisa preservar conjuntamente banco, objetos cifrados e material de chave
+  recuperável. Backup de objetos sem chaves e backup de chaves sem objetos não
+  constituem restauração comprovada.
+- Retenção, legal hold, exclusão LGPD e descarte criptográfico devem ser definidos
+  por classe de artefato, sem apagar indevidamente evidência necessária ao exercício
+  regular de direitos.
 
 ### Critérios de aceitação da Parte 10
 
-- Todas as classes conhecidas de arquivos estão inventariadas e associadas aos módulos que as criam e consomem.
-- O fluxo entre upload, banco, R2, assinatura, evidências, download, backup e exclusão está documentado ponta a ponta.
-- A revisão demonstra se sobrescrita ou adulteração é impedida, detectada ou atualmente não controlada.
-- O isolamento entre tenants e a autorização por objeto são avaliados em todos os endpoints relevantes.
-- A correspondência entre PDF, versão, assinatura, timestamp, evidência e manifesto é explicada com hashes e referências concretas.
-- Prefixes antigos, migrações e fallback de leitura são avaliados sem alterar documentos históricos.
-- Retenção, descarte, legal hold e direitos dos titulares possuem lacunas e decisões pendentes claramente identificadas.
-- Backup e restauração são diferenciados de alta disponibilidade e têm cobertura, RPO/RTO e teste de recuperação avaliados.
-- Nenhuma chamada paga, leitura de documento pessoal ou mutação em R2 ocorre sem autorização adicional.
-- O resultado final é uma auditoria acionável; nenhuma mudança de implementação é incluída nesta parte sem nova autorização.
+- Todas as classes de arquivos e seus ciclos de vida estão inventariados.
+- O clone de staging é fiel, reconciliado, temporário e incapaz de mutar produção.
+- Download direto pelo Cloudflare/R2, backup ou credencial de storage não produz PDF,
+  imagem, assinatura desenhada, evidência sensível ou outro conteúdo legível.
+- Cada tenant/documento/objeto possui contexto criptográfico separado e autenticado;
+  trocar contexto, cabeçalho ou chunks é detectado.
+- Nenhuma chave documental deriva da senha ou de dados pessoais do usuário.
+- Escrita nova é sempre cifrada; leitura de legado existe apenas durante a janela
+  de migração e é desligada após reconciliação com zero pendências.
+- A migração integral do clone pode ser interrompida, retomada e repetida sem perda,
+  duplicidade, corrupção ou exposição de conteúdo.
+- Hashes do plaintext antes e depois da migração coincidem para 100% das referências.
+- Testes cobrem adulteração, truncamento, chave errada, replay, troca de tenant,
+  acesso cruzado, objetos ausentes, órfãos e falhas no meio da gravação.
+- Benchmark demonstra CPU, memória, latência e throughput dentro dos limites
+  definidos, com streaming real e memória limitada por chunks.
+- Trocar página, recolher e reabrir o preview na mesma navegação não baixa
+  novamente o documento completo nem repete desnecessariamente a leitura do R2.
+- Cache, quando habilitado, armazena somente bytes cifrados, tem TTL/tamanho
+  limitados, isolamento por tenant e nenhuma persistência de plaintext.
+- Métricas e testes distinguem latência do R2, descriptografia, processamento do
+  Core e carregamento/renderização no navegador sem expor identificadores sensíveis.
+- Restauração conjunta de banco, objetos e chaves é executada e validada em staging.
+- Produção só é migrada após todos os pacotes anteriores estarem verificados e
+  mediante autorização operacional explícita.
 
 ## Parte 11 — reabertura de processos de assinatura expirados
 
