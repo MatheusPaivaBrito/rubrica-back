@@ -490,6 +490,22 @@ class DatabaseSignatureWorkflowService:
         sent = invite_signer_account(name=name, email=email, locale=locale)
         if not sent:
             raise WorkflowError("This e-mail already belongs to an active Rubrica account", 409)
+        with SessionLocal.begin() as db:
+            request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
+            if request.status != RequestStatus.DRAFT.value:
+                raise WorkflowError("Signer accounts can only be invited while the request is a draft", 409)
+            signer = self._signer(db, signer_id, request.id, lock=True)
+            signer.signature_mode = SignatureMode.SERPROID.value
+            self._audit(
+                db,
+                request.id,
+                actor_id,
+                "signer.signature_mode_selected",
+                "signer",
+                signer.id,
+                {"signature_mode": SignatureMode.SERPROID.value, "source": "account_invitation"},
+            )
         return True
 
     def list_signer_contacts(self, tenant_id: UUID, actor_id: str, query: str = "") -> list[SignerContactRead]:
