@@ -485,27 +485,11 @@ class DatabaseSignatureWorkflowService:
             if signer is None or signer.signature_request_id != request.id:
                 raise WorkflowError("Signer not found", 404)
             if identity_summary(signer.email).identifier_type in {"BR_CPF", "BR_CNPJ"}:
-                raise WorkflowError("Signer already has a Serpro ID eligible identity", 409)
+                raise WorkflowError("Signer already has an eligible Rubrica identity", 409)
             name, email, locale = signer.name, signer.email, signer.preferred_locale
         sent = invite_signer_account(name=name, email=email, locale=locale)
         if not sent:
             raise WorkflowError("This e-mail already belongs to an active Rubrica account", 409)
-        with SessionLocal.begin() as db:
-            request = self._request(db, request_id, lock=True)
-            self._require_request_access(db, request, actor_id)
-            if request.status != RequestStatus.DRAFT.value:
-                raise WorkflowError("Signer accounts can only be invited while the request is a draft", 409)
-            signer = self._signer(db, signer_id, request.id, lock=True)
-            signer.signature_mode = SignatureMode.SERPROID.value
-            self._audit(
-                db,
-                request.id,
-                actor_id,
-                "signer.signature_mode_selected",
-                "signer",
-                signer.id,
-                {"signature_mode": SignatureMode.SERPROID.value, "source": "account_invitation"},
-            )
         return True
 
     def update_signer_signature_mode(self, request_id: str, signer_id: str, actor_id: str, mode: SignatureMode) -> SignerRead:
@@ -676,8 +660,6 @@ class DatabaseSignatureWorkflowService:
             if serproid_signers:
                 if timestamp_required() and (not settings.SERPROID_CLIENT_ID or not settings.SERPROID_CLIENT_SECRET):
                     raise WorkflowError("Serpro ID is not configured", 409)
-                if any(identity_summary(signer.email).identifier_type not in {"BR_CPF", "BR_CNPJ"} for signer in serproid_signers):
-                    raise WorkflowError("Every Serpro ID signer must have a Brazilian CPF or CNPJ", 409)
             document = self._document(db, str(request.document_id))
             if request.stamp_placements and not billing_service.custom_stamp_placement_enabled(db, document.tenant_id):
                 raise WorkflowError("Active paid plan required for custom stamp placement", 403)
@@ -768,6 +750,11 @@ class DatabaseSignatureWorkflowService:
         if not consent:
             raise WorkflowError("Explicit consent is required")
         signer_identity = identity_summary(auth_user_id)
+        if signer_identity.identifier_type not in {"BR_CPF", "BR_CNPJ"}:
+            raise WorkflowError(
+                "An active Rubrica account with a Brazilian CPF or CNPJ is required to sign",
+                409,
+            )
         prepared = self._prepare_signature_operation(
             token,
             auth_user_id,

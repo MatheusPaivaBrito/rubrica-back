@@ -136,6 +136,8 @@ async def internal_identity_match(
             .where(
                 UserEntity.email == payload.email.strip().lower(),
                 UserEntity.deleted_at.is_(None),
+                UserEntity.is_active.is_(True),
+                UserEntity.email_verified.is_(True),
                 UserIdentifierEntity.deleted_at.is_(None),
                 UserIdentifierEntity.identifier_type == payload.identifier_type,
                 UserIdentifierEntity.issuing_country == "BR",
@@ -165,19 +167,29 @@ async def identity_summary(
             detail="Service authentication failed",
         )
     with SessionLocal() as database:
-        identifier = database.scalar(
-            select(UserIdentifierEntity)
-            .join(UserEntity, UserEntity.id == UserIdentifierEntity.user_id)
-            .where(
+        user = database.scalar(
+            select(UserEntity).where(
                 UserEntity.email == email.strip().lower(),
                 UserEntity.deleted_at.is_(None),
+            )
+        )
+        if user is None:
+            return UserIdentitySummary()
+        account_status = "active" if user.is_active and user.email_verified else "pending"
+        if account_status != "active":
+            return UserIdentitySummary(account_status=account_status)
+        identifier = database.scalar(
+            select(UserIdentifierEntity)
+            .where(
+                UserIdentifierEntity.user_id == user.id,
                 UserIdentifierEntity.deleted_at.is_(None),
             )
             .order_by(UserIdentifierEntity.created_at)
         )
         if identifier is None:
-            return UserIdentitySummary()
+            return UserIdentitySummary(account_status=account_status)
         return UserIdentitySummary(
+            account_status=account_status,
             identifier_type=identifier.identifier_type,
             issuing_country=identifier.issuing_country,
             masked_display=identifier.masked_display,

@@ -155,7 +155,7 @@ class AccountService:
                 raise InvalidAccountTokenError
             if token.purpose == "verify_signer_email":
                 if not identity_document_type or not identity_document_country or not identity_document_value:
-                    raise AccountConflictError("CPF is required to activate a Serpro ID signer account")
+                    raise AccountConflictError("CPF is required to activate a signer account")
                 add_identifier(database, user_id=user.id, issuing_country=identity_document_country, identifier_type=identity_document_type, value=identity_document_value)
             user.password_hash = hash_password(new_password)
             user.email_verified = True

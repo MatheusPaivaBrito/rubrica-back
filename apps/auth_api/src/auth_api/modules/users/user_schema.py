@@ -99,6 +99,7 @@ class UserIdentifierRead(BaseModel):
 
 
 class UserIdentitySummary(BaseModel):
+    account_status: str | None = None
     identifier_type: str | None = None
     issuing_country: str | None = None
     masked_display: str | None = None

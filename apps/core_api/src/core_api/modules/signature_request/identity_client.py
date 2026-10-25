@@ -7,6 +7,7 @@ from core_api.infrastructure.settings import settings
 
 @dataclass(frozen=True)
 class IdentitySummary:
+    account_status: str | None = None
     identifier_type: str | None = None
     issuing_country: str | None = None
     masked_display: str | None = None
@@ -26,6 +27,7 @@ def identity_summary(email: str) -> IdentitySummary:
         response.raise_for_status()
         payload = response.json()
         return IdentitySummary(
+            account_status=payload.get("account_status"),
             identifier_type=payload.get("identifier_type"),
             issuing_country=payload.get("issuing_country"),
             masked_display=payload.get("masked_display"),

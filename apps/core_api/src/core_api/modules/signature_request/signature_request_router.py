@@ -64,6 +64,7 @@ async def list_signers(request_id: UUID, context: AuthContext = Depends(require_
     return [
         signer.model_copy(
             update={
+                "identity_account_status": summary.account_status,
                 "identity_document_type": summary.identifier_type,
                 "identity_document_country": summary.issuing_country,
                 "identity_document_masked": summary.masked_display,
@@ -76,7 +77,14 @@ async def list_signers(request_id: UUID, context: AuthContext = Depends(require_
 
 @router.post("/signature-requests/{request_id}/signers", response_model=SignerRead, status_code=status.HTTP_201_CREATED, tags=["signature requests - command"])
 async def add_signer(request_id: UUID, payload: SignerCreate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
-    return workflow_service.add_signer(request_id, payload, context.subject)
+    signer = workflow_service.add_signer(request_id, payload, context.subject)
+    summary = identity_summary(signer.email)
+    return signer.model_copy(update={
+        "identity_account_status": summary.account_status,
+        "identity_document_type": summary.identifier_type,
+        "identity_document_country": summary.issuing_country,
+        "identity_document_masked": summary.masked_display,
+    })
 
 
 @router.post("/signature-requests/{request_id}/signers/{signer_id}/account-invitation", status_code=status.HTTP_204_NO_CONTENT, tags=["signature requests - command"])
@@ -169,6 +177,7 @@ async def signing_context(token: str, context: AuthContext = Depends(authenticat
         update={
             "signer": signing.signer.model_copy(
                 update={
+                    "identity_account_status": summary.account_status,
                     "identity_document_type": summary.identifier_type,
                     "identity_document_country": summary.issuing_country,
                     "identity_document_masked": summary.masked_display,
@@ -201,6 +210,7 @@ async def view_document(token: str, context: AuthContext = Depends(authenticated
     summary = identity_summary(signer.email)
     return signer.model_copy(
         update={
+            "identity_account_status": summary.account_status,
             "identity_document_type": summary.identifier_type,
             "identity_document_country": summary.issuing_country,
             "identity_document_masked": summary.masked_display,

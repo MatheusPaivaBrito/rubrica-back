@@ -13,6 +13,8 @@ from auth_api.infrastructure.database.connection import SessionLocal as AuthSess
 from auth_api.modules.access_control.access_control_entity import UserRoleEntity
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import UserEntity
+from auth_api.modules.users.user_identifier_entity import UserIdentifierEntity
+from auth_api.modules.users.user_identifier_service import add_identifier
 from core_api.infrastructure.auth_context import AuthContext, _active_auth_context
 from core_api.infrastructure.database.connection import SessionLocal as CoreSessionLocal
 from core_api.modules.billing.billing_entity import BillingAccountEntity
@@ -53,7 +55,7 @@ def require_test_environment() -> str:
 def _auth_users(password: str) -> dict[str, UUID]:
     result: dict[str, UUID] = {}
     with AuthSessionLocal.begin() as database:
-        for email, name in ACCOUNTS:
+        for index, (email, name) in enumerate(ACCOUNTS, start=1):
             user = database.scalar(select(UserEntity).where(UserEntity.email == email))
             if user is None:
                 user = UserEntity(email=email, name=name, password_hash=hash_password(password))
@@ -78,6 +80,32 @@ def _auth_users(password: str) -> dict[str, UUID]:
             )
             if role is None:
                 database.add(UserRoleEntity(user_id=user.id, role="signature_admin"))
+            identifier = database.scalar(
+                select(UserIdentifierEntity).where(
+                    UserIdentifierEntity.user_id == user.id,
+                    UserIdentifierEntity.identifier_type == "BR_CPF",
+                    UserIdentifierEntity.issuing_country == "BR",
+                )
+            )
+            if identifier is None:
+                # Deterministic synthetic identifier used only by local/staging fixtures.
+                base = f"{900_000_000 + index:09d}"
+                digits = base
+                for size in (9, 10):
+                    total = sum(
+                        int(digit) * weight
+                        for digit, weight in zip(
+                            digits[:size], range(size + 1, 1, -1), strict=True
+                        )
+                    )
+                    digits += str((total * 10 % 11) % 10)
+                add_identifier(
+                    database,
+                    user_id=user.id,
+                    issuing_country="BR",
+                    identifier_type="BR_CPF",
+                    value=digits,
+                )
             result[email] = user.id
     return result
 

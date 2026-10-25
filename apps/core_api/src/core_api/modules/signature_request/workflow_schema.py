@@ -152,6 +152,7 @@ class SignerRead(BaseModel):
     token_expires_at: datetime
     link_revoked_at: datetime | None = None
     signed_at: datetime | None = None
+    identity_account_status: str | None = None
     identity_document_type: str | None = None
     identity_document_country: str | None = None
     identity_document_masked: str | None = None
