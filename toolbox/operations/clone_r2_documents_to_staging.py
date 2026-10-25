@@ -8,6 +8,7 @@ Run this only after restoring the production Core database into staging.
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 from pathlib import Path
 
 import boto3
@@ -123,6 +124,7 @@ def main() -> None:
     parser.add_argument("--destination-bucket-file", required=True)
     parser.add_argument("--source-prefix", default="")
     parser.add_argument("--destination-prefix", default="")
+    parser.add_argument("--legacy-root")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
@@ -148,58 +150,88 @@ def main() -> None:
     source_prefix = args.source_prefix.strip("/")
     destination_prefix = args.destination_prefix.strip("/")
 
-    checked = copied = existing = missing = bytes_total = 0
+    legacy_root = Path(args.legacy_root).resolve() if args.legacy_root else None
+    checked = copied = existing = missing = recoverable_legacy = bytes_total = 0
     missing_versions = missing_artifacts = 0
     missing_active = missing_deleted = missing_current = missing_historical = 0
     missing_requested = missing_unrequested = 0
     references = _references()
     version_context = _document_version_context()
     for storage_key in sorted(references):
-        _, kinds = references[storage_key]
+        expected_digest, kinds = references[storage_key]
         source_key = f"{source_prefix}/{storage_key}" if source_prefix else storage_key
         destination_key = (
             f"{destination_prefix}/{storage_key}" if destination_prefix else storage_key
         )
         checked += 1
+        source_body = None
+        source_metadata: dict[str, str] = {}
+        source_content_type = "application/octet-stream"
+        legacy_path: Path | None = None
         try:
             source_head = source.head_object(Bucket=source_bucket, Key=source_key)
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
             status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if code in {"NoSuchKey", "404", "NotFound"} or status == 404:
-                missing += 1
-                missing_versions += int("document_version" in kinds)
-                missing_artifacts += int("signed_artifact" in kinds)
-                if "document_version" in kinds:
-                    active, current, requested = version_context[storage_key]
-                    missing_active += int(active)
-                    missing_deleted += int(not active)
-                    missing_current += int(current)
-                    missing_historical += int(not current)
-                    missing_requested += int(requested)
-                    missing_unrequested += int(not requested)
-                continue
-            raise
-        size = int(source_head["ContentLength"])
+                if legacy_root is not None:
+                    candidate = (legacy_root / storage_key).resolve()
+                    if legacy_root in candidate.parents and candidate.is_file():
+                        candidate_digest = sha256()
+                        with candidate.open("rb") as legacy_source:
+                            while chunk := legacy_source.read(1024 * 1024):
+                                candidate_digest.update(chunk)
+                        if candidate_digest.hexdigest() == expected_digest:
+                            legacy_path = candidate
+                            recoverable_legacy += 1
+                if legacy_path is None:
+                    missing += 1
+                    missing_versions += int("document_version" in kinds)
+                    missing_artifacts += int("signed_artifact" in kinds)
+                    if "document_version" in kinds:
+                        active, current, requested = version_context[storage_key]
+                        missing_active += int(active)
+                        missing_deleted += int(not active)
+                        missing_current += int(current)
+                        missing_historical += int(not current)
+                        missing_requested += int(requested)
+                        missing_unrequested += int(not requested)
+                    continue
+            else:
+                raise
+        if legacy_path is not None:
+            size = legacy_path.stat().st_size
+            source_content_type = "application/pdf"
+        else:
+            size = int(source_head["ContentLength"])
+            source_content_type = source_head.get(
+                "ContentType",
+                "application/octet-stream",
+            )
+            source_metadata = source_head.get("Metadata", {})
         bytes_total += size
         if not _missing(destination, bucket=destination_bucket, key=destination_key):
             existing += 1
             continue
         if not args.apply:
             continue
-        response = source.get_object(Bucket=source_bucket, Key=source_key)
+        if legacy_path is not None:
+            source_body = legacy_path.open("rb")
+        else:
+            response = source.get_object(Bucket=source_bucket, Key=source_key)
+            source_body = response["Body"]
         try:
             destination.put_object(
                 Bucket=destination_bucket,
                 Key=destination_key,
-                Body=response["Body"],
+                Body=source_body,
                 ContentLength=size,
-                ContentType=source_head.get("ContentType", "application/octet-stream"),
-                Metadata=source_head.get("Metadata", {}),
+                ContentType=source_content_type,
+                Metadata=source_metadata,
                 IfNoneMatch="*",
             )
         finally:
-            response["Body"].close()
+            source_body.close()
         copied_head = destination.head_object(Bucket=destination_bucket, Key=destination_key)
         if int(copied_head["ContentLength"]) != size:
             raise SystemExit("Destination object size differs after copy")
@@ -209,6 +241,7 @@ def main() -> None:
     print(
         f"[ok] mode={mode}; referenced={checked}; copied={copied}; "
         f"already_present={existing}; missing_source={missing}; "
+        f"recoverable_legacy={recoverable_legacy}; "
         f"missing_document_versions={missing_versions}; "
         f"missing_signed_artifacts={missing_artifacts}; bytes={bytes_total}"
     )

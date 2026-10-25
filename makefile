@@ -44,6 +44,7 @@ STAGING_TOOLS_IMAGE ?= rubrica-staging-tools:local
 STAGING_TOOLS = docker run --rm -i --volume "$(CURDIR):/app" --workdir /app $(STAGING_TOOLS_IMAGE)
 PRODUCTION_SECRETS_DIR ?= /etc/rubrica/secrets
 STAGING_SECRETS_DIR ?= $(CURDIR)/.secrets/staging
+PRODUCTION_DOCUMENT_VOLUME ?= rubrica-prod_document_storage
 BACKUP_ROOT ?= backups
 ECNPJ_DOCUMENT_DIR ?= /srv/rubrica-ecnpj
 ECNPJ_PFX_FILE ?= /etc/rubrica/secrets/empresa-ecnpj-a1.pfx
@@ -231,9 +232,11 @@ staging-clone-core-from-production:
 staging-clone-r2-documents: staging-ensure
 	@test -d "$(PRODUCTION_SECRETS_DIR)" || (echo "[error] diretório de secrets de produção ausente"; exit 2)
 	@test -d "$(STAGING_SECRETS_DIR)" || (echo "[error] diretório de secrets de staging ausente"; exit 2)
+	@docker volume inspect "$(PRODUCTION_DOCUMENT_VOLUME)" >/dev/null || (echo "[error] volume legado de documentos não encontrado: $(PRODUCTION_DOCUMENT_VOLUME)"; exit 2)
 	$(STAGING_MAINTENANCE) run --rm --build \
 		-v "$(PRODUCTION_SECRETS_DIR):/run/production-r2:ro" \
 		-v "$(STAGING_SECRETS_DIR):/run/staging-r2:ro" \
+		-v "$(PRODUCTION_DOCUMENT_VOLUME):/run/production-documents-legacy:ro" \
 		alembic python -m toolbox.operations.clone_r2_documents_to_staging \
 		--source-endpoint-file /run/production-r2/r2_documents_endpoint \
 		--source-access-key-id-file /run/production-r2/r2_documents_access_key_id \
@@ -243,6 +246,7 @@ staging-clone-r2-documents: staging-ensure
 		--destination-access-key-id-file /run/staging-r2/r2_documents_access_key_id \
 		--destination-secret-access-key-file /run/staging-r2/r2_documents_secret_access_key \
 		--destination-bucket-file /run/staging-r2/r2_documents_bucket \
+		--legacy-root /run/production-documents-legacy \
 		--source-prefix "$$(sed -n 's/^R2_DOCUMENTS_PREFIX=//p' "$(PRODUCTION_ENV_FILE)" | tail -n 1)" \
 		--destination-prefix "$$(sed -n 's/^R2_DOCUMENTS_PREFIX=//p' "$(STAGING_ENV_FILE)" | tail -n 1)" \
 		$(if $(apply),--apply,)
