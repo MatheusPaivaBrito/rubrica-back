@@ -60,6 +60,8 @@ def main() -> None:
         secret_access_key=settings.R2_DOCUMENTS_SECRET_ACCESS_KEY,
         bucket=settings.R2_DOCUMENTS_BUCKET,
         prefix=args.source_prefix,
+        encryption_key=settings.DOCUMENT_STORAGE_ENCRYPTION_KEY,
+        allow_legacy_plaintext=settings.DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT,
     )
     target_storage = R2DocumentStorage(
         endpoint=settings.R2_DOCUMENTS_ENDPOINT,
@@ -67,6 +69,8 @@ def main() -> None:
         secret_access_key=settings.R2_DOCUMENTS_SECRET_ACCESS_KEY,
         bucket=settings.R2_DOCUMENTS_BUCKET,
         prefix="",
+        encryption_key=settings.DOCUMENT_STORAGE_ENCRYPTION_KEY,
+        allow_legacy_plaintext=settings.DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT,
     )
 
     copied: list[tuple[str, str]] = []

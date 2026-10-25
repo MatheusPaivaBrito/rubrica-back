@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     R2_DOCUMENTS_BUCKET: str = ""
     R2_DOCUMENTS_BUCKET_FILE: str | None = None
     R2_DOCUMENTS_PREFIX: str = ""
+    DOCUMENT_STORAGE_ENCRYPTION_KEY: str = "rubrica-development-document-storage-key-change-me"
+    DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: str | None = None
+    DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: bool = True
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
@@ -117,6 +120,7 @@ class Settings(BaseSettings):
                 "R2_DOCUMENTS_ACCESS_KEY_ID": "R2_DOCUMENTS_ACCESS_KEY_ID_FILE",
                 "R2_DOCUMENTS_SECRET_ACCESS_KEY": "R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE",
                 "R2_DOCUMENTS_BUCKET": "R2_DOCUMENTS_BUCKET_FILE",
+                "DOCUMENT_STORAGE_ENCRYPTION_KEY": "DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE",
             },
         )
         if self.DOCUMENT_STORAGE_PROVIDER == "r2" and not all(
@@ -125,9 +129,20 @@ class Settings(BaseSettings):
                 self.R2_DOCUMENTS_ACCESS_KEY_ID,
                 self.R2_DOCUMENTS_SECRET_ACCESS_KEY,
                 self.R2_DOCUMENTS_BUCKET,
+                self.DOCUMENT_STORAGE_ENCRYPTION_KEY,
             )
         ):
-            raise ValueError("R2 document storage requires endpoint, credentials and bucket")
+            raise ValueError("R2 document storage requires endpoint, credentials, bucket and encryption key")
+        if self.DOCUMENT_STORAGE_PROVIDER == "r2" and self.ENVIRONMENT.lower() in {"production", "prod", "staging"} and (
+            len(self.DOCUMENT_STORAGE_ENCRYPTION_KEY) < 32
+            or self.DOCUMENT_STORAGE_ENCRYPTION_KEY.startswith("rubrica-development-")
+            or self.DOCUMENT_STORAGE_ENCRYPTION_KEY in {
+                self.EVIDENCE_SECRET,
+                self.TENANT_IDENTITY_ENCRYPTION_KEY,
+                self.TENANT_IDENTITY_HMAC_KEY,
+            }
+        ):
+            raise ValueError("A secure and distinct document storage encryption key is required")
         if self.ENVIRONMENT.lower() in {"production", "prod", "staging"} and (
             len(self.TENANT_IDENTITY_ENCRYPTION_KEY) < 32
             or len(self.TENANT_IDENTITY_HMAC_KEY) < 32

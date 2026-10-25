@@ -1,9 +1,10 @@
 # Cloudflare R2 no Rubrica
 
-Use dois buckets privados e dois tokens de conta limitados ao respectivo bucket:
+Use três buckets privados e tokens de conta limitados ao respectivo bucket:
 
 - `rubrica-backups`: dumps criptografados dos quatro bancos da aplicação;
 - `rubrica-documents`: PDFs operacionais acessados diretamente pelo Core via API S3.
+- `rubrica-documents-staging`: PDFs descartáveis do staging, isolados da produção.
 
 Não habilite acesso público, domínio público ou CORS nesses buckets.
 
@@ -16,9 +17,15 @@ r2_documents_endpoint
 r2_documents_access_key_id
 r2_documents_secret_access_key
 r2_documents_bucket
+document_storage_encryption_key
 ```
 
-O último arquivo contém `rubrica-documents`. Para subir o ambiente com o R2:
+O arquivo `document_storage_encryption_key` deve ser exclusivo deste armazenamento
+e ter pelo menos 32 caracteres aleatórios. Sem ele, objetos cifrados não podem ser
+recuperados. O arquivo `r2_documents_bucket` contém `rubrica-documents` em produção
+e `rubrica-documents-staging` no staging.
+
+Para subir o ambiente com o R2:
 
 ```bash
 docker compose --env-file .env.production \
@@ -30,8 +37,23 @@ Os alvos `make production-config`, `make production-migrate` e
 `make production-up` incluem esse overlay. Assim, a produção não volta
 acidentalmente ao volume local.
 
-O banco continua guardando somente a chave opaca do objeto. Upload, leitura,
-exclusão e backup passam pelo Core; o navegador não recebe credenciais nem URL pública.
+O banco continua guardando somente a chave opaca do objeto. Antes do upload, o
+Core cifra cada PDF com AES-256-GCM e um nonce exclusivo. O R2 recebe apenas
+`application/octet-stream`; baixar um objeto diretamente pelo painel Cloudflare
+não produz um PDF legível. Upload, leitura, exclusão e backup passam pelo Core; o
+navegador não recebe credenciais, chave criptográfica nem URL pública.
+
+Durante uma migração controlada, `DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT=true`
+permite ler os objetos históricos. Primeiro faça o dry-run e depois aplique:
+
+```bash
+make production-encrypt-r2-documents
+make production-encrypt-r2-documents apply=1
+```
+
+Depois que o segundo dry-run informar zero objetos legados, defina
+`DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT=false` e recrie o Core. Nunca remova ou
+substitua a chave sem uma rotação/migração verificada.
 Antes de habilitar isso no servidor, os objetos do volume atual devem ser
 copiados preservando as chaves e conferidos pelo SHA-256 registrado no banco.
 Com o ambiente em janela de manutenção, faça primeiro a conferência e depois a

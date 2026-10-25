@@ -52,6 +52,36 @@ def require_test_environment() -> str:
     return environment
 
 
+def _ensure_test_cpf(database, user: UserEntity, index: int) -> None:
+    identifier = database.scalar(
+        select(UserIdentifierEntity).where(
+            UserIdentifierEntity.user_id == user.id,
+            UserIdentifierEntity.identifier_type == "BR_CPF",
+            UserIdentifierEntity.issuing_country == "BR",
+        )
+    )
+    if identifier is not None:
+        return
+    # Deterministic synthetic identifier used only by local/staging fixtures.
+    base = f"{900_000_000 + index:09d}"
+    digits = base
+    for size in (9, 10):
+        total = sum(
+            int(digit) * weight
+            for digit, weight in zip(
+                digits[:size], range(size + 1, 1, -1), strict=True
+            )
+        )
+        digits += str((total * 10 % 11) % 10)
+    add_identifier(
+        database,
+        user_id=user.id,
+        issuing_country="BR",
+        identifier_type="BR_CPF",
+        value=digits,
+    )
+
+
 def _auth_users(password: str) -> dict[str, UUID]:
     result: dict[str, UUID] = {}
     with AuthSessionLocal.begin() as database:
@@ -80,32 +110,7 @@ def _auth_users(password: str) -> dict[str, UUID]:
             )
             if role is None:
                 database.add(UserRoleEntity(user_id=user.id, role="signature_admin"))
-            identifier = database.scalar(
-                select(UserIdentifierEntity).where(
-                    UserIdentifierEntity.user_id == user.id,
-                    UserIdentifierEntity.identifier_type == "BR_CPF",
-                    UserIdentifierEntity.issuing_country == "BR",
-                )
-            )
-            if identifier is None:
-                # Deterministic synthetic identifier used only by local/staging fixtures.
-                base = f"{900_000_000 + index:09d}"
-                digits = base
-                for size in (9, 10):
-                    total = sum(
-                        int(digit) * weight
-                        for digit, weight in zip(
-                            digits[:size], range(size + 1, 1, -1), strict=True
-                        )
-                    )
-                    digits += str((total * 10 % 11) % 10)
-                add_identifier(
-                    database,
-                    user_id=user.id,
-                    issuing_country="BR",
-                    identifier_type="BR_CPF",
-                    value=digits,
-                )
+            _ensure_test_cpf(database, user, index)
             result[email] = user.id
     return result
 

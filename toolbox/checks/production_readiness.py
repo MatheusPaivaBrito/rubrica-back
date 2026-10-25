@@ -34,6 +34,7 @@ REQUIRED_SECRETS = (
     "r2_documents_access_key_id",
     "r2_documents_secret_access_key",
     "r2_documents_bucket",
+    "document_storage_encryption_key",
     "platform_grafana_service_token",
     "observability_internal_service_key",
 )

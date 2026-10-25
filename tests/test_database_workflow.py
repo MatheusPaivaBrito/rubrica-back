@@ -151,6 +151,27 @@ def test_database_workflow_round_trip(
         writer.write(source)
         original = source.getvalue()
         document = service.create_document(DocumentCreate(organization_id=organization, title="Smoke", original_filename="smoke.pdf", content_type="application/pdf", created_by="operator"), original)
+        with SessionLocal.begin() as db:
+            foreign_tenant = TenantEntity(
+                name="Foreign tenant",
+                slug=f"foreign-{uuid4()}",
+            )
+            db.add(foreign_tenant)
+            db.flush()
+            db.add(
+                TenantMemberEntity(
+                    tenant_id=foreign_tenant.id,
+                    auth_user_id="foreign-user@example.com",
+                    role="admin",
+                    status="active",
+                )
+            )
+        with pytest.raises(WorkflowError) as cross_tenant_error:
+            service.get_content(
+                document.id,
+                actor_id="foreign-user@example.com",
+            )
+        assert cross_tenant_error.value.status_code == 403
         request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
         service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
         service.add_signer(request.id, SignerCreate(name="Second User", email="second@example.com"), "operator")

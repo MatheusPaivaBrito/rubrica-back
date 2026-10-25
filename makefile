@@ -31,7 +31,7 @@ DOCS_COMPOSE = docker compose --env-file $(DOCS_ENV_FILE) -f $(DEV_COMPOSE_FILE)
 # Prevent values exported from the development .env above from overriding the
 # explicit staging/production env files (shell variables outrank --env-file).
 ISOLATED_COMPOSE = env -i PATH="$(PATH)" HOME="$(HOME)" docker compose
-STAGING_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE)
+STAGING_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE) -f compose/features/r2-documents.yml -f compose/features/serpro-timestamp.yml
 PRODUCTION_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
 LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
 LOCAL_SEED = $(LOCAL_COMPOSE) -f compose/services/seed.yml
@@ -200,6 +200,10 @@ staging-smoke: staging-ensure
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/test-accounts/" >/dev/null
 	@echo "[ok] staging gateway, test accounts, named Cloudflare Tunnel and required containers are operational"
+
+.PHONY: staging-encrypt-r2-documents
+staging-encrypt-r2-documents: staging-ensure
+	$(STAGING_COMPOSE) exec -T core-api python -m toolbox.operations.encrypt_r2_documents $(if $(apply),--apply,)
 
 staging-bootstrap: staging-seed
 	$(MAKE) --no-print-directory staging-up STAGING_ENV_FILE=$(STAGING_ENV_FILE)
@@ -404,6 +408,10 @@ production-provider-check: production-ensure
 
 production-provider-check-paid:
 	@echo "[error] paid or externally mutating provider probes require a provider-specific, explicitly authorized command"; exit 2
+
+.PHONY: production-encrypt-r2-documents
+production-encrypt-r2-documents: production-ensure
+	$(PRODUCTION_COMPOSE) exec -T core-api python -m toolbox.operations.encrypt_r2_documents $(if $(apply),--apply,)
 
 ensure-production-databases: production-config
 	$(PRODUCTION_COMPOSE) up -d --wait postgres

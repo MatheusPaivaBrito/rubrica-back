@@ -1,13 +1,26 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from hashlib import sha256
+from io import BytesIO
+import os
 from pathlib import Path
 import re
-from typing import BinaryIO
+from typing import BinaryIO, Literal
 from uuid import uuid4
 
 import boto3
 from botocore.exceptions import ClientError
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+_ENCRYPTED_DOCUMENT_MAGIC = b"RUBRICA-DOC\x00\x01"
+_AES_GCM_NONCE_BYTES = 12
+
+
+class DocumentDecryptionError(OSError):
+    """Stored object is not authentic for the configured application key."""
 
 
 class DocumentStorage(ABC):
@@ -75,10 +88,14 @@ class R2DocumentStorage(DocumentStorage):
         secret_access_key: str,
         bucket: str,
         prefix: str = "",
+        encryption_key: str = "",
+        allow_legacy_plaintext: bool = True,
         client=None,
     ) -> None:
         self.bucket = bucket
         self.prefix = prefix.strip("/")
+        self._encryption_key = sha256(encryption_key.encode("utf-8")).digest()
+        self._allow_legacy_plaintext = allow_legacy_plaintext
         self.client = client or boto3.client(
             "s3",
             endpoint_url=endpoint.rstrip("/"),
@@ -86,6 +103,27 @@ class R2DocumentStorage(DocumentStorage):
             aws_secret_access_key=secret_access_key,
             region_name="auto",
         )
+
+    def _encrypt(self, storage_key: str, plaintext: bytes) -> bytes:
+        nonce = os.urandom(_AES_GCM_NONCE_BYTES)
+        return _ENCRYPTED_DOCUMENT_MAGIC + nonce + AESGCM(self._encryption_key).encrypt(
+            nonce,
+            plaintext,
+            storage_key.encode("utf-8"),
+        )
+
+    def _decrypt(self, storage_key: str, content: bytes) -> bytes:
+        offset = len(_ENCRYPTED_DOCUMENT_MAGIC)
+        nonce = content[offset:offset + _AES_GCM_NONCE_BYTES]
+        ciphertext = content[offset + _AES_GCM_NONCE_BYTES:]
+        try:
+            return AESGCM(self._encryption_key).decrypt(
+                nonce,
+                ciphertext,
+                storage_key.encode("utf-8"),
+            )
+        except (InvalidTag, ValueError) as exc:
+            raise DocumentDecryptionError("Stored document authentication failed") from exc
 
     def put(
         self, stream: BinaryIO, *, filename: str, sha256: str | None = None,
@@ -100,16 +138,18 @@ class R2DocumentStorage(DocumentStorage):
     ) -> int:
         """Store a known opaque key. Reserved for the one-time local migration."""
         self._validate_key(storage_key)
-        content = stream.read()
+        plaintext = stream.read()
+        content = self._encrypt(storage_key, plaintext)
         request = {
             "Bucket": self.bucket,
             "Key": self._object_key(storage_key),
             "Body": content,
-            "ContentType": "application/pdf",
+            "ContentType": "application/octet-stream",
             "IfNoneMatch": "*",
+            "Metadata": {"rubrica-encryption": "aes-256-gcm-v1"},
         }
         if sha256:
-            request["Metadata"] = {"rubrica-sha256": sha256}
+            request["Metadata"]["rubrica-sha256"] = sha256
         try:
             self.client.put_object(**request)
         except ClientError as exc:
@@ -118,7 +158,7 @@ class R2DocumentStorage(DocumentStorage):
             if code in {"PreconditionFailed", "412"} or status == 412:
                 raise FileExistsError(storage_key) from exc
             raise
-        return len(content)
+        return len(plaintext)
 
     def get(self, storage_key: str) -> BinaryIO:
         self._validate_key(storage_key)
@@ -132,9 +172,55 @@ class R2DocumentStorage(DocumentStorage):
             if code in {"NoSuchKey", "404", "NotFound"}:
                 raise FileNotFoundError(storage_key) from exc
             raise
-        from io import BytesIO
+        content = response["Body"].read()
+        if not content.startswith(_ENCRYPTED_DOCUMENT_MAGIC):
+            if self._allow_legacy_plaintext:
+                return BytesIO(content)
+            raise DocumentDecryptionError("Legacy plaintext document storage is disabled")
+        return BytesIO(self._decrypt(storage_key, content))
 
-        return BytesIO(response["Body"].read())
+    def migrate_legacy_object(
+        self,
+        storage_key: str,
+        *,
+        expected_sha256: str,
+        apply: bool = False,
+    ) -> Literal["encrypted", "legacy", "migrated"]:
+        """Verify one referenced object and optionally encrypt a legacy plaintext value."""
+        self._validate_key(storage_key)
+        try:
+            response = self.client.get_object(
+                Bucket=self.bucket,
+                Key=self._object_key(storage_key),
+            )
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"NoSuchKey", "404", "NotFound"}:
+                raise FileNotFoundError(storage_key) from exc
+            raise
+        content = response["Body"].read()
+        already_encrypted = content.startswith(_ENCRYPTED_DOCUMENT_MAGIC)
+        plaintext = self._decrypt(storage_key, content) if already_encrypted else content
+        if sha256(plaintext).hexdigest() != expected_sha256:
+            raise DocumentDecryptionError("Stored document digest does not match the database")
+        if already_encrypted:
+            return "encrypted"
+        if not apply:
+            return "legacy"
+        self.client.put_object(
+            Bucket=self.bucket,
+            Key=self._object_key(storage_key),
+            Body=self._encrypt(storage_key, plaintext),
+            ContentType="application/octet-stream",
+            Metadata={
+                "rubrica-encryption": "aes-256-gcm-v1",
+                "rubrica-sha256": expected_sha256,
+            },
+        )
+        with self.get(storage_key) as migrated:
+            if sha256(migrated.read()).hexdigest() != expected_sha256:
+                raise DocumentDecryptionError("Stored document verification failed after migration")
+        return "migrated"
 
     def discard_uncommitted(self, storage_key: str) -> None:
         self._validate_key(storage_key)
@@ -186,5 +272,7 @@ def configured_document_storage(settings) -> DocumentStorage:
             secret_access_key=settings.R2_DOCUMENTS_SECRET_ACCESS_KEY,
             bucket=settings.R2_DOCUMENTS_BUCKET,
             prefix=settings.R2_DOCUMENTS_PREFIX,
+            encryption_key=settings.DOCUMENT_STORAGE_ENCRYPTION_KEY,
+            allow_legacy_plaintext=settings.DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT,
         )
     return LocalDocumentStorage(Path(settings.DOCUMENT_STORAGE_PATH))

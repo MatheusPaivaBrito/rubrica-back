@@ -7,11 +7,14 @@ services:
       R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_documents_secret_access_key
       R2_DOCUMENTS_BUCKET_FILE: /run/secrets/r2_documents_bucket
       R2_DOCUMENTS_PREFIX: ${R2_DOCUMENTS_PREFIX-}
+      DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/document_storage_encryption_key
+      DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: ${DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT:-true}
     secrets:
       - r2_documents_endpoint
       - r2_documents_access_key_id
       - r2_documents_secret_access_key
       - r2_documents_bucket
+      - document_storage_encryption_key
 
 secrets:
   r2_documents_endpoint:
@@ -22,3 +25,5 @@ secrets:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/r2_documents_secret_access_key
   r2_documents_bucket:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/r2_documents_bucket
+  document_storage_encryption_key:
+    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/document_storage_encryption_key

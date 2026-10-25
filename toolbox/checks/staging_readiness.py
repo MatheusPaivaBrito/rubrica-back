@@ -18,6 +18,13 @@ REQUIRED_SECRETS = (
     "stripe_secret_key", "stripe_webhook_secret", "contact_turnstile_secret_key",
     "serproid_client_secret", "platform_grafana_service_token",
     "observability_internal_service_key", "cloudflare_tunnel_token",
+    "serpro_timestamp_consumer_secret", "serpro_timestamp_trust_roots.pem",
+)
+
+R2_SECRETS = (
+    "r2_documents_endpoint", "r2_documents_access_key_id",
+    "r2_documents_secret_access_key", "r2_documents_bucket",
+    "document_storage_encryption_key",
 )
 
 
@@ -35,8 +42,8 @@ def main() -> int:
     errors: list[str] = []
     if values.get("ENVIRONMENT") != "staging":
         errors.append("ENVIRONMENT must be staging")
-    if values.get("DOCUMENT_STORAGE_PROVIDER") != "local":
-        errors.append("staging must use local document storage")
+    if values.get("DOCUMENT_STORAGE_PROVIDER") != "r2":
+        errors.append("staging must use isolated R2 document storage")
     if values.get("BILLING_PROVIDER") not in {"fake", "stripe"}:
         errors.append("staging BILLING_PROVIDER must be fake or stripe")
     if values.get("PUBLIC_WEB_URL") != "https://staging.rubricasignature.com":
@@ -44,7 +51,8 @@ def main() -> int:
     if values.get("SIGNING_APP_URL") != "https://staging.rubricasignature.com/signing":
         errors.append("staging SIGNING_APP_URL must use the stable staging hostname")
     secrets_dir = staging_secrets_dir(values.get("SECRETS_DIR", "../.secrets/staging"))
-    for name in REQUIRED_SECRETS:
+    required_secrets = REQUIRED_SECRETS + R2_SECRETS
+    for name in required_secrets:
         path = secrets_dir / name
         if not path.is_file() or not path.read_text(encoding="utf-8").strip():
             errors.append(f"missing or empty staging secret: {path}")

@@ -1,9 +1,10 @@
 from io import BytesIO
+from hashlib import sha256
 
 import pytest
 from botocore.exceptions import ClientError
 
-from core_api.modules.document.storage import R2DocumentStorage
+from core_api.modules.document.storage import DocumentDecryptionError, R2DocumentStorage
 
 
 class FakeS3Client:
@@ -12,10 +13,9 @@ class FakeS3Client:
         self.metadata: dict[tuple[str, str], dict[str, str]] = {}
         self.lock_deletes = False
 
-    def put_object(self, *, Bucket, Key, Body, ContentType, IfNoneMatch, Metadata=None):
-        assert ContentType == "application/pdf"
-        assert IfNoneMatch == "*"
-        if (Bucket, Key) in self.objects:
+    def put_object(self, *, Bucket, Key, Body, ContentType, IfNoneMatch=None, Metadata=None):
+        assert ContentType == "application/octet-stream"
+        if IfNoneMatch == "*" and (Bucket, Key) in self.objects:
             raise ClientError(
                 {
                     "Error": {"Code": "PreconditionFailed", "Message": "exists"},
@@ -48,12 +48,13 @@ class FakeS3Client:
         self.objects.pop((Bucket, Key), None)
 
 
-def storage() -> R2DocumentStorage:
+def storage(*, encryption_key: str = "test-document-encryption-key-with-32-bytes") -> R2DocumentStorage:
     return R2DocumentStorage(
         endpoint="https://account.r2.cloudflarestorage.com",
         access_key_id="key-id",
         secret_access_key="secret",
         bucket="rubrica-documents",
+        encryption_key=encryption_key,
         client=FakeS3Client(),
     )
 
@@ -68,8 +69,10 @@ def test_r2_storage_round_trip_and_discard_uncommitted() -> None:
     assert size == 12
     assert target.get(key).read() == b"%PDF-content"
     assert target.client.metadata[(target.bucket, key)] == {
-        "rubrica-sha256": digest
+        "rubrica-encryption": "aes-256-gcm-v1",
+        "rubrica-sha256": digest,
     }
+    assert not target.client.objects[(target.bucket, key)].startswith(b"%PDF")
 
     target.discard_uncommitted(key)
     with pytest.raises(FileNotFoundError):
@@ -119,3 +122,84 @@ def test_locked_orphan_cleanup_is_safe() -> None:
     target.discard_uncommitted("orphan123")
 
     assert target.get("orphan123").read() == b"pdf"
+
+
+def test_r2_storage_rejects_tampered_ciphertext() -> None:
+    target = storage()
+    key, _ = target.put(BytesIO(b"%PDF-secret"), filename="secret.pdf")
+    raw = target.client.objects[(target.bucket, key)]
+    target.client.objects[(target.bucket, key)] = raw[:-1] + bytes([raw[-1] ^ 1])
+
+    with pytest.raises(DocumentDecryptionError, match="authentication failed"):
+        target.get(key)
+
+
+def test_r2_storage_rejects_a_different_application_key() -> None:
+    client = FakeS3Client()
+    writer = R2DocumentStorage(
+        endpoint="https://account.r2.cloudflarestorage.com",
+        access_key_id="key-id",
+        secret_access_key="secret",
+        bucket="rubrica-documents",
+        encryption_key="first-document-encryption-key-with-32-bytes",
+        client=client,
+    )
+    reader = R2DocumentStorage(
+        endpoint="https://account.r2.cloudflarestorage.com",
+        access_key_id="key-id",
+        secret_access_key="secret",
+        bucket="rubrica-documents",
+        encryption_key="second-document-encryption-key-with-32-bytes",
+        client=client,
+    )
+    key, _ = writer.put(BytesIO(b"%PDF-secret"), filename="secret.pdf")
+
+    with pytest.raises(DocumentDecryptionError):
+        reader.get(key)
+
+
+def test_legacy_plaintext_requires_explicit_migration_window() -> None:
+    client = FakeS3Client()
+    client.objects[("rubrica-documents", "legacy123")] = b"%PDF-legacy"
+    compatible = R2DocumentStorage(
+        endpoint="https://account.r2.cloudflarestorage.com",
+        access_key_id="key-id",
+        secret_access_key="secret",
+        bucket="rubrica-documents",
+        encryption_key="test-document-encryption-key-with-32-bytes",
+        allow_legacy_plaintext=True,
+        client=client,
+    )
+    strict = R2DocumentStorage(
+        endpoint="https://account.r2.cloudflarestorage.com",
+        access_key_id="key-id",
+        secret_access_key="secret",
+        bucket="rubrica-documents",
+        encryption_key="test-document-encryption-key-with-32-bytes",
+        allow_legacy_plaintext=False,
+        client=client,
+    )
+
+    assert compatible.get("legacy123").read() == b"%PDF-legacy"
+    with pytest.raises(DocumentDecryptionError, match="disabled"):
+        strict.get("legacy123")
+
+
+def test_legacy_object_migration_is_verified_and_idempotent() -> None:
+    target = storage()
+    plaintext = b"%PDF-legacy"
+    digest = sha256(plaintext).hexdigest()
+    target.client.objects[(target.bucket, "legacy123")] = plaintext
+
+    assert target.migrate_legacy_object(
+        "legacy123", expected_sha256=digest, apply=False
+    ) == "legacy"
+    assert target.client.objects[(target.bucket, "legacy123")] == plaintext
+    assert target.migrate_legacy_object(
+        "legacy123", expected_sha256=digest, apply=True
+    ) == "migrated"
+    assert not target.client.objects[(target.bucket, "legacy123")].startswith(b"%PDF")
+    assert target.get("legacy123").read() == plaintext
+    assert target.migrate_legacy_object(
+        "legacy123", expected_sha256=digest, apply=True
+    ) == "encrypted"

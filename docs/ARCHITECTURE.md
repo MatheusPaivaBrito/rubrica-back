@@ -151,7 +151,7 @@ The three environment levels are deliberately distinct. Do not infer one mode fr
 
 ### Staging
 
-Staging is the first fully containerized product topology and uses its own configuration and Docker Secrets. `make staging-bootstrap` prepares migrations/authorized test data and runs smoke checks; `make staging-up` only starts an already prepared stack. Staging validates images, entrypoints, networks, healthchecks, gateway behavior and persistent local document storage in a named volume.
+Staging is the first fully containerized product topology and uses its own configuration, Docker Secrets and private R2 bucket. `make staging-bootstrap` prepares migrations/authorized test data and runs smoke checks; `make staging-up` only starts an already prepared stack. Staging validates images, entrypoints, networks, healthchecks, gateway behavior and encrypted document storage without sharing production credentials or objects.
 
 Staging must not consume development or production configuration, production providers, the operational R2 bucket or implicit local seed. Run `staging-ensure` and `staging-smoke` before treating the topology as verified.
 
@@ -167,10 +167,16 @@ Provider checks distinguish configured, reachable and operational states. E-mail
 
 ```text
 Development     -> LocalDocumentStorage -> persistent local directory
-Staging         -> LocalDocumentStorage -> named Docker volume
-Production      -> R2DocumentStorage    -> private operational bucket
+Staging         -> R2DocumentStorage    -> encrypted isolated staging bucket
+Production      -> R2DocumentStorage    -> encrypted private operational bucket
 Automated tests -> LocalDocumentStorage -> isolated temporary directory
 ```
+
+R2 objects are encrypted by the Core with AES-256-GCM before upload. Tenant
+authorization is enforced before object lookup, and the plaintext SHA-256 stored
+in PostgreSQL is verified after authenticated decryption. Cloud storage operators
+can list and download ciphertext but cannot interpret document contents without
+the application encryption key.
 
 The Platform Infra stack is external to Rubrica. It is optional and safely degradable in development/staging tests and continuously integrated in production; telemetry failure must never block authentication, signing, migrations or essential readiness.
 
