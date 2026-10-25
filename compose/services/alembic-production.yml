@@ -35,3 +35,4 @@ services:
       - document_storage_encryption_key
     networks:
       - rubrica_internal
+      - rubrica_external
