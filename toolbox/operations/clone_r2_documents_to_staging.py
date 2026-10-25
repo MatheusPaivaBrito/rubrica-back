@@ -26,7 +26,7 @@ def _secret(path: str) -> str:
     return value
 
 
-def _references() -> dict[str, str]:
+def _references() -> dict[str, tuple[str, frozenset[str]]]:
     with SessionLocal() as database:
         versions = database.execute(
             select(DocumentVersionEntity.storage_key, DocumentVersionEntity.sha256).distinct()
@@ -36,15 +36,22 @@ def _references() -> dict[str, str]:
                 SignatureEntity.artifact_storage_key.is_not(None)
             )
         ).all()
-    references = {key: digest for key, digest in versions}
+    references: dict[str, tuple[str, set[str]]] = {
+        key: (digest, {"document_version"}) for key, digest in versions
+    }
     for key, digest in signatures:
         if not key or not digest:
             continue
         previous = references.get(key)
-        if previous is not None and previous != digest:
+        if previous is not None and previous[0] != digest:
             raise SystemExit("Conflicting digests exist for a referenced object")
-        references[key] = digest
-    return references
+        kinds = previous[1] if previous is not None else set()
+        kinds.add("signed_artifact")
+        references[key] = (digest, kinds)
+    return {
+        key: (digest, frozenset(kinds))
+        for key, (digest, kinds) in references.items()
+    }
 
 
 def _client(endpoint: str, access_key_id: str, secret_access_key: str):
@@ -109,7 +116,10 @@ def main() -> None:
     destination_prefix = args.destination_prefix.strip("/")
 
     checked = copied = existing = missing = bytes_total = 0
-    for storage_key in sorted(_references()):
+    missing_versions = missing_artifacts = 0
+    references = _references()
+    for storage_key in sorted(references):
+        _, kinds = references[storage_key]
         source_key = f"{source_prefix}/{storage_key}" if source_prefix else storage_key
         destination_key = (
             f"{destination_prefix}/{storage_key}" if destination_prefix else storage_key
@@ -122,6 +132,8 @@ def main() -> None:
             status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
             if code in {"NoSuchKey", "404", "NotFound"} or status == 404:
                 missing += 1
+                missing_versions += int("document_version" in kinds)
+                missing_artifacts += int("signed_artifact" in kinds)
                 continue
             raise
         size = int(source_head["ContentLength"])
@@ -152,7 +164,9 @@ def main() -> None:
     mode = "apply" if args.apply else "dry-run"
     print(
         f"[ok] mode={mode}; referenced={checked}; copied={copied}; "
-        f"already_present={existing}; missing_source={missing}; bytes={bytes_total}"
+        f"already_present={existing}; missing_source={missing}; "
+        f"missing_document_versions={missing_versions}; "
+        f"missing_signed_artifacts={missing_artifacts}; bytes={bytes_total}"
     )
     if missing:
         raise SystemExit("Referenced source objects are missing; clone is incomplete")
