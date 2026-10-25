@@ -15,8 +15,11 @@ from botocore.exceptions import ClientError
 from sqlalchemy import select
 
 from core_api.infrastructure.database.connection import SessionLocal
-from core_api.modules.document.document_entity import DocumentVersionEntity
-from core_api.modules.signature_request.signature_request_entity import SignatureEntity
+from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
+from core_api.modules.signature_request.signature_request_entity import (
+    SignatureEntity,
+    SignatureRequestEntity,
+)
 
 
 def _secret(path: str) -> str:
@@ -51,6 +54,36 @@ def _references() -> dict[str, tuple[str, frozenset[str]]]:
     return {
         key: (digest, frozenset(kinds))
         for key, (digest, kinds) in references.items()
+    }
+
+
+def _document_version_context() -> dict[str, tuple[bool, bool, bool]]:
+    """Return active/current/requested flags without exposing document metadata."""
+    with SessionLocal() as database:
+        versions = database.execute(
+            select(
+                DocumentVersionEntity.storage_key,
+                DocumentVersionEntity.document_id,
+                DocumentVersionEntity.version,
+                DocumentEntity.deleted_at,
+                DocumentEntity.version,
+            ).join(DocumentEntity, DocumentEntity.id == DocumentVersionEntity.document_id)
+        ).all()
+        requested_versions = set(
+            database.execute(
+                select(
+                    SignatureRequestEntity.document_id,
+                    SignatureRequestEntity.document_version,
+                ).distinct()
+            ).all()
+        )
+    return {
+        storage_key: (
+            deleted_at is None,
+            version == current_version,
+            (document_id, version) in requested_versions,
+        )
+        for storage_key, document_id, version, deleted_at, current_version in versions
     }
 
 
@@ -117,7 +150,10 @@ def main() -> None:
 
     checked = copied = existing = missing = bytes_total = 0
     missing_versions = missing_artifacts = 0
+    missing_active = missing_deleted = missing_current = missing_historical = 0
+    missing_requested = missing_unrequested = 0
     references = _references()
+    version_context = _document_version_context()
     for storage_key in sorted(references):
         _, kinds = references[storage_key]
         source_key = f"{source_prefix}/{storage_key}" if source_prefix else storage_key
@@ -134,6 +170,14 @@ def main() -> None:
                 missing += 1
                 missing_versions += int("document_version" in kinds)
                 missing_artifacts += int("signed_artifact" in kinds)
+                if "document_version" in kinds:
+                    active, current, requested = version_context[storage_key]
+                    missing_active += int(active)
+                    missing_deleted += int(not active)
+                    missing_current += int(current)
+                    missing_historical += int(not current)
+                    missing_requested += int(requested)
+                    missing_unrequested += int(not requested)
                 continue
             raise
         size = int(source_head["ContentLength"])
@@ -168,6 +212,13 @@ def main() -> None:
         f"missing_document_versions={missing_versions}; "
         f"missing_signed_artifacts={missing_artifacts}; bytes={bytes_total}"
     )
+    if missing_versions:
+        print(
+            "[detail] missing versions: "
+            f"active={missing_active}; deleted={missing_deleted}; "
+            f"current={missing_current}; historical={missing_historical}; "
+            f"used_by_requests={missing_requested}; unused={missing_unrequested}"
+        )
     if missing:
         raise SystemExit("Referenced source objects are missing; clone is incomplete")
 
