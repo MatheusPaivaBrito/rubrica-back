@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     AUTH_MFA_ENCRYPTION_KEY: str = "rubrica-development-mfa-key-change-me"
     AUTH_MFA_ENCRYPTION_KEY_FILE: str | None = None
     AUTH_MFA_CHALLENGE_TTL_SECONDS: int = 300
+    AUTH_MFA_REQUIRED: bool = True
     AUTH_IDENTITY_ENCRYPTION_KEY: str = "rubrica-development-identity-key-change-me"
     AUTH_IDENTITY_ENCRYPTION_KEY_FILE: str | None = None
     AUTH_IDENTITY_HMAC_KEY: str = "rubrica-development-identity-hmac-change-me"

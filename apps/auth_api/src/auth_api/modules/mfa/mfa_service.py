@@ -67,7 +67,8 @@ class MfaService:
                     MfaRecoveryCodeEntity.deleted_at.is_(None),
                 )
             )
-            return user.mfa_enabled, True, not user.mfa_enabled, int(remaining or 0)
+            required = settings.AUTH_MFA_REQUIRED
+            return user.mfa_enabled, required, required and not user.mfa_enabled, int(remaining or 0)
 
     def regenerate_recovery_codes(self, subject: str, password: str, code: str) -> list[str]:
         with SessionLocal.begin() as database:

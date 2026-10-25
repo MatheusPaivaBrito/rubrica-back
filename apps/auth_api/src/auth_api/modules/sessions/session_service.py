@@ -68,7 +68,7 @@ class SessionService:
             if not verify_password(payload.password, user.password_hash):
                 return None
             self._redis.delete(rate_key)
-            if user.mfa_enabled:
+            if settings.AUTH_MFA_REQUIRED and user.mfa_enabled:
                 return self._create_mfa_challenge(user)
             return self._create_session(user)
 
@@ -193,7 +193,7 @@ class SessionService:
             user = database.get(UserEntity, self._user_identifier(state["user_id"]))
             preferred_locale = user.preferred_locale if user is not None else "en"
         fingerprint = sha256(f"{session.subject}:{session.session_id}".encode("utf-8")).hexdigest()
-        setup_required = not bool(user and (user.mfa_enabled or user.mfa_exempt))
+        setup_required = settings.AUTH_MFA_REQUIRED and not bool(user and (user.mfa_enabled or user.mfa_exempt))
         return UiContextResponse(
             subject=session.subject,
             user_id=str(user.id),

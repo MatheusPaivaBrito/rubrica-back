@@ -13,6 +13,8 @@ services:
     extends: {file: ./services/redis.yml, service: production}
   auth-api:
     extends: {file: ./services/auth-api.yml, service: production}
+    environment:
+      AUTH_MFA_REQUIRED: "false"
   core-api:
     extends: {file: ./services/core-api.yml, service: production}
     volumes:
