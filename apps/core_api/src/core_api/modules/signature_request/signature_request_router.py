@@ -19,6 +19,7 @@ from core_api.modules.signature_request.workflow_schema import (
     SignerContactRead,
     SigningLinkRead,
     SignerRead,
+    SignerSignatureModeUpdate,
     SigningRead,
     StampConfiguration,
     StampCustomization,
@@ -82,6 +83,11 @@ async def add_signer(request_id: UUID, payload: SignerCreate, context: AuthConte
 async def invite_signer_account(request_id: UUID, signer_id: UUID, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> Response:
     workflow_service.invite_signer_account(str(request_id), str(signer_id), context.subject)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.put("/signature-requests/{request_id}/signers/{signer_id}/signature-mode", response_model=SignerRead, tags=["signature requests - command"])
+async def update_signer_signature_mode(request_id: UUID, signer_id: UUID, payload: SignerSignatureModeUpdate, context: AuthContext = Depends(require_permission("signature_requests:write"))) -> SignerRead:
+    return workflow_service.update_signer_signature_mode(str(request_id), str(signer_id), context.subject, payload.signature_mode)
 
 
 @router.get("/signature-requests/{request_id}/stamp-configuration", response_model=StampConfiguration, tags=["signature requests - query"])

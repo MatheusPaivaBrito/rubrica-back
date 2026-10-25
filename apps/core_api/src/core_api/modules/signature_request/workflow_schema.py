@@ -161,6 +161,10 @@ class SignerRead(BaseModel):
     signature_mode: SignatureMode = SignatureMode.SERPRO_TIMESTAMP
 
 
+class SignerSignatureModeUpdate(BaseModel):
+    signature_mode: SignatureMode
+
+
 class SignerContactRead(BaseModel):
     name: str
     email: str

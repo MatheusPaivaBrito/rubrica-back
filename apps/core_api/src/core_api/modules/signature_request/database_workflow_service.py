@@ -508,6 +508,18 @@ class DatabaseSignatureWorkflowService:
             )
         return True
 
+    def update_signer_signature_mode(self, request_id: str, signer_id: str, actor_id: str, mode: SignatureMode) -> SignerRead:
+        with SessionLocal.begin() as db:
+            request = self._request(db, request_id, lock=True)
+            self._require_request_access(db, request, actor_id)
+            if request.status != RequestStatus.DRAFT.value:
+                raise WorkflowError("Signature mode is frozen after opening", 409)
+            signer = self._signer(db, signer_id, request.id, lock=True)
+            signer.signature_mode = mode.value
+            self._audit(db, request.id, actor_id, "signer.signature_mode_selected", "signer", signer.id, {"signature_mode": mode.value, "source": "signer_card"})
+            db.flush()
+            return self._signer_read(signer)
+
     def list_signer_contacts(self, tenant_id: UUID, actor_id: str, query: str = "") -> list[SignerContactRead]:
         search = query.strip().lower()
         with SessionLocal() as db:
