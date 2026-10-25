@@ -87,3 +87,16 @@ def test_stamp_variant_is_stored_per_position() -> None:
         "minimal",
         "drawn",
     ]
+
+
+def test_stamp_customization_is_resolved_per_signer() -> None:
+    first = uuid4()
+    second = uuid4()
+    snapshot = {
+        "schema": "per-signer-v1",
+        "default": {"show_logo": False},
+        "by_signer": {str(first): {"show_logo": True, "primary_color": "#A82035"}},
+    }
+
+    assert DatabaseSignatureWorkflowService._signer_stamp_customization(snapshot, first)["show_logo"] is True
+    assert DatabaseSignatureWorkflowService._signer_stamp_customization(snapshot, second)["show_logo"] is False

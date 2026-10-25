@@ -204,6 +204,7 @@ class StampCustomization(BaseModel):
 class StampConfiguration(BaseModel):
     placements: list[StampPosition] = Field(default_factory=list, max_length=500)
     customization: StampCustomization | None = None
+    signer_customizations: dict[UUID, StampCustomization] = Field(default_factory=dict)
     signer_signature_modes: dict[UUID, Literal["serpro_timestamp", "serproid"]] = Field(default_factory=dict)
 
 
