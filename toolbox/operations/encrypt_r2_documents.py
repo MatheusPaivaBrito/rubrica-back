@@ -13,7 +13,11 @@ from sqlalchemy import select
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_entity import DocumentVersionEntity
-from core_api.modules.document.storage import R2DocumentStorage, configured_document_storage
+from core_api.modules.document.storage import (
+    DocumentDecryptionError,
+    R2DocumentStorage,
+    configured_document_storage,
+)
 from core_api.modules.signature_request.signature_request_entity import SignatureEntity
 
 
@@ -33,7 +37,7 @@ def _referenced_objects() -> dict[str, str]:
             continue
         existing = objects.get(key)
         if existing is not None and existing != digest:
-            raise SystemExit(f"Conflicting SHA-256 values for storage key: {key}")
+            raise SystemExit("Conflicting SHA-256 values exist for one storage object")
         objects[key] = digest
     return objects
 
@@ -48,22 +52,32 @@ def main() -> None:
     if not isinstance(storage, R2DocumentStorage):
         raise SystemExit("DOCUMENT_STORAGE_PROVIDER must be r2")
 
-    checked = migrated = legacy = encrypted = 0
+    checked = migrated = legacy = encrypted = missing = invalid = 0
     for storage_key, digest in sorted(_referenced_objects().items()):
-        state = storage.migrate_legacy_object(
-            storage_key,
-            expected_sha256=digest,
-            apply=args.apply,
-        )
         checked += 1
+        try:
+            state = storage.migrate_legacy_object(
+                storage_key,
+                expected_sha256=digest,
+                apply=args.apply,
+            )
+        except FileNotFoundError:
+            missing += 1
+            continue
+        except DocumentDecryptionError:
+            invalid += 1
+            continue
         migrated += int(state == "migrated")
         legacy += int(state == "legacy")
         encrypted += int(state == "encrypted")
 
     print(
         f"[ok] {checked} referenced objects verified; "
-        f"{encrypted} already encrypted; {legacy} legacy plaintext; {migrated} migrated"
+        f"{encrypted} already encrypted; {legacy} legacy plaintext; {migrated} migrated; "
+        f"{missing} missing; {invalid} invalid"
     )
+    if missing or invalid:
+        raise SystemExit("Referenced objects are missing or failed integrity validation")
 
 
 if __name__ == "__main__":
