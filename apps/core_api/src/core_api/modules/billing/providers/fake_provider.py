@@ -6,6 +6,7 @@ from core_api.modules.billing.providers.protocol import (
     ProviderBusinessIdentity,
     ProviderCustomer,
     ProviderSession,
+    ProviderSubscriptionChange,
 )
 
 
@@ -50,6 +51,9 @@ class FakeBillingProvider:
             "status": "active",
             "metadata": {"product_code": "rubrica_base"},
         }
+
+    def update_subscription_seats(self, **_kwargs) -> ProviderSubscriptionChange:
+        return ProviderSubscriptionChange(invoice_id="in_fake_seat_change")
 
     def retrieve_customer_business_identity(
         self, customer_id: str

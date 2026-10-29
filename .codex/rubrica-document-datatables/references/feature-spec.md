@@ -3,8 +3,8 @@
 ## Estado
 
 - Especificação em construção.
-- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 e 12.
-- Partes 1, 2, 3, 5, 6, 7, 9, 11 e 12 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas. A Parte 10 foi autorizada em 2026-10-25 e está em andamento, priorizando confidencialidade criptográfica dos documentos e uma migração ensaiada integralmente em staging. A validação integral da Parte 12 ainda depende do runtime Docker de staging e do servidor de produção.
+- Partes registradas: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 e 13.
+- Partes 1, 2, 3, 5, 6, 7, 9, 11 e 12 autorizadas e implementadas na branch da feature; Partes 4 e 8 adiadas. A Parte 10 foi autorizada em 2026-10-25 e está em andamento, priorizando confidencialidade criptográfica dos documentos e uma migração ensaiada integralmente em staging. A Parte 13 foi registrada e autorizada em 2026-10-28; matriz comercial, preços BRL e política nominal de cadeiras foram fechados, e sua implementação está em andamento. A validação integral da Parte 12 ainda depende do runtime Docker de staging e do servidor de produção.
 - Feature full stack, com trabalho coordenado entre `rubrica-back` e `rubrica-front`.
 - Skill mantida no repositório backend como fonte central da especificação.
 
@@ -14,7 +14,7 @@ Modernizar o fluxo de documentos e assinaturas do Rúbrica em uma branch exclusi
 
 ## Acompanhamento da implementação
 
-Última atualização do quadro: **2026-10-25**.
+Última atualização do quadro: **2026-10-28**.
 
 ### Legenda obrigatória
 
@@ -178,6 +178,18 @@ Regras:
 | 12L | Testar os três níveis, seleção de serviços e proteções cruzadas | backend/infra/CI | 12C–12K | `IMPLEMENTADO` | Ruff; 307 testes backend; 61 frontend; lint/build; 5 testes de seleção/isolation; contratos renderizados e staging completo comprovado com secrets, volumes, migrations, healthchecks e gateway | Smoke interativo bare metal/dev-docker ainda depende do ciclo de desenvolvimento; produção somente pode ser comprovada no servidor. |
 | 12M | Atualizar os `AGENTS.md` com o fluxo operacional definitivo do Rúbrica | ambos/documentação | 12C–12L verificados | `VERIFICADO` | `AGENTS.md` backend contém contrato canônico; frontend possui instrução mínima autônoma e referência ao orquestrador; README e Make help alinhados | Nenhum. |
 
+### Parte 13 — pacotes de trabalho
+
+| ID | Entrega | Repositório | Dependências | Status | Evidência | Pendente/próximo passo |
+|---|---|---|---|---|---|---|
+| 13A | Fechar matriz comercial de tiers e entitlements | produto/ambos | decisões da Parte 13 | `VERIFICADO` | Gratuito somente com evidências Rúbrica; Essencial libera timestamp/SerproID e personalização básica; Profissional/Equipe liberam branding CNPJ e Time; Vitalício equivale ao Equipe com 10 cadeiras, documentos e providers ilimitados | Cortesia promocional foi retirada do escopo desta implementação. |
+| 13B | Fechar preço, assentos adicionais e franquia compartilhada | produto/billing | 13A | `VERIFICADO` | Profissional R$ 69,90/699,90; Equipe R$ 149,90/1.499,90 com 220 documentos; adicional de R$ 11,43/114,29 por uma cadeira e 20 documentos; Equipe escala sem teto | Prices estrangeiros podem ser cadastrados posteriormente sem bloquear BRL. |
+| 13C | Modelar assinatura, itens recorrentes e transição automática no Stripe | backend/billing | 13A, 13B | `EM ANDAMENTO` | `contracted_seats` persistido; Price adicional configurável; webhook reconhece item adicional e deriva assentos/franquia; catálogo normaliza Profissional/Equipe; endpoint de cotação calcula preço recorrente, franquia e vigência para 3–N cadeiras | Conectar a cotação à prévia de proration e à mutação quantitativa no Stripe, incluindo transições 9→10 e 10→9. |
+| 13D | Centralizar entitlements e impor autorização server-side | backend | 13A–13C | `EM ANDAMENTO` | Catálogo central define Evidência, Timestamp, SerproID, personalização, branding, representação, Time e e-mail; seleção e abertura revalidam modalidade no backend; Gratuito voltou a aceitar Evidência em produção | Ampliar testes de autorização cruzada e revisar superfícies restantes que ainda comparam `product_code` diretamente. |
+| 13E | Implementar gestão de assentos, franquia e UX de upgrade | ambos | 13B–13D | `EM ANDAMENTO` | Escala futura persistida por ciclo; lista vigente permanece travada; membros excedentes entram como `without_seat`; UI agenda ocupantes do próximo ciclo; Equipe usa 220 + 20 por adicional | Implementar compra/redução de quantidade, prévia financeira e UX de upgrade/downgrade completa. |
+| 13F | Migrar assinaturas existentes e validar cobrança | backend/infra | 13C–13E | `NÃO INICIADO` | Nenhuma migration ou alteração Stripe executada | Planejar compatibilidade, reconciliação, rollback e ensaio integral em staging. |
+| 13G | Testar autorização, faturamento e mudanças de tier | ambos/CI | 13D–13F | `EM ANDAMENTO` | 332 testes backend, 5 skips esperados e 63 testes frontend passaram; testes novos cobrem preços/franquias 3/9/10/11, Vitalício e aplicação da escala somente na virada; lint e build Angular válidos | Cobrir proration real, webhooks quantitativos repetidos, concorrência da escala e E2E visual de upgrade/downgrade. |
+
 ## Parte 1 — tabelas e ordenação
 
 ### Superfícies afetadas
@@ -249,7 +261,7 @@ Neste requisito, **carimbo** significa a representação visual da assinatura/ru
 - O frontend deve consultar uma capacidade explícita, como `custom_stamp_placement`, derivada pelo backend do plano vigente, e só renderizar a interface de posicionamento quando ela estiver habilitada.
 - O backend deve validar essa capacidade ao salvar posições e novamente ao abrir a solicitação, impedindo que chamadas diretas contornem o plano.
 - Todos os planos pagos ativos podem usar a capacidade, inclusive o plano Essencial, salvo futura decisão comercial diferente.
-- Acesso vitalício cortesia não deve ser tratado automaticamente como plano pago. Ele só recebe essa capacidade se o produto conceder explicitamente esse entitlement.
+- A categoria Vitalícia recebe explicitamente os mesmos entitlements do Equipe; não depende de ser inferida como assinatura paga ou cortesia genérica.
 - O downgrade ou cancelamento não apaga posições nem documentos históricos. Solicitações já abertas continuam assináveis com a configuração congelada; novos rascunhos e rascunhos ainda não abertos deixam de poder usar a capacidade.
 - Uma chamada direta não autorizada deve produzir erro de domínio claro, sem depender de redirecionamento comercial e sem afetar o acesso do signatário a uma solicitação que já tenha sido aberta validamente.
 
@@ -338,7 +350,7 @@ Não duplique o pacote completo de evidências para cada carimbo visual. A unida
 - O editor oferece replicação automática da posição do signatário em todas as páginas.
 - Dimensões são limitadas pelo contrato e sobreposição entre signatários na mesma página é rejeitada.
 - A configuração fica imutável após a abertura; qualquer mudança exige novo rascunho/solicitação.
-- O acesso vitalício cortesia não recebe esse entitlement implicitamente.
+- A categoria Vitalícia recebe esse entitlement explicitamente por equivaler funcionalmente ao Equipe.
 
 ## Parte 3 — personalização empresarial do carimbo
 
@@ -458,7 +470,7 @@ Campos técnicos obrigatórios para rastreabilidade não podem ser removidos pel
 - O tenant mantém um padrão reutilizável e cada solicitação congela seu próprio snapshot.
 - A personalização usa modelos seguros predefinidos, sem HTML/SVG ou template livre.
 - Templates institucional e de representante são distintos; o representante preserva pessoa e empresa na evidência.
-- Acesso vitalício cortesia não recebe branding empresarial implicitamente.
+- A categoria Vitalícia recebe branding empresarial explicitamente por equivaler funcionalmente ao Equipe.
 
 ## Parte 4 — verificação opcional de identidade com documento e rosto
 
@@ -1615,6 +1627,370 @@ Os `AGENTS.md` não devem conter credenciais, endereços privados sensíveis, da
 - Testes automatizados validam seleção de dependências, staging/produção renderizados, ausência de serviços proibidos, publicação de portas e proteção contra cruzamento de níveis.
 - Smokes controlados comprovam dev, dev-docker completo/parcial, staging e produção antes de marcar os pacotes como `VERIFICADO`.
 
+## Parte 13 — tiers, entitlements, assentos e franquias
+
+### Objetivo e estado desta Parte
+
+Revisar a separação comercial entre Gratuito, Essencial, Profissional e Equipe; tornar modalidades de assinatura e personalização entitlements explícitos; permitir expansão progressiva de assentos e franquia; e assegurar que o Profissional expandido converta de maneira coerente para Equipe.
+
+Esta Parte foi autorizada para implementação em 2026-10-28. A matriz funcional, os preços BRL, a expansão conjunta de cadeira + documentos, a política nominal por ciclo e o papel do Empresarial estão confirmados. Itens explicitamente adiados permanecem fora do primeiro corte para não bloquear a entrega.
+
+### Diagnóstico do comportamento atual
+
+- Produção atualmente recusa novas solicitações em modo `evidence` e exige carimbo do tempo para todas, independentemente do plano.
+- As opções de carimbo do tempo e SerproID são derivadas da disponibilidade dos providers, não de entitlement comercial.
+- A troca da modalidade individual do signatário não valida tier.
+- `custom_stamp_placement` está disponível para todos os planos pagos.
+- `custom_stamp_branding` exige tenant empresarial, CNPJ e Profissional/Equipe.
+- Profissional e Equipe compartilham os mesmos recursos empresariais; hoje divergem nos limites fixos de membros e arquivos.
+- `complimentary_lifetime` libera capacidades pagas e empresariais implicitamente no código atual, em conflito com decisões anteriores que exigiam entitlement explícito.
+- A personalização por signatário precisa ser revalidada integralmente no backend, não apenas escondida no frontend.
+
+### Matriz funcional pretendida
+
+| Capacidade | Gratuito | Essencial | Profissional | Equipe |
+|---|:---:|:---:|:---:|:---:|
+| Evidências Rúbrica | Sim | Sim | Sim | Sim |
+| Carimbo do tempo SERPRO | Não | Sim | Sim | Sim |
+| SerproID + carimbo do tempo | Não | Sim | Sim | Sim |
+| Carimbo visual padrão | Sim | Sim | Sim | Sim |
+| Posicionar o carimbo | Não | Sim | Sim | Sim |
+| Escolher estilo mínimo/completo/desenhado | Não | Sim | Sim | Sim |
+| Cor e personalização visual básica | Não | Sim | Sim | Sim |
+| Upload de logo | Não | Não | Sim | Sim |
+| Branding empresarial/CNPJ | Não | Não | Sim | Sim |
+| Representação empresarial | Não | Não | Sim | Sim |
+| Gestão de Time | Não | Não | Sim | Sim |
+| Assentos incluídos | 1 | 1 | 3 | 10 |
+
+Regras confirmadas:
+
+- O Gratuito não consome carimbo do tempo nem SerproID. Ele produz assinatura eletrônica por evidências Rúbrica, com consentimento, identidade cadastrada, horário UTC da plataforma, IP/dispositivo, hashes e trilha verificável.
+- O Essencial é um plano pago individual. Ele libera as modalidades com provider pago, posicionamento e personalização básica, mas não recebe logo, CNPJ visual, representação empresarial ou gestão de Time.
+- Profissional e Equipe possuem a mesma categoria funcional. Equipe é a continuidade de capacidade do Profissional, não um conjunto artificialmente diferente de recursos.
+- Logo e CNPJ impressos são identidade visual/evidência de representação; não devem alegar assinatura criptográfica da empresa sem a credencial correspondente.
+- SerproID sempre inclui o carimbo do tempo posterior à assinatura PAdES/CMS.
+- Backend é a autoridade. Esconder opções no frontend não substitui validação de entitlement.
+
+Entitlements sugeridos:
+
+```text
+trusted_timestamp
+serproid_signature
+custom_stamp_placement
+custom_stamp_basic
+custom_stamp_branding
+business_representation
+team_management
+```
+
+### Preços-base e franquias confirmados
+
+| Tier | Mensal BRL | Anual BRL | Assentos incluídos | Franquia compartilhada |
+|---|---:|---:|---:|---:|
+| Gratuito | R$ 0,00 | R$ 0,00 | 1 | 5 assinaturas durante toda a vida da conta, sem provider pago |
+| Essencial | R$ 29,90 | R$ 299,90 | 1 | 20 documentos por mês |
+| Profissional | R$ 69,90 | R$ 699,90 | 3 | 80 documentos por mês |
+| Equipe | R$ 149,90 | R$ 1.499,90 | 10 | 220 documentos por mês |
+
+“Documento” é a unidade comercial atual dos planos pagos: um arquivo enviado e seu fluxo de assinatura. A terminologia precisa permanecer consistente na landing page, Stripe, billing, métricas e mensagens de limite.
+
+### Modelo recomendado de expansão
+
+A franquia é um pool do workspace, não uma carteira individual. Reservar documentos por membro desperdiçaria capacidade e criaria redistribuição complexa. Cada assento adicional contribui com uma capacidade mínima para o pool, mas qualquer membro autorizado pode utilizá-lo.
+
+Parâmetros confirmados:
+
+```text
+Assento adicional:           R$ 11,43/mês ou R$ 114,29/ano
+Capacidade por assento:      +20 documentos/mês no pool
+Transição para Equipe:       ao ativar o 10º assento
+Preço-base do Equipe:        R$ 149,90/mês ou R$ 1.499,90/ano
+```
+
+O valor matemático para distribuir os R$ 80,00 de diferença entre Profissional e Equipe pelos sete assentos é `R$ 11,428571...` por assento. Como o Stripe trabalha em centavos, o Price adicional usa R$ 11,43/mês e R$ 114,29/ano. Ao ativar o décimo assento, a assinatura é normalizada diretamente para o Price-base exato do Equipe; isso absorve a diferença acumulada de R$ 0,01 no mensal e R$ 0,03 no anual sem item corretivo separado.
+
+#### Escada confirmada entre Profissional e Equipe
+
+| Tier exibido | Pessoas | Mensal | Anual | Documentos/mês | Observação |
+|---|---:|---:|---:|---:|---|
+| Profissional | 3 | R$ 69,90 | R$ 699,90 | 80 | Base incluída |
+| Profissional | 4 | R$ 81,33 | R$ 814,19 | 100 | +1 assento, +20 documentos |
+| Profissional | 5 | R$ 92,76 | R$ 928,48 | 120 | +2 assentos, +40 documentos |
+| Profissional | 6 | R$ 104,19 | R$ 1.042,77 | 140 | +3 assentos, +60 documentos |
+| Profissional | 7 | R$ 115,62 | R$ 1.157,06 | 160 | +4 assentos, +80 documentos |
+| Profissional | 8 | R$ 127,05 | R$ 1.271,35 | 180 | +5 assentos, +100 documentos |
+| Profissional | 9 | R$ 138,48 | R$ 1.385,64 | 200 | +6 assentos, +120 documentos |
+| Equipe | 10 | R$ 149,90 | R$ 1.499,90 | 220 | Conversão automática; +20 documentos no décimo assento |
+
+O décimo assento completa o tier Equipe e aumenta a franquia de 200 para 220 documentos. Isso preserva o acréscimo de 20 documentos em cada degrau e o preço público do Equipe.
+
+#### Expansão após Equipe
+
+Equipe mantém as mesmas capacidades e continua escalando:
+
+| Pessoas | Mensal | Anual | Documentos/mês |
+|---:|---:|---:|---:|
+| 10 | R$ 149,90 | R$ 1.499,90 | 220 |
+| 11 | R$ 161,33 | R$ 1.614,19 | 240 |
+| 12 | R$ 172,76 | R$ 1.728,48 | 260 |
+| 15 | R$ 207,05 | R$ 2.071,35 | 320 |
+| 20 | R$ 264,20 | R$ 2.642,80 | 420 |
+
+O Equipe permanece self-service e pode crescer sem teto comercial de cadeiras e documentos pelo mecanismo de expansão. Quantidade de pessoas, inclusive acima de 50, não converte automaticamente a assinatura para Empresarial. Empresarial é outro produto: acesso contratado ao backend/API do Rúbrica para integração de sistemas, com autenticação própria, OAuth ou credenciais equivalentes e cobrança negociada por assinatura concluída.
+
+### Decisões comerciais fechadas e adiadas
+
+- O pacote adicional custa R$ 11,43/mês ou R$ 114,29/ano e entrega uma cadeira com mais 20 documentos mensais.
+- O nono assento possui 200 documentos; o Equipe com dez assentos possui 220.
+- Upgrade e cadeira adicional entram imediatamente com cobrança proporcional calculada pelo Stripe.
+- Downgrade entra somente na renovação, sem crédito pelo período corrente; quantidade e franquia menores passam a valer na mesma virada.
+- O Gratuito recebe cinco assinaturas durante toda a vida da conta. Depois de consumi-las, precisa contratar um plano pago para continuar emitindo documentos.
+- A conta Vitalícia possui todos os recursos do Equipe, exatamente 10 cadeiras, documentos ilimitados, carimbo do tempo e SerproID. É criada manualmente pelo proprietário do produto e não possui restrição comercial adicional de franquia.
+- A conta Vitalícia não pode comprar, receber ou provisionar cadeiras adicionais. Ela é concedida somente quando dez cadeiras atendem ao beneficiário; sua única diferença em relação ao Equipe-base é a franquia ilimitada de documentos.
+- A conta Vitalícia não possui cobrança, assinatura Stripe, renovação, fatura ou portal de pagamento. Checkout, mudança paga de plano e compra de assentos devem ser bloqueados enquanto a concessão vitalícia estiver ativa.
+- Valores e arredondamento em USD, EUR e JPY serão definidos ao cadastrar os Prices estrangeiros e não bloqueiam a implementação inicial em BRL.
+
+Não fazem parte desta primeira implementação:
+
+- compra avulsa somente de documentos;
+- compra de cadeira sem o acréscimo correspondente de documentos;
+- códigos promocionais e campanhas de cortesia;
+- conversão obrigatória para Empresarial por quantidade de cadeiras.
+
+Uma futura cortesia pode ser modelada como código promocional de ativação — por exemplo, crédito de 20 documentos — com validade, limite por tenant, antifraude e ledger próprios. Ela não é tier, não altera permanentemente entitlements e não deve atrasar a implementação dos planos.
+
+Conta Vitalícia é uma categoria explícita equivalente funcionalmente ao Equipe, com 10 cadeiras e franquia ilimitada de documentos. Não depende de heurística de assinatura paga nem do antigo conceito genérico de cortesia.
+
+### Direção técnica futura, ainda não autorizada
+
+- Stripe deve representar plano-base e assentos adicionais como itens recorrentes/quantidade, evitando criar um Price para cada combinação.
+- O webhook é a autoridade para confirmar quantidade, tier, período e status pago; retorno do Checkout não concede acesso sozinho.
+- A conversão Profissional → Equipe precisa ser idempotente e auditável.
+- Mudanças de quantidade devem usar proration explícita e uma prévia de preço antes da confirmação.
+- O backend deriva entitlements de um catálogo central; não espalhar comparações de `product_code` por routers e componentes.
+- O consumo continua por workspace/tenant e não por membro individual.
+- Downgrade não apaga usuários, documentos, assinaturas ou evidências; apenas exige seleção dos membros ativos e bloqueia novos consumos até regularização.
+- Inadimplência remove entitlements pagos conforme a política de tolerância já existente, sem alterar evidências históricas.
+
+### Modelo proposto no Stripe
+
+Não criar um produto ou Price para cada quantidade de pessoas. Quantidade é estado da assinatura, não um novo plano comercial. O catálogo precisa de poucos componentes estáveis:
+
+| Produto lógico | Função | Quantidade do item |
+|---|---|---:|
+| Rubrica Essencial | Base individual, 1 pessoa e 20 documentos | Sempre 1 |
+| Rubrica Profissional | Base empresarial, 3 pessoas e 80 documentos | Sempre 1 enquanto houver 3–9 pessoas |
+| Rubrica Equipe | Base empresarial, 10 pessoas e 220 documentos | Sempre 1 a partir de 10 pessoas |
+| Assento adicional Rubrica | Expansão recorrente de uma pessoa e da franquia correspondente | Variável |
+
+Cada produto lógico possui Prices separados por periodicidade e moeda, sem multiplicar por quantidade:
+
+```text
+Essencial mensal/anual × BRL, USD, EUR e JPY
+Profissional mensal/anual × BRL, USD, EUR e JPY
+Equipe mensal/anual × BRL, USD, EUR e JPY
+Assento adicional mensal/anual × BRL, USD, EUR e JPY
+```
+
+Em BRL, o Price do assento adicional proposto é:
+
+```text
+Mensal: R$ 11,43 por unidade
+Anual:  R$ 114,29 por unidade
+```
+
+O item de assento usa cobrança recorrente por unidade (`licensed`) e o campo `quantity` da assinatura. Não é cobrança por uso medido: o cliente paga pelos lugares provisionados no período, independentemente de quantos documentos cada membro assinou.
+
+#### Composição da assinatura por quantidade
+
+| Pessoas contratadas | Item-base | Quantidade do item adicional | Total mensal BRL |
+|---:|---|---:|---:|
+| 1 | Essencial | 0 | R$ 29,90 |
+| 3 | Profissional | 0 | R$ 69,90 |
+| 4 | Profissional | 1 | R$ 81,33 |
+| 5 | Profissional | 2 | R$ 92,76 |
+| 9 | Profissional | 6 | R$ 138,48 |
+| 10 | Equipe | 0 | R$ 149,90 |
+| 11 | Equipe | 1 | R$ 161,33 |
+| 12 | Equipe | 2 | R$ 172,76 |
+
+A passagem 9→10 troca o item-base Profissional + 6 adicionais pelo item-base Equipe. O décimo assento adiciona 20 documentos, levando a franquia de 200 para 220, e o preço é normalizado de R$ 138,48 para R$ 149,90. A prévia deve mostrar claramente a conversão antes da confirmação.
+
+#### Algoritmo de normalização
+
+```text
+1 pessoa:
+  base = Essencial
+  extras = 0
+
+3 a 9 pessoas:
+  base = Profissional
+  extras = pessoas - 3
+  documentos = 80 + extras × 20
+
+10 ou mais pessoas:
+  base = Equipe
+  extras = pessoas - 10
+  documentos = 220 + extras × 20
+```
+
+O plano Profissional não deve aceitar 1–2 pessoas enquanto a regra comercial mantiver três assentos incluídos; esses lugares fazem parte do preço-base, mesmo que inicialmente estejam vagos. O Essencial não aceita assento adicional nem gestão de Time.
+
+#### Atualizações e webhooks
+
+- O backend calcula o estado normalizado antes de solicitar a alteração ao Stripe.
+- A UI mostra preço atual, novo preço, cobrança proporcional imediata, próxima renovação, assentos e nova franquia.
+- Ao cruzar 9→10, a atualização substitui o Price-base Profissional pelo Equipe e remove o item adicional antigo; não deixa os dois produtos-base ativos.
+- Ao cruzar 10→9, a atualização substitui Equipe por Profissional e cria item adicional com `quantity=6`, respeitando a seleção prévia de membros que permanecerão ativos.
+- Dentro do mesmo tier, altera-se apenas `quantity` do item de assentos.
+- O Stripe calcula proration; o Rubrica apresenta a prévia antes da confirmação e não concede entitlement com base apenas no retorno do portal/Checkout.
+- Webhooks confirmados são a autoridade para persistir produto-base, quantidade, período, status e franquia derivada.
+- O processamento usa ID do evento e estado da assinatura para ser idempotente diante de repetição, atraso ou entrega fora de ordem.
+- Metadata pode identificar `product_code`, versão do catálogo e função do item (`base` ou `seat`), mas preço e quantidade recebidos do Stripe também precisam ser validados contra allowlist local.
+
+#### Redução de pessoas e assentos contratados
+
+“Profissionais no tenant”, “ocupantes do ciclo” e “assentos contratados” são quantidades distintas. Remover, desativar ou suspender uma pessoa não reduz automaticamente a assinatura nem libera seu assento para rodízio no ciclo vigente: uma mudança acidental na equipe não pode alterar cobrança ou permitir que mais identidades utilizem a mesma cadeira sem confirmação administrativa.
+
+Regras propostas:
+
+- cobrança e franquia derivam dos assentos contratados, não da contagem momentânea de membros ativos;
+- membros ativos nunca podem exceder os assentos contratados;
+- remover um membro não agenda downgrade e deixa sua cadeira bloqueada/vaga até a próxima virada; ela não pode ser transferida normalmente dentro do ciclo vigente;
+- reduzir assentos exige ação explícita do administrador, prévia de preço e confirmação;
+- downgrade entra em vigor na próxima renovação, sem crédito proporcional automático no período corrente;
+- até a renovação, preço, franquia e assentos atuais permanecem disponíveis;
+- o administrador pode cancelar o downgrade agendado antes da renovação;
+- se houver mais profissionais no tenant que o novo limite, o sistema exige que o administrador escolha explicitamente quais deles ocuparão as cadeiras do ciclo futuro;
+- a seleção futura pode ser alterada até a virada do período, sem antecipar o limite menor;
+- durante o período pendente, o administrador continua podendo ativar e desativar membros dentro do limite contratado atual;
+- toda troca feita durante a pendência deve permitir atualizar também a seleção futura, deixando claro quais pessoas estarão ativas após a renovação;
+- na virada, somente a última seleção futura confirmada recebe cadeira; os demais profissionais continuam pertencendo ao tenant com o estado `sem_cadeira`;
+- `sem_cadeira` não significa removido, demitido ou apagado: a pessoa permanece visível no Time e preserva perfil, vínculo, autoria, histórico e auditoria, mas não pode operar o workspace;
+- um profissional sem cadeira pode assinar documentos como signatário externo, pois assinatura recebida não concede acesso operacional nem consome cadeira de Time;
+- o sistema não escolhe pessoas automaticamente por data, ordem ou uso; sem uma seleção válida no prazo, o downgrade não deve ser efetivado silenciosamente;
+- se a renovação chegar sem uma seleção futura válida, o downgrade é cancelado, a quantidade e a cobrança anteriores permanecem e o administrador é notificado para solicitar novamente a redução;
+- depois da virada, assentos tornam-se nominais e não podem ser usados em rodízio entre identidades dentro do mesmo ciclo;
+- a regra comercial é uma publicação de ocupantes por ciclo, e não uma quantidade de trocas individuais: com 5 assentos, o administrador publica uma única lista de até 5 identidades para aquele período;
+- a cada ciclo mensal, o administrador define uma lista de membros habilitados limitada à quantidade de assentos contratados; com 5 assentos, escolhe até 5 identidades para aquele ciclo;
+- a lista vigente fica travada durante todo o ciclo: desativar uma das 5 pessoas não autoriza colocar uma sexta identidade em seu lugar naquele mesmo período;
+- durante o ciclo vigente, o administrador pode preparar e alterar livremente a lista do ciclo seguinte, mas essa seleção futura não concede acesso antecipado;
+- na próxima virada, a lista futura confirmada substitui integralmente a lista vigente; assim, podem ser outras 5 pessoas, mas nunca 7 pessoas operando em momentos diferentes sobre apenas 5 assentos no mesmo ciclo;
+- se não houver alteração confirmada, a lista vigente é renovada automaticamente para o ciclo seguinte;
+- uma nova identidade durante o ciclo somente entra mediante contratação de assento adicional ou exceção operacional auditada pelo suporte; a exceção deve substituir uma identidade e não ampliar a quantidade habilitada;
+- a remoção por desligamento revoga o acesso imediatamente, mas, por padrão, mantém a cadeira vaga e bloqueada; eventual substituição emergencial exige suporte, é definitiva até a virada e impede o retorno da identidade retirada naquele ciclo;
+- não existe substituição emergencial self-service no primeiro corte; somente uma operação de suporte autenticada, justificada e auditada pode substituir a identidade de uma cadeira vigente;
+- em contratos anuais, as listas continuam sendo fechadas em janelas mensais derivadas da data de início do contrato, em vez de ficarem imutáveis por um ano inteiro;
+- a lista futura do downgrade permanece editável até a virada porque o cliente ainda paga pelo limite antigo; na renovação, ela se torna a primeira lista nominal do novo ciclo;
+- convites pendentes que reservem acesso também consomem vaga, para impedir ultrapassar o limite por convites ainda não aceitos;
+- o proprietário do tenant e ao menos um administrador válido precisam ocupar cadeira; o sistema bloqueia uma seleção futura que deixe o workspace sem administração;
+- membros removidos do tenant e profissionais `sem_cadeira` são estados diferentes; ambos preservam autoria, auditoria, documentos e evidências históricas, mas somente o primeiro deixa de pertencer à organização.
+
+Exemplo — um workspace possui 7 cadeiras contratadas, 7 profissionais no tenant e agenda a redução para 5:
+
+```text
+Administrador solicita reduzir a contratação para 5 pessoas:
+  estado futuro = Profissional + 2 assentos adicionais;
+  preço futuro = R$ 92,76/mês ou R$ 928,48/ano;
+  franquia futura = 120 documentos/mês;
+  mudança é agendada para a próxima renovação;
+  os 7 profissionais continuam pertencendo ao tenant;
+  o administrador escolhe quais 5 ocuparão as cadeiras do próximo ciclo;
+  essa seleção pode ser trocada quantas vezes forem necessárias até a virada;
+  enquanto isso, as 7 cadeiras atuais continuam disponíveis;
+  na renovação, a última seleção válida passa a ser a lista de ocupantes.
+
+Após a renovação:
+  os 5 assentos ficam vinculados às 5 identidades selecionadas;
+  os outros 2 profissionais permanecem no tenant com status Sem cadeira;
+  esses 2 não podem operar o workspace, mas não perdem histórico ou autoria;
+  essa lista de 5 identidades fica travada durante o ciclo mensal;
+  desativar alguém no meio do ciclo não permite habilitar uma sexta pessoa na vaga;
+  o administrador pode preparar outras 5 identidades para o próximo ciclo;
+  na próxima virada, a nova lista substitui a anterior por completo.
+```
+
+Se o número “7 pessoas” representar assentos efetivamente contratados por uma regra antiga, a migração primeiro normaliza a assinatura para Profissional + 4 adicionais. A posterior redução para 5 agenda Profissional + 2 adicionais na renovação; nenhuma assinatura histórica é modificada.
+
+O backend precisa persistir, por ciclo, a lista nominal vigente e a lista futura, o estado `sem_cadeira` dos demais profissionais e um ledger de alterações com identidades incluídas e retiradas, ator, horário e motivo. A regra é validada server-side em convites, ativações e reativações; esconder o botão no frontend não impede rodízio por chamada direta. Uma correção de convite ainda não aceito e nunca utilizado pode alterar a lista vigente somente se uma política antifraude objetiva confirmar ausência total de acesso e atividade; fora desse caso, a correção vale apenas para o ciclo seguinte.
+
+Esta política de ocupação por ciclo está **confirmada**. A expressão “trocar uma vez por ciclo” significa publicar a composição nominal que valerá naquele ciclo, e não conceder ao administrador uma troca livre depois que o período começou. O rascunho do próximo ciclo pode ser editado várias vezes até o corte; a lista publicada permanece imutável durante o período, salvo compra de cadeira ou exceção auditada.
+
+### Confirmação financeira de upgrades
+
+Upgrade de plano ou quantidade cria estado pendente e solicita ao Stripe a cobrança proporcional. O retorno da API, do Checkout ou do Portal não libera capacidade. Cadeiras, documentos e novos entitlements somente entram em vigor depois de webhook válido confirmar o pagamento relacionado à alteração.
+
+Se a cobrança falhar, expirar ou permanecer incompleta, o tenant conserva produto, cadeiras, franquia e ocupantes anteriores. Eventos repetidos ou fora de ordem não podem conceder capacidade duas vezes. A prévia precisa mostrar preço recorrente futuro e valor proporcional imediato antes da confirmação.
+
+#### Tier Empresarial — backend/API por assinatura emitida
+
+Empresarial não é a continuação do Equipe por quantidade de pessoas. Ele é destinado a clientes que integram seus próprios sistemas diretamente ao backend/API do Rúbrica, mediante contrato, OAuth ou credencial técnica equivalente. Não usa o modelo de assentos dos tiers self-service e cobra pelo volume de assinaturas efetivamente concluídas.
+
+Direção comercial:
+
+```text
+Uso principal:            backend/API do Rúbrica integrado ao sistema do cliente
+Autenticação:             OAuth ou credencial técnica contratual equivalente
+Assentos:                 não se aplica ao consumo da API
+Franquia fixa:            não se aplica
+Unidade faturável:        cada ato de assinatura concluído
+Preço unitário:           definido no contrato empresarial
+Apuração:                 mensal
+```
+
+“Assinatura emitida” significa uma manifestação de vontade concluída por um signatário, com evidência persistida e artefato confirmado. Um documento com três signatários que concluíram o fluxo gera três unidades faturáveis. Upload, convite, abertura, tentativa, falha, cancelamento e expiração não geram cobrança.
+
+Regras de medição:
+
+- cada unidade usa o identificador canônico da assinatura como chave idempotente;
+- retry técnico, callback repetido e webhook duplicado não geram nova unidade;
+- assinatura que falha antes da confirmação não é faturada;
+- assinatura preservada ao reabrir uma rodada não é faturada novamente;
+- apenas novas assinaturas concluídas na nova rodada entram no consumo;
+- evidência Rúbrica, carimbo do tempo e SerproID podem ter preços contratuais distintos se o custo do provider justificar, mas a diferença precisa estar explícita no contrato e na medição;
+- membros ativos, inativos e convidados não alteram o preço diretamente;
+- histórico de consumo precisa ser reconciliável por período sem expor conteúdo de documentos ou dados pessoais ao Stripe;
+- ajuste manual, estorno e crédito exigem evento auditável com motivo e ator.
+
+Modelo Stripe sugerido para Empresarial:
+
+- assinatura/contrato empresarial separado dos Products self-service;
+- Price recorrente medido por unidade, usando Stripe Meter/metered billing ou fatura calculada a partir do ledger interno confirmado;
+- o Rubrica mantém ledger local append-only de unidades faturáveis antes de reportar uso externo;
+- envio de uso ao Stripe é idempotente e reconciliado com a fatura antes do fechamento;
+- nenhuma cobrança é derivada de contagem bruta de requests HTTP ou eventos não confirmados.
+
+Permanecem pendentes preço unitário, faixas de volume, eventual consumo mínimo, diferenciação por modalidade, impostos, prazo de fechamento, SLA, escopos OAuth e política de excedente. Esses valores serão negociados com cada cliente e não bloqueiam o catálogo self-service. A decisão confirmada neste momento é: Empresarial vende integração com o backend/API, não cadeiras, e sua grandeza comercial é a quantidade de assinaturas concluídas.
+
+#### O que não criar
+
+Não criar produtos como:
+
+```text
+Profissional 4 pessoas
+Profissional 5 pessoas
+Profissional 6 pessoas
+Equipe 11 pessoas
+Equipe 12 pessoas
+```
+
+Esse desenho multiplicaria Products e Prices por quantidade, moeda e periodicidade, dificultaria portal, relatórios, migração de preços, webhooks e reconciliação. A quantidade do item adicional resolve o mesmo problema com catálogo estável.
+
+### Critérios de aceitação futuros
+
+- Gratuito não consegue solicitar timestamp ou SerproID pela UI nem pela API.
+- Essencial consegue timestamp, SerproID, posicionamento e personalização básica, mas não logo, CNPJ, representação ou Time.
+- Profissional e Equipe compartilham capacidades empresariais; limites e preço derivam da quantidade contratada.
+- A prévia de preço para 3→4, 9→10, 10→11 e downgrade coincide com Stripe e com a UI.
+- O décimo assento converte automaticamente para Equipe sem duplicar assinatura, cobrança ou webhook.
+- Cada assento adicional após o Profissional acrescenta a franquia definida ao pool compartilhado.
+- Chamadas diretas não contornam entitlement de modalidade, branding, representação ou Time.
+- Downgrade preserva histórico e exige escolha explícita dos membros ativos quando o novo limite for excedido.
+- Após o downgrade, assentos são nominais por ciclo: um workspace com 5 assentos habilita no máximo 5 identidades durante todo o período, pode preparar outra lista de até 5 para o ciclo seguinte e não consegue operar pessoas adicionais por desativação, reativação, convite ou chamada direta à API.
+- Webhooks repetidos, fora de ordem ou após timeout são idempotentes.
+- Landing page, billing, e-mails, Stripe e API apresentam os mesmos preços, limites e nomes.
+
 ## Próximas partes
 
-Acrescente aqui a Parte 12 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.
+Acrescente aqui a Parte 14 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.

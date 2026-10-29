@@ -9,7 +9,11 @@ from core_api.infrastructure.auth_context import active_auth_context
 from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
-from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
+from core_api.modules.tenant.tenant_entity import (
+    TenantEntity,
+    TenantMemberEntity,
+    TenantSeatRosterEntity,
+)
 from core_api.modules.tenant.tenant_identity import InvalidBusinessIdentifierError, protect_cnpj
 from core_api.modules.tenant.user_client import invite_auth_user, resolve_auth_user
 from shared_kernel.time.datetime_service import DateTimeService
@@ -21,6 +25,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantMemberRead,
     TenantTeamRead,
     TenantTeamUpdate,
+    TenantSeatRosterUpdate,
     TenantProvision,
     TenantPreferencesUpdate,
     TenantRead,
@@ -242,10 +247,13 @@ class TenantService:
                     TenantMemberEntity.status == "active",
                 )
             ) or 0
-            if member_limit is not None and active_members >= member_limit:
-                raise WorkflowError(f"The current plan allows up to {member_limit} tenant members", 409)
+            initial_status = (
+                "without_seat"
+                if member_limit is not None and active_members >= member_limit
+                else "active"
+            )
             member_user_uuid = resolve_auth_user(payload.auth_user_id.lower())
-            db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), auth_user_uuid=member_user_uuid, role=payload.role, status="active", joined_at=DateTimeService.utc_now()))
+            db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=payload.auth_user_id.lower(), auth_user_uuid=member_user_uuid, role=payload.role, status=initial_status, joined_at=DateTimeService.utc_now()))
             try:
                 db.flush()
             except IntegrityError as exc:
@@ -268,8 +276,11 @@ class TenantService:
                 TenantMemberEntity.deleted_at.is_(None),
                 TenantMemberEntity.status == "active",
             )) or 0
-            if limit is not None and active_members >= limit:
-                raise WorkflowError(f"The current plan allows up to {limit} tenant members", 409)
+            initial_status = (
+                "without_seat"
+                if limit is not None and active_members >= limit
+                else "active"
+            )
             email = payload.email.strip().lower()
             existing = db.scalar(select(TenantMemberEntity).where(
                 TenantMemberEntity.tenant_id == tenant_id,
@@ -284,7 +295,7 @@ class TenantService:
             )
             db.add(TenantMemberEntity(
                 tenant_id=tenant_id, auth_user_id=email, auth_user_uuid=user_uuid,
-                role=payload.role, status="active", joined_at=DateTimeService.utc_now(),
+                role=payload.role, status=initial_status, joined_at=DateTimeService.utc_now(),
             ))
             self._audit(db, tenant_id, subject, "tenant.member_invited", {"member_role": payload.role, "member_count": active_members + 1})
 
@@ -321,11 +332,7 @@ class TenantService:
             BillingAccountEntity.tenant_id == tenant_id, BillingAccountEntity.deleted_at.is_(None)))
         if account is None:
             return 1
-        if account.complimentary_lifetime:
-            return None
-        if not BillingService._paid_access_enabled(account):
-            return 1
-        return BillingService.PLAN_MEMBER_LIMITS.get(account.current_product_code, 1)
+        return BillingService.contracted_seat_count(account)
 
     @staticmethod
     def team_over_limit(db, tenant_id: UUID) -> bool:
@@ -341,21 +348,164 @@ class TenantService:
         ).order_by(TenantMemberEntity.role, TenantMemberEntity.auth_user_id, TenantMemberEntity.id)).all()
         limit = self.member_limit(db, tenant_id)
         active_count = sum(m.status == "active" for m in members)
+        account = db.scalar(
+            select(BillingAccountEntity).where(
+                BillingAccountEntity.tenant_id == tenant_id,
+                BillingAccountEntity.deleted_at.is_(None),
+            )
+        )
+        next_cycle = None
+        if account and account.current_period_ends_at:
+            next_cycle = db.scalar(
+                select(TenantSeatRosterEntity).where(
+                    TenantSeatRosterEntity.tenant_id == tenant_id,
+                    TenantSeatRosterEntity.cycle_starts_at
+                    == account.current_period_ends_at,
+                    TenantSeatRosterEntity.status == "scheduled",
+                    TenantSeatRosterEntity.deleted_at.is_(None),
+                )
+            )
         return TenantTeamRead(
             members=[TenantMemberRead.model_validate(m, from_attributes=True) for m in members],
             member_limit=limit,
             active_count=active_count,
             requires_selection=limit is not None and active_count > limit,
             can_manage=member.role == "admin", current_member_id=member.id,
+            current_seat_member_ids=[m.id for m in members if m.status == "active"],
+            next_cycle_member_ids=(
+                [UUID(value) for value in next_cycle.member_ids]
+                if next_cycle
+                else [m.id for m in members if m.status == "active"]
+            ),
+            next_cycle_starts_at=(
+                account.current_period_ends_at if account else None
+            ),
+            seat_roster_locked=True,
         )
 
     def team(self, tenant_id: UUID, subject: str) -> TenantTeamRead:
         with SessionLocal.begin() as db:
+            self.apply_due_seat_roster(db, tenant_id)
             member = self.require_role(
                 db, tenant_id, subject, {"admin"}, allow_over_limit=True
             )
             self.reconcile_single_member_plan(db, tenant_id)
             return self._team_read(db, tenant_id, member)
+
+    def schedule_seat_roster(
+        self,
+        tenant_id: UUID,
+        payload: TenantSeatRosterUpdate,
+        subject: str,
+    ) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            self.apply_due_seat_roster(db, tenant_id)
+            actor = self.require_role(
+                db, tenant_id, subject, {"admin"}, allow_over_limit=True
+            )
+            account = db.scalar(
+                select(BillingAccountEntity)
+                .where(
+                    BillingAccountEntity.tenant_id == tenant_id,
+                    BillingAccountEntity.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            if account is None or account.current_period_ends_at is None:
+                raise WorkflowError(
+                    "A billing cycle is required to schedule seat occupants", 409
+                )
+            members = db.scalars(
+                select(TenantMemberEntity).where(
+                    TenantMemberEntity.tenant_id == tenant_id,
+                    TenantMemberEntity.deleted_at.is_(None),
+                )
+            ).all()
+            selected = set(payload.member_ids)
+            by_id = {member.id: member for member in members}
+            if not selected.issubset(by_id):
+                raise WorkflowError("Member does not belong to this tenant", 422)
+            limit = self.member_limit(db, tenant_id)
+            if limit is not None and len(selected) > limit:
+                raise WorkflowError(
+                    f"The current plan allows up to {limit} seat occupants", 409
+                )
+            if actor.id not in selected:
+                raise WorkflowError("Keep your administrator account in a seat", 409)
+            if not any(by_id[member_id].role == "admin" for member_id in selected):
+                raise WorkflowError("Keep at least one administrator in a seat", 409)
+            roster = db.scalar(
+                select(TenantSeatRosterEntity)
+                .where(
+                    TenantSeatRosterEntity.tenant_id == tenant_id,
+                    TenantSeatRosterEntity.cycle_starts_at
+                    == account.current_period_ends_at,
+                    TenantSeatRosterEntity.deleted_at.is_(None),
+                )
+                .with_for_update()
+            )
+            member_ids = sorted(str(member_id) for member_id in selected)
+            if roster is None:
+                roster = TenantSeatRosterEntity(
+                    tenant_id=tenant_id,
+                    cycle_starts_at=account.current_period_ends_at,
+                    seat_limit=limit or len(member_ids),
+                    member_ids=member_ids,
+                    status="scheduled",
+                    created_by=subject.lower(),
+                )
+                db.add(roster)
+            else:
+                if roster.status != "scheduled":
+                    raise WorkflowError("The current cycle roster is locked", 409)
+                roster.seat_limit = limit or len(member_ids)
+                roster.member_ids = member_ids
+                roster.created_by = subject.lower()
+            self._audit(
+                db,
+                tenant_id,
+                subject,
+                "tenant.seat_roster_scheduled",
+                {
+                    "cycle_starts_at": account.current_period_ends_at.isoformat(),
+                    "seat_limit": limit,
+                    "member_ids": member_ids,
+                },
+            )
+            db.flush()
+            return self._team_read(db, tenant_id, actor)
+
+    @staticmethod
+    def apply_due_seat_roster(db, tenant_id: UUID) -> None:
+        now = DateTimeService.utc_now()
+        rosters = db.scalars(
+            select(TenantSeatRosterEntity)
+            .where(
+                TenantSeatRosterEntity.tenant_id == tenant_id,
+                TenantSeatRosterEntity.status == "scheduled",
+                TenantSeatRosterEntity.cycle_starts_at <= now,
+                TenantSeatRosterEntity.deleted_at.is_(None),
+            )
+            .order_by(TenantSeatRosterEntity.cycle_starts_at)
+            .with_for_update()
+        ).all()
+        for roster in rosters:
+            selected = {UUID(value) for value in roster.member_ids}
+            members = db.scalars(
+                select(TenantMemberEntity)
+                .where(
+                    TenantMemberEntity.tenant_id == tenant_id,
+                    TenantMemberEntity.deleted_at.is_(None),
+                )
+                .with_for_update()
+            ).all()
+            for member in members:
+                member.status = (
+                    "active" if member.id in selected else "without_seat"
+                )
+            roster.status = "applied"
+            roster.applied_at = now
 
     def reconcile_single_member_plan(self, db, tenant_id: UUID) -> None:
         """Keep only the administrator active when the current plan has one seat."""

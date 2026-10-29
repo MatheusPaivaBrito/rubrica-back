@@ -162,6 +162,17 @@ class TenantTeamUpdate(BaseModel):
         return value
 
 
+class TenantSeatRosterUpdate(BaseModel):
+    member_ids: list[UUID] = Field(min_length=1, max_length=1000)
+
+    @field_validator("member_ids")
+    @classmethod
+    def unique_members(cls, value: list[UUID]) -> list[UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("Duplicate members")
+        return value
+
+
 class TenantMemberRoleUpdate(BaseModel):
     role: Literal["member", "auditor"]
 
@@ -173,3 +184,7 @@ class TenantTeamRead(BaseModel):
     requires_selection: bool
     can_manage: bool
     current_member_id: UUID
+    current_seat_member_ids: list[UUID] = Field(default_factory=list)
+    next_cycle_member_ids: list[UUID] = Field(default_factory=list)
+    next_cycle_starts_at: datetime | None = None
+    seat_roster_locked: bool = True

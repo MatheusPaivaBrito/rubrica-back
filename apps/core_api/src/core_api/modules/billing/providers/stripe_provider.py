@@ -10,6 +10,7 @@ from core_api.modules.billing.providers.protocol import (
     ProviderCustomer,
     ProviderBusinessIdentity,
     ProviderSession,
+    ProviderSubscriptionChange,
     ProviderTaxId,
 )
 
@@ -131,6 +132,91 @@ class StripeBillingProvider:
             raise BillingProviderError(
                 "Stripe subscription could not be synchronized"
             ) from exc
+
+    def update_subscription_seats(
+        self,
+        *,
+        subscription_id: str,
+        product_code: str,
+        base_price_id: str,
+        seat_price_id: str,
+        seat_price_ids: frozenset[str],
+        additional_seats: int,
+    ) -> ProviderSubscriptionChange:
+        try:
+            subscription = stripe.Subscription.retrieve(subscription_id)
+            existing_items = list(
+                (subscription.get("items") or {}).get("data") or []
+            )
+            base_item = next(
+                (
+                    item
+                    for item in existing_items
+                    if str((item.get("price") or {}).get("id") or "")
+                    not in seat_price_ids
+                ),
+                None,
+            )
+            if base_item is None:
+                raise BillingProviderError(
+                    "Stripe subscription has no base plan item"
+                )
+            seat_item = next(
+                (
+                    item
+                    for item in existing_items
+                    if str((item.get("price") or {}).get("id") or "")
+                    in seat_price_ids
+                ),
+                None,
+            )
+            items: list[dict[str, object]] = [
+                {
+                    "id": str(base_item.get("id")),
+                    "price": base_price_id,
+                    "quantity": 1,
+                }
+            ]
+            if additional_seats > 0:
+                seat_change: dict[str, object] = {
+                    "price": seat_price_id,
+                    "quantity": additional_seats,
+                }
+                if seat_item is not None:
+                    seat_change["id"] = str(seat_item.get("id"))
+                items.append(seat_change)
+            elif seat_item is not None:
+                items.append(
+                    {"id": str(seat_item.get("id")), "deleted": True}
+                )
+            updated = stripe.Subscription.modify(
+                subscription_id,
+                items=items,
+                payment_behavior="pending_if_incomplete",
+                proration_behavior="always_invoice",
+                metadata={
+                    **dict(subscription.get("metadata") or {}),
+                    "product_code": product_code,
+                },
+                expand=["latest_invoice"],
+            )
+        except BillingProviderError:
+            raise
+        except Exception as exc:
+            raise BillingProviderError(
+                "Stripe could not update the contracted seats"
+            ) from exc
+        invoice = updated.get("latest_invoice")
+        invoice_id = (
+            str(invoice.get("id"))
+            if isinstance(invoice, dict)
+            else str(invoice or "")
+        )
+        if not invoice_id:
+            raise BillingProviderError(
+                "Stripe did not return the proration invoice"
+            )
+        return ProviderSubscriptionChange(invoice_id=invoice_id)
 
     def retrieve_customer_business_identity(
         self, customer_id: str

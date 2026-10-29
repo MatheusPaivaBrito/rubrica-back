@@ -9,9 +9,6 @@ from io import BytesIO
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from core_api.infrastructure.settings import settings
-
-
 def _normalized_png_data_url(value: str | None) -> str | None:
     if value is None:
         return None
@@ -115,12 +112,6 @@ class SignatureRequestRead(BaseModel):
 class OpenSignatureRequest(BaseModel):
     signature_mode: SignatureMode
 
-    @model_validator(mode="after")
-    def require_trusted_timestamp(self) -> "OpenSignatureRequest":
-        if settings.ENVIRONMENT.lower() == "production" and self.signature_mode == SignatureMode.EVIDENCE:
-            raise ValueError("New signature requests require a SERPRO trusted timestamp")
-        return self
-
 
 class SignerCreate(BaseModel):
     name: str = Field(min_length=1, max_length=180)
@@ -159,7 +150,7 @@ class SignerRead(BaseModel):
     participant_role: ParticipantRole = ParticipantRole.EXTERNAL_SIGNER
     represented_tenant_id: UUID | None = None
     representation_snapshot: dict[str, object] | None = None
-    signature_mode: SignatureMode = SignatureMode.SERPRO_TIMESTAMP
+    signature_mode: SignatureMode = SignatureMode.EVIDENCE
 
 
 class SignerSignatureModeUpdate(BaseModel):

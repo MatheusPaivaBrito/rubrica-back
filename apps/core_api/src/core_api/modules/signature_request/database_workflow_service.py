@@ -537,6 +537,13 @@ class DatabaseSignatureWorkflowService:
             if request.status != RequestStatus.DRAFT.value:
                 raise WorkflowError("Signature mode is frozen after opening", 409)
             signer = self._signer(db, signer_id, request.id, lock=True)
+            document = self._document(db, str(request.document_id))
+            if not billing_service.signature_mode_enabled(
+                db, document.tenant_id, mode.value
+            ):
+                raise WorkflowError(
+                    "The current plan does not include this signature mode", 403
+                )
             signer.signature_mode = mode.value
             self._audit(db, request.id, actor_id, "signer.signature_mode_selected", "signer", signer.id, {"signature_mode": mode.value, "source": "signer_card"})
             db.flush()
@@ -605,6 +612,27 @@ class DatabaseSignatureWorkflowService:
                 raise WorkflowError("Every signature mode must belong to a request signer", 422)
             if set(payload.signer_customizations) - signer_ids:
                 raise WorkflowError("Every stamp customization must belong to a request signer", 422)
+            requested_modes = {
+                signer_id: payload.signer_signature_modes.get(
+                    signer_id, SignatureMode.EVIDENCE.value
+                )
+                for signer_id in signer_ids
+            }
+            unavailable_modes = sorted(
+                {
+                    mode
+                    for mode in requested_modes.values()
+                    if not billing_service.signature_mode_enabled(
+                        db, tenant_id, str(mode)
+                    )
+                }
+            )
+            if unavailable_modes:
+                raise WorkflowError(
+                    "The current plan does not include these signature modes: "
+                    + ", ".join(str(mode) for mode in unavailable_modes),
+                    403,
+                )
             positions = sorted(payload.placements, key=lambda item: (item.order, item.page))
             for position in positions:
                 if position.signer_id not in signer_ids:
@@ -621,7 +649,7 @@ class DatabaseSignatureWorkflowService:
                 "by_signer": {str(key): value.model_dump(mode="json") for key, value in payload.signer_customizations.items()},
             } if payload.customization or payload.signer_customizations else None
             for signer in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all():
-                signer.signature_mode = payload.signer_signature_modes.get(signer.id, SignatureMode.SERPRO_TIMESTAMP.value)
+                signer.signature_mode = requested_modes[signer.id]
             self._audit(db, request.id, actor_id, "signature_request.stamp_configuration_saved", "signature_request", request.id, {"position_count": len(positions), "customized": payload.customization is not None})
             return StampConfiguration(placements=positions, customization=payload.customization, signer_customizations=payload.signer_customizations, signer_signature_modes={item.id: item.signature_mode for item in db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all()})
 
@@ -691,14 +719,34 @@ class DatabaseSignatureWorkflowService:
             signers = db.scalars(select(SignerEntity).where(SignerEntity.signature_request_id == request.id)).all()
             if not signers:
                 raise WorkflowError("At least one signer is required", 409)
+            document = self._document(db, str(request.document_id))
+            unavailable_modes = sorted(
+                {
+                    signer.signature_mode
+                    for signer in signers
+                    if not billing_service.signature_mode_enabled(
+                        db, document.tenant_id, signer.signature_mode
+                    )
+                }
+            )
+            if unavailable_modes:
+                raise WorkflowError(
+                    "The current plan does not include these signature modes: "
+                    + ", ".join(unavailable_modes),
+                    403,
+                )
             from core_api.modules.signature_request.serpro_timestamp_service import timestamp_enabled, timestamp_required
-            if timestamp_required() and not timestamp_enabled():
+            requires_timestamp = any(
+                signer.signature_mode
+                in {SignatureMode.SERPRO_TIMESTAMP.value, SignatureMode.SERPROID.value}
+                for signer in signers
+            )
+            if requires_timestamp and timestamp_required() and not timestamp_enabled():
                 raise WorkflowError("SERPRO timestamp is not configured", 409)
             serproid_signers = [signer for signer in signers if signer.signature_mode == SignatureMode.SERPROID.value]
             if serproid_signers:
                 if timestamp_required() and (not settings.SERPROID_CLIENT_ID or not settings.SERPROID_CLIENT_SECRET):
                     raise WorkflowError("Serpro ID is not configured", 409)
-            document = self._document(db, str(request.document_id))
             if request.stamp_placements and not billing_service.custom_stamp_placement_enabled(db, document.tenant_id):
                 raise WorkflowError("Active paid plan required for custom stamp placement", 403)
             if request.stamp_customization_snapshot and not billing_service.custom_stamp_branding_enabled(db, document.tenant_id):
@@ -871,9 +919,17 @@ class DatabaseSignatureWorkflowService:
                 artifact = certificate_signer(artifact)
             from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp, timestamp_required
 
-            artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
-            if trusted_timestamp is None and timestamp_required():
-                raise WorkflowError("SERPRO timestamp is required for every signature", 503)
+            signature_mode = str(prepared["signature_mode"])
+            trusted_timestamp = None
+            if signature_mode in {
+                SignatureMode.SERPRO_TIMESTAMP.value,
+                SignatureMode.SERPROID.value,
+            }:
+                artifact, trusted_timestamp = apply_serpro_timestamp(artifact)
+                if trusted_timestamp is None and timestamp_required():
+                    raise WorkflowError(
+                        "SERPRO timestamp is required for this signature mode", 503
+                    )
             artifact_hash = sha256(artifact).hexdigest()
             artifact_key, _ = self.storage.put(
                 BytesIO(artifact),
@@ -1113,6 +1169,7 @@ class DatabaseSignatureWorkflowService:
                 "original_filename": version.original_filename,
                 "stamp_records": stamp_records,
                 "metadata": metadata,
+                "signature_mode": signer.signature_mode,
                 "artifact_scope": signed_artifact_storage_scope(
                     document.tenant_id,
                     self._document_owner_storage_id(db, document),
@@ -1162,11 +1219,22 @@ class DatabaseSignatureWorkflowService:
                 return self._signer_read(signer)
             from core_api.modules.signature_request.serpro_timestamp_service import timestamp_required
 
+            signature_mode = str(
+                (operation.evidence_json or {}).get("signature_mode", "evidence")
+            )
+            timestamp_is_required = signature_mode in {
+                SignatureMode.SERPRO_TIMESTAMP.value,
+                SignatureMode.SERPROID.value,
+            }
             if (
                 operation.status != "artifact_ready"
                 or not operation.artifact_storage_key
                 or not operation.artifact_sha256
-                or (timestamp_required() and operation.trusted_timestamp_json is None)
+                or (
+                    timestamp_is_required
+                    and timestamp_required()
+                    and operation.trusted_timestamp_json is None
+                )
             ):
                 raise WorkflowError("Signature operation artifact is not ready", 409)
             if request.status != RequestStatus.OPEN.value:

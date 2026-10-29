@@ -27,6 +27,19 @@ class BillingAccountEntity(BaseEntity):
         String(160), nullable=True, unique=True
     )
     current_product_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    contracted_seats: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default="1",
+    )
+    pending_product_code: Mapped[str | None] = mapped_column(String(80))
+    pending_contracted_seats: Mapped[int | None] = mapped_column(Integer)
+    pending_change_kind: Mapped[str | None] = mapped_column(String(24))
+    pending_change_effective_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    pending_provider_invoice_id: Mapped[str | None] = mapped_column(String(160))
     current_period_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(
         Boolean,

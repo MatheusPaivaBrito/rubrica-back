@@ -16,6 +16,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantAccessState,
     TenantTeamRead,
     TenantTeamUpdate,
+    TenantSeatRosterUpdate,
 )
 from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.security.service_tokens import verify_service_token
@@ -123,6 +124,17 @@ async def read_team(tenant_id: UUID, context: AuthContext = Depends(require_perm
 @router.patch("/{tenant_id}/team", response_model=TenantTeamRead)
 async def update_team(tenant_id: UUID, payload: TenantTeamUpdate, context: AuthContext = Depends(require_permission("users:write"))) -> TenantTeamRead:
     return tenant_service.update_team(tenant_id, payload, context.subject)
+
+
+@router.put("/{tenant_id}/team/next-cycle", response_model=TenantTeamRead)
+async def schedule_next_cycle_seats(
+    tenant_id: UUID,
+    payload: TenantSeatRosterUpdate,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantTeamRead:
+    return tenant_service.schedule_seat_roster(
+        tenant_id, payload, context.subject
+    )
 
 
 @router.patch("/{tenant_id}/team/{member_id}/role", response_model=TenantTeamRead)

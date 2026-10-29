@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import uuid4
 
 import pytest
@@ -9,15 +10,31 @@ from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant import tenant_service as module
-from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
-from core_api.modules.tenant.tenant_schema import TenantCreate, TenantMemberInvitation, TenantTeamUpdate
+from core_api.modules.tenant.tenant_entity import (
+    TenantEntity,
+    TenantMemberEntity,
+    TenantSeatRosterEntity,
+)
+from core_api.modules.tenant.tenant_schema import (
+    TenantCreate,
+    TenantMemberInvitation,
+    TenantSeatRosterUpdate,
+    TenantTeamUpdate,
+)
+from shared_kernel.time.datetime_service import DateTimeService
 
 
 @pytest.fixture
 def team_db(monkeypatch):
     token = _active_auth_context.set(None)
     engine = create_engine('sqlite://')
-    for entity in (TenantEntity, TenantMemberEntity, BillingAccountEntity, AuditEventEntity):
+    for entity in (
+        TenantEntity,
+        TenantMemberEntity,
+        TenantSeatRosterEntity,
+        BillingAccountEntity,
+        AuditEventEntity,
+    ):
         entity.__table__.create(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(module, 'SessionLocal', factory)
@@ -163,14 +180,14 @@ def test_team_limit_uses_current_entitlement(team_db, product, status, expected)
     assert module.tenant_service.team(tenant_id, 'member0@example.local').member_limit == expected
 
 
-def test_complimentary_lifetime_tenant_has_unlimited_members(team_db):
+def test_complimentary_lifetime_tenant_has_ten_members(team_db):
     factory, tenant_id, ids = team_db
     with factory.begin() as db:
         db.scalar(select(BillingAccountEntity)).complimentary_lifetime = True
 
     state = module.tenant_service.team(tenant_id, 'member0@example.local')
 
-    assert state.member_limit is None
+    assert state.member_limit == 10
     assert state.active_count == 6
     assert not state.requires_selection
     updated = module.tenant_service.update_team(
@@ -179,6 +196,34 @@ def test_complimentary_lifetime_tenant_has_unlimited_members(team_db):
         'member0@example.local',
     )
     assert updated.active_count == 6
+
+
+def test_next_cycle_roster_does_not_change_current_occupants_until_cutover(team_db):
+    factory, tenant_id, ids = team_db
+    cycle_start = DateTimeService.utc_now() + timedelta(days=5)
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        account.current_product_code = 'rubrica_intermediate'
+        account.contracted_seats = 3
+        account.current_period_ends_at = cycle_start
+
+    scheduled = module.tenant_service.schedule_seat_roster(
+        tenant_id,
+        TenantSeatRosterUpdate(member_ids=[ids[0], ids[4], ids[5]]),
+        'member0@example.local',
+    )
+
+    assert scheduled.active_count == 6
+    assert set(scheduled.next_cycle_member_ids) == {ids[0], ids[4], ids[5]}
+    with factory.begin() as db:
+        roster = db.scalar(select(TenantSeatRosterEntity))
+        roster.cycle_starts_at = DateTimeService.utc_now() - timedelta(seconds=1)
+        module.tenant_service.apply_due_seat_roster(db, tenant_id)
+
+    applied = module.tenant_service.team(tenant_id, 'member0@example.local')
+    assert applied.active_count == 3
+    assert set(applied.current_seat_member_ids) == {ids[0], ids[4], ids[5]}
+    assert [member.status for member in applied.members].count('without_seat') == 3
 
 
 def test_professional_personal_tenant_can_invite_member(team_db, monkeypatch):

@@ -88,7 +88,32 @@ def test_checkout_selects_annual_price(monkeypatch, product_code: str, setting_n
 def test_team_plan_limits() -> None:
     assert BillingService.PLAN_MEMBER_LIMITS["rubrica_intermediate"] == 3
     assert BillingService.PLAN_MEMBER_LIMITS["rubrica_team"] == 10
-    assert BillingService.PLAN_FILE_LIMITS["rubrica_team"] == 200
+    assert BillingService.PLAN_FILE_LIMITS["rubrica_team"] == 220
+
+
+@pytest.mark.parametrize(
+    ("seats", "interval", "product", "amount", "documents"),
+    [
+        (3, "month", "rubrica_intermediate", 6990, 80),
+        (9, "month", "rubrica_intermediate", 13848, 200),
+        (10, "month", "rubrica_team", 14990, 220),
+        (11, "month", "rubrica_team", 16133, 240),
+        (9, "year", "rubrica_intermediate", 138564, 200),
+        (10, "year", "rubrica_team", 149990, 220),
+    ],
+)
+def test_seat_quote_normalizes_plan_price_and_documents(
+    seats: int,
+    interval: str,
+    product: str,
+    amount: int,
+    documents: int,
+) -> None:
+    assert BillingService._seat_quote_values(seats, interval) == (
+        product,
+        amount,
+        documents,
+    )
 
 
 @pytest.mark.parametrize(
@@ -253,6 +278,10 @@ def test_scheduled_cancellation_keeps_access_until_period_end(monkeypatch) -> No
         "core_api.modules.billing.billing_service.tenant_service.reconcile_single_member_plan",
         lambda *_args, **_kwargs: None,
     )
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.apply_due_seat_roster",
+        lambda *_args, **_kwargs: None,
+    )
 
     period_end = 1_800_000_000
     BillingService._apply_event(
@@ -298,6 +327,10 @@ def test_subscription_deleted_ends_paid_access(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         "core_api.modules.billing.billing_service.tenant_service.reconcile_single_member_plan",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.billing_service.tenant_service.apply_due_seat_roster",
         lambda *_args, **_kwargs: None,
     )
 
@@ -633,6 +666,70 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
 
     assert account.status == "active"
     assert account.grace_period_ends_at is None
+
+
+def test_paid_proration_invoice_activates_pending_seat_upgrade(monkeypatch) -> None:
+    account = SimpleNamespace(
+        status="active",
+        provider=None,
+        provider_customer_id=None,
+        grace_period_ends_at=None,
+        current_period_ends_at=None,
+        current_product_code="rubrica_intermediate",
+        contracted_seats=3,
+        pending_product_code="rubrica_intermediate",
+        pending_contracted_seats=4,
+        pending_change_kind="upgrade",
+        pending_change_effective_at=None,
+        pending_provider_invoice_id="in_upgrade",
+    )
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: None)
+
+    BillingService._apply_event(
+        object(),
+        "invoice.payment_succeeded",
+        {"id": "in_upgrade"},
+        uuid4(),
+    )
+
+    assert account.contracted_seats == 4
+    assert account.pending_contracted_seats is None
+    assert account.pending_provider_invoice_id is None
+
+
+def test_unrelated_paid_invoice_does_not_activate_pending_upgrade(monkeypatch) -> None:
+    account = SimpleNamespace(
+        status="active",
+        provider=None,
+        provider_customer_id=None,
+        grace_period_ends_at=None,
+        current_period_ends_at=None,
+        current_product_code="rubrica_intermediate",
+        contracted_seats=3,
+        pending_product_code="rubrica_intermediate",
+        pending_contracted_seats=4,
+        pending_change_kind="upgrade",
+        pending_change_effective_at=None,
+        pending_provider_invoice_id="in_upgrade",
+    )
+    monkeypatch.setattr(
+        BillingService, "_account_entity", lambda *_args, **_kwargs: account
+    )
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: None)
+
+    BillingService._apply_event(
+        object(),
+        "invoice.payment_succeeded",
+        {"id": "in_renewal"},
+        uuid4(),
+    )
+
+    assert account.contracted_seats == 3
+    assert account.pending_contracted_seats == 4
+    assert account.pending_provider_invoice_id == "in_upgrade"
 
 
 @pytest.mark.parametrize("locale", ["en", "pt-BR", "es", "ja-JP"])

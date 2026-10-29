@@ -18,11 +18,26 @@ from core_api.modules.billing.billing_schema import (
     BillingCheckoutRead,
     BillingPortalRead,
     BillingPaymentRead,
+    BillingSeatQuoteRead,
+    BillingSeatChangeRead,
     BillingWebhookRead,
 )
 from core_api.modules.billing.notification_client import (
     BillingEmailDeliveryError,
     request_billing_email,
+)
+from core_api.modules.billing.plan_catalog import (
+    BUSINESS_REPRESENTATION,
+    CUSTOM_STAMP_BRANDING,
+    CUSTOM_STAMP_PLACEMENT,
+    EMAIL_INVITATIONS,
+    SERPROID,
+    TEAM_MANAGEMENT,
+    TRUSTED_TIMESTAMP,
+    account_plan,
+    document_limit,
+    normalize_product_code,
+    normalized_seats,
 )
 from core_api.modules.billing.providers import billing_provider
 from core_api.modules.billing.providers.protocol import (
@@ -44,10 +59,22 @@ class BillingService:
     PLAN_FILE_LIMITS = {
         "rubrica_base": 20,
         "rubrica_intermediate": 80,
-        "rubrica_team": 200,
+        "rubrica_team": 220,
     }
     BUSINESS_PRODUCT_CODES = frozenset({"rubrica_intermediate", "rubrica_team"})
     PLAN_MEMBER_LIMITS = {"rubrica_intermediate": 3, "rubrica_team": 10}
+    BRL_RECURRING_PRICES = {
+        "month": {
+            "professional": 6990,
+            "team": 14990,
+            "seat": 1143,
+        },
+        "year": {
+            "professional": 69990,
+            "team": 149990,
+            "seat": 11429,
+        },
+    }
 
     def __init__(self, provider: BillingProvider | None = None) -> None:
         self._provider = provider
@@ -145,6 +172,152 @@ class BillingService:
                     .order_by(BillingPaymentEntity.created_at.desc())
                 ).all()
             ]
+
+    def quote_seats(
+        self,
+        tenant_id: UUID,
+        subject: str,
+        target_seats: int,
+        billing_interval: str,
+    ) -> BillingSeatQuoteRead:
+        if target_seats < 3:
+            raise WorkflowError(
+                "Team subscriptions require at least three contracted seats", 422
+            )
+        if billing_interval not in self.BRL_RECURRING_PRICES:
+            raise WorkflowError("Unsupported billing interval", 422)
+        with SessionLocal() as database:
+            tenant_service.require_role(
+                database, tenant_id, subject, {"admin"}, allow_over_limit=True
+            )
+            tenant = database.get(TenantEntity, tenant_id)
+            if tenant is None or tenant.deleted_at is not None:
+                raise WorkflowError("Tenant not found", 404)
+            if tenant.currency != "BRL":
+                raise WorkflowError(
+                    "Seat pricing is currently available in BRL only", 409
+                )
+            account = self._account_entity(database, tenant_id)
+            if account.complimentary_lifetime:
+                raise WorkflowError(
+                    "Lifetime accounts have a fixed ten-seat entitlement", 409
+                )
+            current_seats = self.contracted_seat_count(account)
+            product_code, recurring, documents = self._seat_quote_values(
+                target_seats, billing_interval
+            )
+            effective = "immediate" if target_seats > current_seats else "next_renewal"
+            return BillingSeatQuoteRead(
+                target_product_code=product_code,
+                target_seats=target_seats,
+                documents_limit=documents,
+                recurring_amount_minor=recurring,
+                currency="BRL",
+                billing_interval=billing_interval,
+                effective=effective,
+                effective_at=(
+                    None
+                    if effective == "immediate"
+                    else account.current_period_ends_at
+                ),
+            )
+
+    def change_seats(
+        self,
+        tenant_id: UUID,
+        subject: str,
+        target_seats: int,
+        billing_interval: str,
+    ) -> BillingSeatChangeRead:
+        provider = self._get_provider()
+        if target_seats < 3:
+            raise WorkflowError(
+                "Team subscriptions require at least three contracted seats", 422
+            )
+        if billing_interval not in self.BRL_RECURRING_PRICES:
+            raise WorkflowError("Unsupported billing interval", 422)
+        with SessionLocal.begin() as database:
+            tenant_service.require_role(
+                database, tenant_id, subject, {"admin"}, allow_over_limit=True
+            )
+            tenant = database.get(TenantEntity, tenant_id)
+            if tenant is None or tenant.deleted_at is not None:
+                raise WorkflowError("Tenant not found", 404)
+            if tenant.currency != "BRL":
+                raise WorkflowError(
+                    "Seat pricing is currently available in BRL only", 409
+                )
+            account = self._account_entity(database, tenant_id, lock=True)
+            if account.complimentary_lifetime:
+                raise WorkflowError(
+                    "Lifetime accounts have exactly ten seats and cannot expand",
+                    409,
+                )
+            if not account.provider_subscription_id or account.status != "active":
+                raise WorkflowError(
+                    "An active Stripe subscription is required", 409
+                )
+            if account.pending_contracted_seats is not None:
+                raise WorkflowError(
+                    "Another seat change is awaiting payment confirmation", 409
+                )
+            current_seats = self.contracted_seat_count(account)
+            if target_seats == current_seats:
+                raise WorkflowError("The requested seat quantity is already active", 409)
+            if target_seats < current_seats:
+                raise WorkflowError(
+                    "Seat reductions must be scheduled for the next renewal", 409
+                )
+            product_code, _amount, _documents = self._seat_quote_values(
+                target_seats, billing_interval
+            )
+            base_price_id = self._price_for_currency(
+                tenant.currency, product_code, billing_interval
+            )
+            seat_price_id = self._seat_price_for_currency(
+                tenant.currency, billing_interval
+            )
+            base_seats = self.PLAN_MEMBER_LIMITS[product_code]
+            try:
+                change = provider.update_subscription_seats(
+                    subscription_id=account.provider_subscription_id,
+                    product_code=product_code,
+                    base_price_id=base_price_id,
+                    seat_price_id=seat_price_id,
+                    seat_price_ids=self._configured_seat_price_ids(),
+                    additional_seats=target_seats - base_seats,
+                )
+            except BillingProviderError as exc:
+                raise WorkflowError(str(exc), 502) from exc
+            account.pending_product_code = product_code
+            account.pending_contracted_seats = target_seats
+            account.pending_change_kind = "upgrade"
+            account.pending_change_effective_at = None
+            account.pending_provider_invoice_id = change.invoice_id
+            return BillingSeatChangeRead(
+                status="pending_payment",
+                target_product_code=product_code,
+                target_seats=target_seats,
+                effective_at=None,
+            )
+
+    @classmethod
+    def _seat_quote_values(
+        cls, target_seats: int, billing_interval: str
+    ) -> tuple[str, int, int]:
+        prices = cls.BRL_RECURRING_PRICES[billing_interval]
+        if target_seats < 10:
+            return (
+                "rubrica_intermediate",
+                prices["professional"]
+                + (target_seats - 3) * prices["seat"],
+                80 + (target_seats - 3) * 20,
+            )
+        return (
+            "rubrica_team",
+            prices["team"] + (target_seats - 10) * prices["seat"],
+            220 + (target_seats - 10) * 20,
+        )
 
     def consume_signature(self, database, tenant_id: UUID) -> None:
         account = database.scalar(
@@ -245,6 +418,11 @@ class BillingService:
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
             account = self._account_entity(database, tenant_id)
+            if account.complimentary_lifetime:
+                raise WorkflowError(
+                    "Lifetime accounts have no subscription or billing portal",
+                    409,
+                )
             if not account.provider_customer_id:
                 raise WorkflowError("Stripe customer is not configured", 409)
             if self._normalize_product_code(account.current_product_code) == self._normalize_product_code(product_code):
@@ -595,6 +773,7 @@ class BillingService:
                 str(subscription) if subscription else None
             )
             account.current_product_code = BillingService._product_code(resource)
+            BillingService._sync_contracted_seats(account, resource)
             if account.status != "active":
                 account.status = "pending"
             BillingService._apply_business_identity(
@@ -612,6 +791,12 @@ class BillingService:
             if event_type == "invoice.payment_succeeded":
                 account.status = "active"
                 account.grace_period_ends_at = None
+                if (
+                    getattr(account, "pending_provider_invoice_id", None)
+                    and getattr(account, "pending_provider_invoice_id", None)
+                    == str(resource.get("id") or "")
+                ):
+                    BillingService._commit_pending_change(account)
                 period_start, period_end = BillingService._invoice_service_period(
                     resource
                 )
@@ -638,6 +823,7 @@ class BillingService:
                 return False
             account.provider_subscription_id = str(resource.get("id"))
             account.current_product_code = BillingService._product_code(resource)
+            BillingService._sync_contracted_seats(account, resource)
             account.status = BillingService._subscription_status(
                 str(resource.get("status", ""))
             )
@@ -670,8 +856,21 @@ class BillingService:
             BillingService._apply_business_identity(
                 database, tenant_id, account.current_product_code, business_identity
             )
+            tenant_service.apply_due_seat_roster(database, tenant_id)
             tenant_service.reconcile_single_member_plan(database, tenant_id)
         return True
+
+    @staticmethod
+    def _commit_pending_change(account: BillingAccountEntity) -> None:
+        if account.pending_product_code is not None:
+            account.current_product_code = account.pending_product_code
+        if account.pending_contracted_seats is not None:
+            account.contracted_seats = account.pending_contracted_seats
+        account.pending_product_code = None
+        account.pending_contracted_seats = None
+        account.pending_change_kind = None
+        account.pending_change_effective_at = None
+        account.pending_provider_invoice_id = None
 
     @staticmethod
     def _apply_business_identity(
@@ -789,10 +988,12 @@ class BillingService:
 
     @staticmethod
     def _active_plan_file_limit(account: BillingAccountEntity) -> int | None:
-        if not BillingService._paid_access_enabled(account):
+        plan = BillingService._plan(account)
+        if plan.code == "rubrica_free":
             return None
-        return BillingService.PLAN_FILE_LIMITS.get(
-            BillingService._normalize_product_code(account.current_product_code)
+        return document_limit(
+            plan,
+            normalized_seats(plan, getattr(account, "contracted_seats", None)),
         )
 
     @staticmethod
@@ -804,8 +1005,42 @@ class BillingService:
 
     @staticmethod
     def _normalize_product_code(product_code: object) -> str:
-        value = str(product_code or "rubrica_base")
-        return "rubrica_base" if value == "rubrica_mvp" else value
+        return normalize_product_code(product_code)
+
+    @staticmethod
+    def _plan(account: BillingAccountEntity):
+        return account_plan(
+            product_code=account.current_product_code,
+            paid=BillingService._paid_access_enabled(account),
+            lifetime=bool(getattr(account, "complimentary_lifetime", False)),
+        )
+
+    @staticmethod
+    def contracted_seat_count(account: BillingAccountEntity) -> int:
+        plan = BillingService._plan(account)
+        return normalized_seats(plan, getattr(account, "contracted_seats", None))
+
+    @staticmethod
+    def entitlement_enabled(database, tenant_id: UUID, entitlement: str) -> bool:
+        account = database.scalar(
+            select(BillingAccountEntity).where(
+                BillingAccountEntity.tenant_id == tenant_id,
+                BillingAccountEntity.deleted_at.is_(None),
+            )
+        )
+        return bool(account and entitlement in BillingService._plan(account).entitlements)
+
+    @staticmethod
+    def signature_mode_enabled(database, tenant_id: UUID, mode: str) -> bool:
+        entitlement = {
+            "evidence": "evidence_signature",
+            "serpro_timestamp": TRUSTED_TIMESTAMP,
+            "serproid": SERPROID,
+        }.get(mode)
+        return bool(
+            entitlement
+            and BillingService.entitlement_enabled(database, tenant_id, entitlement)
+        )
 
     @staticmethod
     def _product_code(resource) -> str:
@@ -846,6 +1081,11 @@ class BillingService:
             for price_id in price_ids
             if price_id
         }
+        for item in (resource.get("items") or {}).get("data") or []:
+            price = item.get("price") or item.get("plan") or {}
+            price_id = str(price.get("id") or "")
+            if price_id in configured_prices:
+                return configured_prices[price_id]
         price_id = BillingService._subscription_price_id(resource)
         if price_id in configured_prices:
             return configured_prices[price_id]
@@ -865,6 +1105,33 @@ class BillingService:
             if price_id:
                 return price_id
         return None
+
+    @staticmethod
+    def _sync_contracted_seats(account: BillingAccountEntity, resource) -> None:
+        plan_code = BillingService._normalize_product_code(
+            account.current_product_code
+        )
+        base_seats = BillingService.PLAN_MEMBER_LIMITS.get(plan_code, 1)
+        seat_prices = {
+            value
+            for value in (
+                settings.STRIPE_PRICE_SEAT_MONTHLY_BRL,
+                settings.STRIPE_PRICE_SEAT_MONTHLY_USD,
+                settings.STRIPE_PRICE_SEAT_MONTHLY_EUR,
+                settings.STRIPE_PRICE_SEAT_MONTHLY_JPY,
+                settings.STRIPE_PRICE_SEAT_ANNUAL_BRL,
+                settings.STRIPE_PRICE_SEAT_ANNUAL_USD,
+                settings.STRIPE_PRICE_SEAT_ANNUAL_EUR,
+                settings.STRIPE_PRICE_SEAT_ANNUAL_JPY,
+            )
+            if value
+        }
+        extras = 0
+        for item in (resource.get("items") or {}).get("data") or []:
+            price = item.get("price") or item.get("plan") or {}
+            if str(price.get("id") or "") in seat_prices:
+                extras += max(int(item.get("quantity") or 0), 0)
+        account.contracted_seats = base_seats + extras
 
     @staticmethod
     def _subscription_period(resource) -> tuple[datetime | None, datetime | None]:
@@ -960,43 +1227,38 @@ class BillingService:
         }
 
     @staticmethod
-    def business_features_enabled(database, tenant_id: UUID) -> bool:
-        account = database.scalar(
-            select(BillingAccountEntity).where(
-                BillingAccountEntity.tenant_id == tenant_id,
-                BillingAccountEntity.deleted_at.is_(None),
-            )
+    def _seat_price_for_currency(currency: str, billing_interval: str) -> str:
+        interval = "MONTHLY" if billing_interval == "month" else "ANNUAL"
+        price_id = getattr(
+            settings,
+            f"STRIPE_PRICE_SEAT_{interval}_{currency.upper()}",
+            None,
         )
-        return bool(
-            account
-            and (
-                getattr(account, "complimentary_lifetime", False)
-                or (
-                    BillingService._normalize_product_code(account.current_product_code)
-                    in BillingService.BUSINESS_PRODUCT_CODES
-                    and BillingService._paid_access_enabled(account)
-                )
+        if not price_id:
+            raise WorkflowError(
+                f"Stripe seat price is not configured in {currency}", 503
             )
+        return price_id
+
+    @staticmethod
+    def _configured_seat_price_ids() -> frozenset[str]:
+        return frozenset(
+            value
+            for interval in ("MONTHLY", "ANNUAL")
+            for currency in ("BRL", "USD", "EUR", "JPY")
+            if (value := getattr(settings, f"STRIPE_PRICE_SEAT_{interval}_{currency}"))
+        )
+
+    @staticmethod
+    def business_features_enabled(database, tenant_id: UUID) -> bool:
+        return BillingService.entitlement_enabled(
+            database, tenant_id, BUSINESS_REPRESENTATION
         )
 
     @staticmethod
     def custom_stamp_placement_enabled(database, tenant_id: UUID) -> bool:
-        account = database.scalar(
-            select(BillingAccountEntity).where(
-                BillingAccountEntity.tenant_id == tenant_id,
-                BillingAccountEntity.deleted_at.is_(None),
-            )
-        )
-        return bool(
-            account
-            and (
-                getattr(account, "complimentary_lifetime", False)
-                or (
-                    BillingService._normalize_product_code(account.current_product_code)
-                    in {"rubrica_base", *BillingService.BUSINESS_PRODUCT_CODES}
-                    and BillingService._paid_access_enabled(account)
-                )
-            )
+        return BillingService.entitlement_enabled(
+            database, tenant_id, CUSTOM_STAMP_PLACEMENT
         )
 
     @staticmethod
@@ -1007,27 +1269,15 @@ class BillingService:
             and tenant.kind == "business"
             and tenant.registration_type == "BR_CNPJ"
             and tenant.registration_masked
-            and BillingService.business_features_enabled(database, tenant_id)
+            and BillingService.entitlement_enabled(
+                database, tenant_id, CUSTOM_STAMP_BRANDING
+            )
         )
 
     @staticmethod
     def email_invitations_enabled(database, tenant_id: UUID) -> bool:
-        account = database.scalar(
-            select(BillingAccountEntity).where(
-                BillingAccountEntity.tenant_id == tenant_id,
-                BillingAccountEntity.deleted_at.is_(None),
-            )
-        )
-        return bool(
-            account
-            and (
-                getattr(account, "complimentary_lifetime", False)
-                or (
-                    BillingService._normalize_product_code(account.current_product_code)
-                    in BillingService.BUSINESS_PRODUCT_CODES
-                    and BillingService._paid_access_enabled(account)
-                )
-            )
+        return BillingService.entitlement_enabled(
+            database, tenant_id, EMAIL_INVITATIONS
         )
 
     @staticmethod
@@ -1058,6 +1308,8 @@ class BillingService:
             account = BillingService._account_entity(database, tenant_id)
             unlimited = BillingService._has_unlimited_signatures(account)
             paid_access = BillingService._paid_access_enabled(account)
+            plan = BillingService._plan(account)
+            seats = BillingService.contracted_seat_count(account)
             files_limit = BillingService._active_plan_file_limit(account)
             unlimited_files = bool(account.complimentary_lifetime)
             return BillingAccountRead(
@@ -1068,6 +1320,13 @@ class BillingService:
                 provider_customer_id=account.provider_customer_id,
                 provider_subscription_id=account.provider_subscription_id,
                 current_product_code=account.current_product_code,
+                plan_code=plan.code,
+                contracted_seats=seats,
+                pending_product_code=account.pending_product_code,
+                pending_contracted_seats=account.pending_contracted_seats,
+                pending_change_kind=account.pending_change_kind,
+                pending_change_effective_at=account.pending_change_effective_at,
+                entitlements=sorted(plan.entitlements),
                 current_period_ends_at=account.current_period_ends_at,
                 cancel_at_period_end=account.cancel_at_period_end,
                 cancels_at=account.cancels_at,
@@ -1104,6 +1363,9 @@ class BillingService:
                 custom_stamp_branding=BillingService.custom_stamp_branding_enabled(
                     database, tenant_id
                 ),
+                trusted_timestamp=TRUSTED_TIMESTAMP in plan.entitlements,
+                serproid_signature=SERPROID in plan.entitlements,
+                team_management=TEAM_MANAGEMENT in plan.entitlements,
                 usage_period_starts_at=account.usage_period_starts_at,
                 complimentary_lifetime=account.complimentary_lifetime,
                 created_at=account.created_at,

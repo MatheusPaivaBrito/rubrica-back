@@ -21,6 +21,11 @@ class ProviderSession:
 
 
 @dataclass(frozen=True)
+class ProviderSubscriptionChange:
+    invoice_id: str
+
+
+@dataclass(frozen=True)
 class ProviderTaxId:
     id: str
     type: str
@@ -64,6 +69,17 @@ class BillingProvider(Protocol):
     ) -> ProviderSession: ...
 
     def retrieve_subscription(self, subscription_id: str) -> Mapping[str, Any]: ...
+
+    def update_subscription_seats(
+        self,
+        *,
+        subscription_id: str,
+        product_code: str,
+        base_price_id: str,
+        seat_price_id: str,
+        seat_price_ids: frozenset[str],
+        additional_seats: int,
+    ) -> ProviderSubscriptionChange: ...
 
     def retrieve_customer_business_identity(
         self, customer_id: str

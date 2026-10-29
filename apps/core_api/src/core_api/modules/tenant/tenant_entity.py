@@ -2,7 +2,7 @@ from uuid import UUID
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -58,3 +58,29 @@ class TenantMemberEntity(BaseEntity):
     role: Mapped[str] = mapped_column(String(24), nullable=False, default="member", index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active", index=True)
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class TenantSeatRosterEntity(BaseEntity):
+    __tablename__ = "tenant_seat_rosters"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "cycle_starts_at", name="uq_tenant_seat_roster_cycle"
+        ),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    cycle_starts_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    seat_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    member_ids: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="scheduled", server_default="scheduled"
+    )
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

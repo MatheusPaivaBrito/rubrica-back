@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     STRIPE_PRICE_TEAM_ANNUAL_USD: str | None = None
     STRIPE_PRICE_TEAM_ANNUAL_EUR: str | None = None
     STRIPE_PRICE_TEAM_ANNUAL_JPY: str | None = None
+    STRIPE_PRICE_SEAT_MONTHLY_BRL: str | None = None
+    STRIPE_PRICE_SEAT_MONTHLY_USD: str | None = None
+    STRIPE_PRICE_SEAT_MONTHLY_EUR: str | None = None
+    STRIPE_PRICE_SEAT_MONTHLY_JPY: str | None = None
+    STRIPE_PRICE_SEAT_ANNUAL_BRL: str | None = None
+    STRIPE_PRICE_SEAT_ANNUAL_USD: str | None = None
+    STRIPE_PRICE_SEAT_ANNUAL_EUR: str | None = None
+    STRIPE_PRICE_SEAT_ANNUAL_JPY: str | None = None
     STRIPE_PORTAL_CONFIGURATION_ID: str | None = None
     BILLING_GRACE_PERIOD_DAYS: int = Field(default=10, ge=0, le=30)
 

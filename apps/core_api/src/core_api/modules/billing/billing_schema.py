@@ -16,6 +16,13 @@ class BillingAccountRead(BaseModel):
     provider_customer_id: str | None
     provider_subscription_id: str | None
     current_product_code: str | None
+    plan_code: str
+    contracted_seats: int
+    pending_product_code: str | None
+    pending_contracted_seats: int | None
+    pending_change_kind: str | None
+    pending_change_effective_at: datetime | None
+    entitlements: list[str]
     current_period_ends_at: datetime | None
     cancel_at_period_end: bool
     cancels_at: datetime | None
@@ -31,6 +38,9 @@ class BillingAccountRead(BaseModel):
     email_invitations_enabled: bool
     custom_stamp_placement: bool
     custom_stamp_branding: bool
+    trusted_timestamp: bool
+    serproid_signature: bool
+    team_management: bool
     usage_period_starts_at: datetime | None
     complimentary_lifetime: bool
     created_at: datetime
@@ -51,6 +61,33 @@ class BillingPortalRead(BaseModel):
 
 class BillingPlanChangeCreate(BillingCheckoutCreate):
     pass
+
+
+class BillingSeatQuoteCreate(BaseModel):
+    target_seats: int
+    billing_interval: Literal["month", "year"] = "month"
+
+
+class BillingSeatQuoteRead(BaseModel):
+    target_product_code: Literal["rubrica_intermediate", "rubrica_team"]
+    target_seats: int
+    documents_limit: int
+    recurring_amount_minor: int
+    currency: str
+    billing_interval: Literal["month", "year"]
+    effective: Literal["immediate", "next_renewal"]
+    effective_at: datetime | None
+
+
+class BillingSeatChangeCreate(BillingSeatQuoteCreate):
+    pass
+
+
+class BillingSeatChangeRead(BaseModel):
+    status: Literal["pending_payment", "scheduled"]
+    target_product_code: Literal["rubrica_intermediate", "rubrica_team"]
+    target_seats: int
+    effective_at: datetime | None
 
 
 class BillingWebhookRead(BaseModel):

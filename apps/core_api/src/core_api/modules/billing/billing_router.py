@@ -8,6 +8,10 @@ from core_api.modules.billing.billing_schema import (
     BillingCheckoutCreate,
     BillingPortalRead,
     BillingPlanChangeCreate,
+    BillingSeatQuoteCreate,
+    BillingSeatQuoteRead,
+    BillingSeatChangeCreate,
+    BillingSeatChangeRead,
     BillingPaymentRead,
     BillingWebhookRead,
 )
@@ -59,6 +63,38 @@ async def create_portal(
     context: AuthContext = Depends(require_permission("documents:write")),
 ) -> BillingPortalRead:
     return billing_service.create_portal(tenant_id, context.subject, payload.product_code, payload.billing_interval)
+
+
+@router.post(
+    "/tenants/{tenant_id}/seat-quote", response_model=BillingSeatQuoteRead
+)
+async def quote_seats(
+    tenant_id: UUID,
+    payload: BillingSeatQuoteCreate,
+    context: AuthContext = Depends(require_permission("documents:write")),
+) -> BillingSeatQuoteRead:
+    return billing_service.quote_seats(
+        tenant_id,
+        context.subject,
+        payload.target_seats,
+        payload.billing_interval,
+    )
+
+
+@router.post(
+    "/tenants/{tenant_id}/seat-change", response_model=BillingSeatChangeRead
+)
+async def change_seats(
+    tenant_id: UUID,
+    payload: BillingSeatChangeCreate,
+    context: AuthContext = Depends(require_permission("documents:write")),
+) -> BillingSeatChangeRead:
+    return billing_service.change_seats(
+        tenant_id,
+        context.subject,
+        payload.target_seats,
+        payload.billing_interval,
+    )
 
 
 @router.post("/webhooks/stripe", response_model=BillingWebhookRead)
