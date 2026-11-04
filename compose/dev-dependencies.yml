@@ -15,6 +15,12 @@ services:
     volumes:
       - dev_redis_data:/data
 
+  clamav:
+    image: clamav/clamav:stable
+    ports: ["127.0.0.1:${CLAMAV_HOST_PORT:-3310}:3310"]
+    volumes: [dev_clamav_database:/var/lib/clamav]
+    mem_limit: 1536m
+
   kafka:
     image: apache/kafka:4.1.0
     ports:
@@ -101,6 +107,7 @@ services:
       - "host.docker.internal:host-gateway"
 
 volumes:
+  dev_clamav_database:
   dev_postgres_data:
   dev_redis_data:
 

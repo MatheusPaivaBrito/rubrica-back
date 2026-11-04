@@ -48,7 +48,7 @@ async def read_pdf_body(request: Request) -> bytes:
 
 
 def persist_upload(context, content, filename, content_type, idempotency_key):
-    validate_pdf_upload(content, filename=filename, content_type=content_type)
+    validate_pdf_upload(content, filename=filename, content_type=content_type, deep=False)
     digest = sha256(content).hexdigest()
     storage = configured_document_storage(for_mode(settings, context.sandbox))
     storage_key = None

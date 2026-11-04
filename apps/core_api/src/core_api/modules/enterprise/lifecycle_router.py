@@ -61,12 +61,54 @@ def contract_status(tenant_id: UUID, context: AuthContext = Depends(require_perm
         if account is None or (account.current_product_code != "rubrica_enterprise" and state is None):
             raise HTTPException(403, "Enterprise contract required")
         result = contract_view(account, state)
-        result["internal_retention_complete"] = False
+        from core_api.modules.enterprise.closure import closure_for, complete
+        closure = closure_for(db, state) if state else None
+        result["internal_retention_complete"] = complete(closure)
+        result["closure_id"] = closure.id if closure else None
+        result["metadata_erased"] = bool(closure and closure.metadata_purged_at)
+        result["credentials_retired"] = bool(closure and closure.credentials_retired_at)
+        result["backups_verified"] = bool(closure and closure.backups_verified_at)
+        result["recontract_allowed"] = bool(complete(closure) and account.current_product_code == "rubrica_enterprise"
+            and account.status == "active" and not account.cancel_at_period_end)
         result["automatic_current_copy_purge_enabled"] = settings.ENTERPRISE_RETENTION_PURGE_ENABLED
         result["notices"] = [{"id": item.id, "kind": item.kind, "payload": item.payload, "created_at": item.created_at,
                               "email_delivered": item.email_complete} for item in db.scalars(select(EnterpriseNotice).where(
                                   EnterpriseNotice.tenant_id == tenant_id).order_by(EnterpriseNotice.created_at.desc()).limit(30))]
         return result
+
+
+class RecontractRequest(BaseModel):
+    confirm_empty_contract: bool
+    closure_id: UUID
+
+
+@router.post("/contract/reopen")
+def reopen_contract(tenant_id: UUID, payload: RecontractRequest,
+                    context: AuthContext = Depends(require_permission("documents:write"))):
+    from core_api.modules.enterprise.closure import complete
+    if not payload.confirm_empty_contract:
+        raise HTTPException(422, "Confirm a new empty contract; erased data cannot be restored")
+    with SessionLocal.begin() as db:
+        tenant_service.require_role(db, tenant_id, context.subject, {"admin"})
+        account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id,
+            BillingAccountEntity.deleted_at.is_(None)).with_for_update())
+        state = lifecycle_for(db, tenant_id, lock=True)
+        from core_api.modules.enterprise.completion_entity import EnterpriseClosure
+        closure = db.scalar(select(EnterpriseClosure).where(EnterpriseClosure.id == payload.closure_id,
+            EnterpriseClosure.tenant_id == tenant_id).with_for_update())
+        if closure and closure.reopened_at:
+            return {"status": "already_reopened", "revision": closure.revision + 1, "data_restored": False}
+        if not (account and account.current_product_code == "rubrica_enterprise" and account.status == "active"
+                and not account.cancel_at_period_end and state and state.purged_at and complete(closure) and closure.revision == state.revision):
+            raise HTTPException(409, "Paid active contract and verified complete closure are required")
+        now = datetime.now(UTC)
+        closure.reopened_at = now
+        state.suspended_at = state.recovery_until = state.failure_cutoff = state.purge_started_at = state.purged_at = None
+        state.status, state.revision = "active", state.revision + 1
+        account.usage_period_starts_at = now
+        tenant_service._audit(db, tenant_id, "contract-admin", "enterprise.contract.reopened", {"revision": state.revision,
+            "previous_closure": str(closure.id), "data_restored": False})
+        return {"status": "active", "revision": state.revision, "data_restored": False, "new_tokens_required": True}
 
 
 class WebhookConfiguration(BaseModel):

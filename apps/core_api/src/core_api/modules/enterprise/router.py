@@ -46,12 +46,29 @@ class TokenRotation(BaseModel):
     expires_at: datetime | None = None
 
 
+class IntegrationState(BaseModel):
+    enabled: bool
+
+
+@router.patch("/integrations/{integration_id}", response_model=IntegrationRead)
+def change_integration(tenant_id: UUID, integration_id: UUID, payload: IntegrationState,
+                       context: AuthContext = Depends(require_permission("documents:write"))):
+    with SessionLocal.begin() as db:
+        item = binding(db, tenant_id, integration_id, context, recovery=True)
+        if payload.enabled:
+            require_enterprise(db, tenant_id, context)
+        item.enabled = payload.enabled
+        tenant_service._audit(db, tenant_id, context.subject, "enterprise.integration.state_changed", {
+            "integration_id": str(item.id), "enabled": item.enabled})
+        return IntegrationRead.model_validate(item)
+
+
 def require_enterprise(db, tenant_id, context, *, recovery=False):
     tenant_service.require_role(db, tenant_id, context.subject, {"admin"})
     account = db.scalar(select(BillingAccountEntity).where(
         BillingAccountEntity.tenant_id == tenant_id,
         BillingAccountEntity.deleted_at.is_(None),
-    ))
+    ).with_for_update())
     if account is None:
         raise HTTPException(403, "Active enterprise contract required")
     from core_api.modules.enterprise.lifecycle import contract_view, lifecycle_for

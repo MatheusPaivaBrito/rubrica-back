@@ -3,12 +3,12 @@ set -euo pipefail
 umask 077
 
 usage() {
-  echo "Usage: RESTIC_REPOSITORY=s3:https://S3-ENDPOINT/BUCKET/PREFIX RESTIC_PASSWORD_FILE=/path/password AWS_ACCESS_KEY_ID_FILE=/path/key-id AWS_SECRET_ACCESS_KEY_FILE=/path/key toolbox/operations/offsite_backup.sh init|create|upload|check|restore [directory]" >&2
+  echo "Usage: RESTIC_REPOSITORY=s3:https://S3-ENDPOINT/BUCKET/PREFIX RESTIC_PASSWORD_FILE=/path/password AWS_ACCESS_KEY_ID_FILE=/path/key-id AWS_SECRET_ACCESS_KEY_FILE=/path/key toolbox/operations/offsite_backup.sh init|create|upload|check|restore|retention [arguments]" >&2
   exit 2
 }
 
 action="${1:-}"
-case "$action" in init|create|upload|check|restore) ;; *) usage ;; esac
+case "$action" in init|create|upload|check|restore|retention) ;; *) usage ;; esac
 
 for variable in RESTIC_REPOSITORY RESTIC_PASSWORD_FILE AWS_ACCESS_KEY_ID_FILE AWS_SECRET_ACCESS_KEY_FILE; do
   if [[ -z "${!variable:-}" ]]; then
@@ -51,8 +51,8 @@ case "$action" in
     BACKUP_INCLUDE_DOCUMENTS="${BACKUP_INCLUDE_DOCUMENTS:-1}" BACKUP_PATH_OUTPUT="$path_file" "$(dirname "$0")/backup.sh" "${BACKUP_ROOT:-backups}"
     backup_dir="$(cat "$path_file")"
     (cd "$backup_dir" && sha256sum --check SHA256SUMS)
-    "${restic_cmd[@]}" backup --tag rubrica-production "$backup_dir"
-    "${restic_cmd[@]}" forget --tag rubrica-production \
+    "${restic_cmd[@]}" backup --tag "rubrica-${RUBRICA_BACKUP_ENVIRONMENT:-production}" "$backup_dir"
+    "${restic_cmd[@]}" forget --tag "rubrica-${RUBRICA_BACKUP_ENVIRONMENT:-production}" \
       --keep-within "${RESTIC_KEEP_WITHIN:-7d}" --prune
     if [[ "${DELETE_LOCAL_AFTER_UPLOAD:-0}" == "1" ]]; then
       backup_root="$(cd "${BACKUP_ROOT:-backups}" && pwd)"
@@ -68,10 +68,14 @@ case "$action" in
     [[ -n "$backup_dir" && -d "$backup_dir" ]] || usage
     backup_dir="$(cd "$backup_dir" && pwd)"
     (cd "$backup_dir" && sha256sum --check SHA256SUMS)
-    "${restic_cmd[@]}" backup --tag rubrica-production "$backup_dir"
+    "${restic_cmd[@]}" backup --tag "rubrica-${RUBRICA_BACKUP_ENVIRONMENT:-production}" "$backup_dir"
     ;;
   check)
     "${restic_cmd[@]}" check
+    ;;
+  retention)
+    shift
+    python -m toolbox.operations.enterprise_backup_barrier "$@"
     ;;
   restore)
     target="${2:-}"

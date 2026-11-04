@@ -84,18 +84,13 @@ def get_document(document_id: UUID, context: MachineContext = Depends(require_ma
         return metadata(lookup_document(db, context, document_id))
 
 
-@router.post("/api/v1/compartments/{compartment_id}/documents/{document_id}/scan")
-@router.post("/api/v1/sandbox/compartments/{compartment_id}/documents/{document_id}/scan")
+@router.post("/api/v1/compartments/{compartment_id}/documents/{document_id}/scan", status_code=202)
+@router.post("/api/v1/sandbox/compartments/{compartment_id}/documents/{document_id}/scan", status_code=202)
 def scan(document_id: UUID, context: MachineContext = Depends(require_machine("documents:create"))):
-    from core_api.modules.enterprise.scanning import scan_document
-    from core_api.modules.enterprise.document_router import upload_slots
-    slots = upload_slots(context.sandbox)
-    if not slots.acquire(blocking=False):
-        raise HTTPException(429, "Scanning capacity temporarily exhausted", headers={"Retry-After": "5"})
-    try:
-        return scan_document(context, document_id)
-    finally:
-        slots.release()
+    from core_api.modules.enterprise.jobs import enqueue
+    with SessionLocal() as db:
+        lookup_document(db, context, document_id)
+    return enqueue(context, "scan", {"document_id": str(document_id), "token_public_id": context.token_public_id}, str(document_id))
 
 
 @router.get("/api/v1/compartments/{compartment_id}/documents/{document_id}/download")

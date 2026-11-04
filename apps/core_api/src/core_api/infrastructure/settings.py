@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
     ENTERPRISE_UPLOAD_CONCURRENCY: int = Field(default=2, ge=1, le=8)
     ENTERPRISE_REQUESTS_PER_MINUTE: int = Field(default=600, ge=1)
+    ENTERPRISE_TOKEN_REQUESTS_PER_MINUTE: int = Field(default=300, ge=1)
+    ENTERPRISE_SANDBOX_TOKEN_REQUESTS_PER_MINUTE: int = Field(default=60, ge=1)
     ENTERPRISE_SANDBOX_REQUESTS_PER_MINUTE: int = Field(default=120, ge=1)
     ENTERPRISE_SIGNATURES_PER_DAY: int = Field(default=10000, ge=1)
     ENTERPRISE_SANDBOX_SIGNATURES_PER_DAY: int = Field(default=100, ge=1)
@@ -61,7 +63,15 @@ class Settings(BaseSettings):
     OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE: str | None = None
     ENTERPRISE_TELEMETRY_RELAY_ENABLED: bool = True
     ENTERPRISE_STORAGE_WORKER_ENABLED: bool = True
+    ENTERPRISE_DEDICATED_WORKERS: bool = False
+    ENTERPRISE_QUEUE_LIMIT: int = Field(default=50, ge=1, le=1000)
+    ENTERPRISE_EXECUTION_CONCURRENCY: int = Field(default=4, ge=1, le=16)
+    ENTERPRISE_TENANT_CONCURRENCY: int = Field(default=2, ge=1, le=8)
+    ENTERPRISE_JOB_TIMEOUT_SECONDS: int = Field(default=60, ge=15, le=300)
+    ENTERPRISE_JOB_MEMORY_MIB: int = Field(default=1024, ge=256, le=4096)
     ENTERPRISE_LIFECYCLE_WORKER_ENABLED: bool = True
+    ENTERPRISE_BACKUP_POLICY: str = "external"
+    ENTERPRISE_BACKUP_REPOSITORIES: str = ""
     ENTERPRISE_RETENTION_PURGE_ENABLED: bool = False
     ENTERPRISE_WEBHOOK_ALLOWED_HOSTS: str = ""
     ENTERPRISE_S3_ALLOWED_HOSTS: str = ""

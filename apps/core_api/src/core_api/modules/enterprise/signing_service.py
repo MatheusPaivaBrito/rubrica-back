@@ -75,6 +75,27 @@ def resolve_session(db, secret, sandbox, *, lock=False):
 
 def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certificate_signer=None,
                   provider_evidence=None, expected_input_hash=None):
+    from core_api.modules.enterprise import provider_operations
+    if not command.consent or command.consent_version != "rubrica-enterprise-evidence-v1":
+        raise HTTPException(422, "Explicit supported signer consent is required")
+    operation = provider_operations.prepare(SessionLocal, resolve_session, secret, sandbox, command)
+    if operation and operation["status"] in {"remote_pending", "uncertain", "result_ready", "completed"}:
+        return provider_operations.recover(SessionLocal, configured_document_storage, operation["id"])
+    try:
+        result = _sign_evidence(secret, sandbox, command, ip_address=ip_address, user_agent=user_agent,
+            certificate_signer=certificate_signer, provider_evidence=provider_evidence,
+            expected_input_hash=expected_input_hash, operation=operation)
+        if operation:
+            provider_operations.mark_outcome(SessionLocal, operation, True)
+        return result
+    except Exception:
+        if operation:
+            provider_operations.mark_outcome(SessionLocal, operation, False)
+        raise
+
+
+def _sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certificate_signer=None,
+                   provider_evidence=None, expected_input_hash=None, operation=None):
     if not command.consent:
         raise HTTPException(422, "Explicit signer consent is required")
     if command.consent_version != "rubrica-enterprise-evidence-v1":
@@ -90,7 +111,8 @@ def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certifica
                 EnterpriseSignature.request_id == item.id, EnterpriseSignature.signer_id == session.signer_id))
             stamp = signer.get("stamp") or (command.stamp.model_dump(mode="json") if command.stamp else None)
             if existing is not None and session.used_at is not None:
-                if existing.evidence.get("stamp") != stamp:
+                drawing_hash = sha256(command.drawn_signature_png_data_url.encode()).hexdigest() if command.drawn_signature_png_data_url else None
+                if existing.evidence.get("stamp") != stamp or existing.evidence.get("drawing_sha256") != drawing_hash:
                     raise HTTPException(409, "Consumed session cannot change signature position")
                 return signature_read(existing, sandbox)
             if session.used_at is not None or signer["status"] != "pending" or item.status != "open":
@@ -117,8 +139,8 @@ def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certifica
                 original = stream.read()
             if stamp is None:
                 raise HTTPException(422, "A signature position is required")
-            if stamp.get("display_variant") == "drawn":
-                raise HTTPException(422, "Drawn enterprise signatures are not available yet")
+            if stamp.get("display_variant") == "drawn" and not command.drawn_signature_png_data_url:
+                raise HTTPException(422, "A PNG drawing from the consenting signer is required")
             if stamp["page"] > len(PdfReader(BytesIO(original)).pages):
                 raise HTTPException(422, "Signature page is outside the document")
             now = datetime.now(UTC)
@@ -133,9 +155,13 @@ def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certifica
                 "stamp": stamp, "sandbox": sandbox, "simulated": sandbox,
                 "ip_address": ip_address, "user_agent": user_agent[:1000],
                 "token_public_id": item.token_public_id}
+            if command.drawn_signature_png_data_url:
+                evidence["drawing_sha256"] = sha256(command.drawn_signature_png_data_url.encode()).hexdigest()
             canonical = json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
             evidence_hash = sha256(canonical).hexdigest()
             stamp_record = evidence | {"evidence_sha256": evidence_hash}
+            if command.drawn_signature_png_data_url:
+                stamp_record["drawn_signature_png_data_url"] = command.drawn_signature_png_data_url
             if sandbox:
                 stamp_record["signer_name"] = f"SIMULAÇÃO — {signer['name']}"
             artifact = generate_signed_pdf(original, stamps=[stamp_record],
@@ -145,6 +171,8 @@ def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certifica
                 from core_api.modules.enterprise.provider_vault import load_configuration
                 config = load_configuration(db, context.tenant_id, mode, False,
                                             expected_version=signer["provider_version"])
+                from core_api.modules.enterprise import provider_operations
+                provider_operations.remote_started(SessionLocal, operation, context, artifact, evidence, provider_evidence)
                 if mode == "serpro_timestamp":
                     from core_api.modules.signature_request.serpro_timestamp_service import apply_serpro_timestamp
                     artifact, provider_evidence = apply_serpro_timestamp(artifact,
@@ -162,11 +190,14 @@ def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certifica
                 if current_provider is not None:
                     current_provider.status = "verified_by_signature"
             artifact_hash = sha256(artifact).hexdigest()
-            signature_id = uuid4()
+            signature_id = operation["signature_id"] if operation else uuid4()
+            if operation:
+                artifact_key, artifact_size = provider_operations.save_result(SessionLocal, operation, storage, artifact, provider_evidence)
             reserve_storage(db, context, len(artifact))
             mode = "sandbox" if sandbox else "live"
-            artifact_key, artifact_size = storage.put(BytesIO(artifact), filename="signed.pdf", sha256=artifact_hash,
-                scope=f"tenants/{context.tenant_id}/enterprise/{mode}/{context.integration_id}/{context.compartment_id}/{signature_id}")
+            if not operation:
+                artifact_key, artifact_size = storage.put(BytesIO(artifact), filename="signed.pdf", sha256=artifact_hash,
+                    scope=f"tenants/{context.tenant_id}/enterprise/{mode}/{context.integration_id}/{context.compartment_id}/{signature_id}")
             signature = EnterpriseSignature(id=signature_id, request_id=item.id, signer_id=session.signer_id,
                 signed_at=now, evidence=evidence, evidence_sha256=evidence_hash,
                 evidence_hmac=hmac_new(settings.EVIDENCE_SECRET.encode(), canonical, "sha256").hexdigest(),
@@ -182,7 +213,7 @@ def sign_evidence(secret, sandbox, command, *, ip_address, user_agent, certifica
             db.flush()
             return signature_read(signature, sandbox)
     except Exception:
-        if artifact_key:
+        if artifact_key and not operation:
             storage.discard_uncommitted(artifact_key)
         raise
 

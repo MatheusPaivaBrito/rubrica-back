@@ -81,24 +81,39 @@ async def storage_loop():
 
 @asynccontextmanager
 async def lifespan(_app):
-    task = asyncio.create_task(relay_loop()) if settings.ENTERPRISE_TELEMETRY_RELAY_ENABLED else None
-    storage_task = asyncio.create_task(storage_loop()) if settings.ENTERPRISE_STORAGE_WORKER_ENABLED else None
-    lifecycle_task = asyncio.create_task(lifecycle_loop()) if settings.ENTERPRISE_LIFECYCLE_WORKER_ENABLED else None
+    embedded = not settings.ENTERPRISE_DEDICATED_WORKERS
+    task = asyncio.create_task(relay_loop()) if embedded and settings.ENTERPRISE_TELEMETRY_RELAY_ENABLED else None
+    storage_task = asyncio.create_task(storage_loop()) if embedded and settings.ENTERPRISE_STORAGE_WORKER_ENABLED else None
+    lifecycle_task = asyncio.create_task(lifecycle_loop()) if embedded and settings.ENTERPRISE_LIFECYCLE_WORKER_ENABLED else None
+    processing = [asyncio.create_task(processing_loop(sandbox)) for sandbox in (False, True)] if embedded else []
     try:
         yield
     finally:
-        for pending in (task, storage_task, lifecycle_task):
+        for pending in (task, storage_task, lifecycle_task, *processing):
             if pending is not None:
                 pending.cancel()
                 with suppress(asyncio.CancelledError):
                     await pending
 
 
+async def processing_loop(sandbox):
+    from core_api.modules.enterprise.worker import run_once
+    while True:
+        try:
+            await asyncio.to_thread(run_once, sandbox=sandbox)
+        except Exception:
+            logger.warning("Enterprise processing deferred")
+        await asyncio.sleep(1)
+
+
 async def lifecycle_loop():
     from core_api.modules.enterprise.retention import synchronize_once, purge_once, email_notice_once
     from core_api.modules.enterprise.webhooks import dispatch_once
+    from core_api.modules.enterprise.closure import finalize_once
+    from core_api.modules.enterprise.worker import recover_once
+    from core_api.modules.enterprise.housekeeping import cleanup_once
     while True:
-        for operation in (synchronize_once, purge_once, email_notice_once, dispatch_once):
+        for operation in (synchronize_once, purge_once, email_notice_once, dispatch_once, recover_once, cleanup_once, finalize_once):
             try:
                 await asyncio.to_thread(operation)
             except Exception:

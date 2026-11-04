@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 
-ALLOWED = {"postgres", "redis", "kafka", "loki", "docs", "stripe-cli", "quick-tunnel"}
+ALLOWED = {"postgres", "redis", "clamav", "kafka", "loki", "docs", "stripe-cli", "quick-tunnel"}
 DEFAULT = ("postgres", "redis")
 PROFILES = {"stripe-cli": "stripe", "quick-tunnel": "quick-tunnel"}
 

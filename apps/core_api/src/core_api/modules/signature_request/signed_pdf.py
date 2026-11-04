@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import NullObject
 from PIL import Image
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen.canvas import Canvas
@@ -35,6 +36,14 @@ def generate_signed_pdf(
     source = BytesIO(original)
     reader = PdfReader(source)
     writer = PdfWriter(source, incremental=True)
+    # pypdf does not clone the previous xref stream into its object list. Reusing
+    # that ID for a new font makes readers resolve the old xref stream as a font.
+    # Reserve the original trailer's address space without rewriting old bytes.
+    original_size = int(reader.trailer.get("/Size", 0))
+    if original_size > 1_000_000:
+        raise ValueError("PDF object address space exceeds the supported limit")
+    while len(writer._objects) < original_size - 1:
+        writer._add_object(NullObject())
     for page_number, output_page in enumerate(writer.pages, start=1):
         page_stamps: list[dict[str, Any]] = []
         for item in stamps:

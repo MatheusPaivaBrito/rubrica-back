@@ -91,6 +91,10 @@ def consume_attempt(state):
 
 def finish(state, code, error):
     tenant_id, attempt = consume_attempt(state)
+    return complete_authorization(tenant_id, attempt, code, error)
+
+
+def complete_authorization(tenant_id, attempt, code, error=None):
     if error or not code:
         return {"status": "authorization_denied"}
     # Revalidate session, tenant contract and provider version after consuming state.

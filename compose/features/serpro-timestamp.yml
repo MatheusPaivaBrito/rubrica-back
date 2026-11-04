@@ -9,6 +9,39 @@ services:
     secrets:
       - serpro_timestamp_consumer_secret
       - serpro_timestamp_trust_roots
+  enterprise-worker:
+    environment:
+      SERPRO_TIMESTAMP_PROVIDER: serpro
+      SERPRO_TIMESTAMP_CONSUMER_KEY: ${SERPRO_TIMESTAMP_CONSUMER_KEY:-}
+      SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE: /run/secrets/serpro_timestamp_consumer_secret
+      SERPRO_TIMESTAMP_TRUST_ROOTS_FILE: /run/secrets/serpro_timestamp_trust_roots
+      SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS: ${SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS:-}
+    secrets:
+      - serpro_timestamp_consumer_secret
+      - serpro_timestamp_trust_roots
+
+  enterprise-sandbox-worker:
+    environment:
+      SERPRO_TIMESTAMP_PROVIDER: serpro
+      SERPRO_TIMESTAMP_CONSUMER_KEY: ${SERPRO_TIMESTAMP_CONSUMER_KEY:-}
+      SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE: /run/secrets/serpro_timestamp_consumer_secret
+      SERPRO_TIMESTAMP_TRUST_ROOTS_FILE: /run/secrets/serpro_timestamp_trust_roots
+      SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS: ${SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS:-}
+    secrets:
+      - serpro_timestamp_consumer_secret
+      - serpro_timestamp_trust_roots
+
+  enterprise-maintenance:
+    environment:
+      SERPRO_TIMESTAMP_PROVIDER: serpro
+      SERPRO_TIMESTAMP_CONSUMER_KEY: ${SERPRO_TIMESTAMP_CONSUMER_KEY:-}
+      SERPRO_TIMESTAMP_CONSUMER_SECRET_FILE: /run/secrets/serpro_timestamp_consumer_secret
+      SERPRO_TIMESTAMP_TRUST_ROOTS_FILE: /run/secrets/serpro_timestamp_trust_roots
+      SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS: ${SERPRO_TIMESTAMP_ACCEPTED_POLICY_OIDS:-}
+    secrets:
+      - serpro_timestamp_consumer_secret
+      - serpro_timestamp_trust_roots
+
 
 secrets:
   serpro_timestamp_consumer_secret:

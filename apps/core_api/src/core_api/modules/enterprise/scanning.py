@@ -2,6 +2,7 @@
 
 import socket
 import struct
+from io import BytesIO
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -52,7 +53,14 @@ def scan_document(context, document_id):
             raise HTTPException(409, "Document cannot be scanned")
         with verified_content(configured_document_storage(for_mode(settings, context.sandbox, item.storage_namespace)), item.storage_key,
                               item.sha256, item.size_bytes) as stream:
-            item.status = scan_stream(stream)
+            from core_api.modules.document.pdf_validation import validate_pdf_upload
+            from core_api.modules.signature_request.workflow_service import WorkflowError
+            content = stream.read(50_000_001)
+            try:
+                validate_pdf_upload(content, filename=item.filename, content_type="application/pdf")
+                item.status = scan_stream(BytesIO(content))
+            except WorkflowError:
+                item.status = "rejected"
         tenant_service._audit(db, context.tenant_id, f"integration:{context.integration_id}",
             "enterprise.document.scanned", {"document_id": str(item.id),
                 "token_public_id": context.token_public_id, "status": item.status})

@@ -37,8 +37,10 @@ def workflow(monkeypatch, tmp_path):
     tenant_id, integration_id, compartment_id = uuid4(), uuid4(), uuid4()
     with sessions.begin() as db:
         db.add(TenantEntity(id=tenant_id, name="Business", slug="business"))
+        db.flush()
         db.add(BillingAccountEntity(tenant_id=tenant_id, status="active", current_product_code="rubrica_enterprise"))
         db.add(EnterpriseIntegration(id=integration_id, tenant_id=tenant_id, name="ERP", environment="development", sandbox=True, created_by="admin"))
+        db.flush()
         db.add(EnterpriseCompartment(id=compartment_id, integration_id=integration_id, name="Customer"))
     context = MachineContext(tenant_id, integration_id, compartment_id, "public-token", True)
     output = BytesIO()

@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from auth_api.infrastructure.database.connection import SessionLocal
 from auth_api.infrastructure.settings import settings
 from auth_api.modules.machine_credentials.entity import MachineCredentialEntity
+from auth_api.modules.machine_credentials.entity import MachineRetirementEntity, MachineCredentialAuditEntity
 from auth_api.modules.machine_credentials.service import (
     CredentialError, authenticate_token, revoke_token, rotate_token,
 )
@@ -103,3 +104,40 @@ def introspect(payload: AuthenticationRequest, response: Response):
             )
     except CredentialError as exc:
         raise HTTPException(401, "Invalid machine credential") from exc
+
+
+class RetirementRequest(BaseModel):
+    tenant_id: UUID
+    environment: Literal["development", "staging", "production"]
+    operation_id: UUID
+
+
+def retire_credentials(db, payload):
+    existing = db.scalar(select(MachineRetirementEntity).where(MachineRetirementEntity.operation_id == payload.operation_id))
+    if existing:
+        if existing.tenant_id != payload.tenant_id or existing.environment != payload.environment:
+            raise HTTPException(409, "Retirement operation binding mismatch")
+        return {"operation_id": payload.operation_id, "retired": True}
+    db.add(MachineRetirementEntity(tenant_id=payload.tenant_id, environment=payload.environment, operation_id=payload.operation_id))
+    db.flush()
+    rows = list(db.scalars(select(MachineCredentialEntity).where(MachineCredentialEntity.tenant_id == payload.tenant_id,
+        MachineCredentialEntity.environment == payload.environment).order_by(MachineCredentialEntity.integration_id).with_for_update()))
+    for credential in rows:
+        db.add(MachineCredentialAuditEntity(tenant_id=payload.tenant_id, integration_id=credential.integration_id,
+            public_id=None, actor="contract-retention", action="retired"))
+        credential.digest = credential.public_id = credential.expires_at = credential.rotated_by = None
+        credential.scopes = []
+    for audit in db.scalars(select(MachineCredentialAuditEntity).where(MachineCredentialAuditEntity.tenant_id == payload.tenant_id,
+        MachineCredentialAuditEntity.integration_id.in_([row.integration_id for row in rows]))):
+        audit.actor, audit.public_id = "[erased]", None
+    return {"operation_id": payload.operation_id, "retired": True}
+
+
+@router.post("/retire-tenant")
+def retire_tenant(payload: RetirementRequest):
+    validate_environment(payload.environment)
+    try:
+        with SessionLocal.begin() as db:
+            return retire_credentials(db, payload)
+    except IntegrityError as exc:
+        raise HTTPException(409, "Concurrent retirement; retry the same operation") from exc

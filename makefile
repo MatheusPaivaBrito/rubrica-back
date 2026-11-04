@@ -222,7 +222,7 @@ staging-clone-core-from-production:
 		production_core_db="$${production_core_db:-rubrica_core}"; \
 		staging_core_db="$${staging_core_db:-rubrica_core}"; \
 		trap 'rm -f "$$dump_file"' EXIT; \
-		$(STAGING_COMPOSE) stop core-api auth-api eventing-api notification-api observability-api gateway web docs cloudflared >/dev/null; \
+		$(STAGING_COMPOSE) stop enterprise-worker enterprise-sandbox-worker enterprise-maintenance core-api auth-api eventing-api notification-api observability-api gateway web docs cloudflared >/dev/null; \
 		$(PRODUCTION_COMPOSE) exec -T postgres sh -c 'pg_dump -U "$$POSTGRES_USER" -Fc "$$1"' _ "$$production_core_db" >"$$dump_file"; \
 		test -s "$$dump_file"; \
 		$(STAGING_COMPOSE) exec -T postgres sh -c 'dropdb --force -U "$$POSTGRES_USER" --if-exists "$$1" && createdb -U "$$POSTGRES_USER" "$$1"' _ "$$staging_core_db"; \

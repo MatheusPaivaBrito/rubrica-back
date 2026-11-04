@@ -11,6 +11,23 @@ from core_api.modules.signature_request.workflow_schema import StampPosition
 from core_api.modules.signature_request.signed_pdf import _alpha3_country_code, _draw_country_flag, _stamp_locale_for_country, generate_signed_pdf
 
 
+def test_successive_incremental_stamps_preserve_fonts_and_original_bytes():
+    source = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.write(source)
+    content = source.getvalue()
+    names = ["First signer", "Second signer", "Third signer"]
+    for name in names:
+        original = content
+        content = generate_signed_pdf(original, stamps=[{"signer_name": name, "signed_at": "2026-11-04T12:00:00Z",
+            "evidence_sha256": "a" * 64, "stamp": {"page": 1, "x": .5, "y": .5, "locale": "en"}}], metadata={})
+        assert content.startswith(original)
+        text = PdfReader(BytesIO(content)).pages[0].extract_text()
+        for previous in names[:names.index(name)+1]:
+            assert previous in text
+
+
 def test_japanese_stamp_and_locale_are_embedded_in_signed_pdf() -> None:
     source = BytesIO()
     writer = PdfWriter()

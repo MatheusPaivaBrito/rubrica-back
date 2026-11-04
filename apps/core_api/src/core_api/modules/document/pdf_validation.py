@@ -27,7 +27,7 @@ _ACTIVE_PDF_KEYS = {
 }
 
 
-def validate_pdf_upload(content: bytes, *, filename: str, content_type: str) -> None:
+def validate_pdf_upload(content: bytes, *, filename: str, content_type: str, deep: bool = True) -> None:
     """Reject disguised, malformed, encrypted, or active PDFs before storage."""
     if not content:
         raise WorkflowError("Document content cannot be empty")
@@ -39,6 +39,8 @@ def validate_pdf_upload(content: bytes, *, filename: str, content_type: str) -> 
         raise WorkflowError("Invalid PDF filename")
     if not content.startswith(b"%PDF-") or b"%%EOF" not in content[-2048:]:
         raise WorkflowError("File content is not a PDF", 415)
+    if not deep:
+        return  # Enterprise quarantine defers parsing to a bounded worker.
 
     try:
         reader = PdfReader(BytesIO(content), strict=False)

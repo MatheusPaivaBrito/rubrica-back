@@ -1,8 +1,7 @@
-from threading import BoundedSemaphore
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 
 from core_api.infrastructure.database.connection import SessionLocal
@@ -11,7 +10,7 @@ from core_api.modules.enterprise.document_access import lookup_document, require
 from core_api.modules.enterprise.entities import EnterpriseSignature
 from core_api.modules.enterprise.machine_context import MachineContext, require_machine
 from core_api.modules.enterprise.request_router import lookup_request
-from core_api.modules.enterprise.signing_service import resolve_session, sign_evidence
+from core_api.modules.enterprise.signing_service import resolve_session
 from core_api.modules.enterprise.storage_access import open_copy
 from core_api.modules.enterprise.streaming import measured_chunks
 from core_api.modules.enterprise.usage import reserve_api_request
@@ -20,8 +19,6 @@ from fastapi.responses import StreamingResponse
 from core_api.infrastructure.content_disposition import pdf_content_disposition
 
 router = APIRouter(tags=["enterprise signer sessions"])
-_SIGNING_SLOTS = BoundedSemaphore(2)
-_SANDBOX_SIGNING_SLOTS = BoundedSemaphore(1)
 
 
 def session_secret(authorization: str = Header(default="")):
@@ -45,6 +42,13 @@ class ConsentCommand(BaseModel):
     consent_version: str = Field(max_length=80)
     document_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     stamp: StampPosition | None = None
+    drawn_signature_png_data_url: str | None = Field(default=None, max_length=400_000)
+
+    @field_validator("drawn_signature_png_data_url")
+    @classmethod
+    def normalize_drawing(cls, value):
+        from core_api.modules.signature_request.workflow_schema import _normalized_png_data_url
+        return _normalized_png_data_url(value)
 
 
 def pdf_response(stream, filename, digest, size, context):
@@ -79,22 +83,20 @@ def session_document(request: Request, secret: str = Depends(session_secret)):
         return pdf_response(stream, document.filename, item.document_sha256, document.size_bytes, context)
 
 
-@router.post("/api/v1/signing-session/consent")
-@router.post("/api/v1/sandbox/signing-session/consent")
+@router.post("/api/v1/signing-session/consent", status_code=202)
+@router.post("/api/v1/sandbox/signing-session/consent", status_code=202)
 def consent(request: Request, payload: ConsentCommand, response: Response, secret: str = Depends(session_secret)):
     response.headers["Cache-Control"] = "no-store"
     with SessionLocal() as db:
         context, _, _, _ = resolve_session(db, secret, is_sandbox(request))
     count_session_request(request, context)
-    slots = _SANDBOX_SIGNING_SLOTS if is_sandbox(request) else _SIGNING_SLOTS
-    if not slots.acquire(blocking=False):
-        raise HTTPException(429, "Signing capacity temporarily exhausted", headers={"Retry-After": "5"})
-    try:
-        return sign_evidence(secret, is_sandbox(request), payload,
-            ip_address=request.client.host if request.client else "unknown",
-            user_agent=request.headers.get("user-agent", "unknown"))
-    finally:
-        slots.release()
+    if not payload.consent or payload.consent_version != "rubrica-enterprise-evidence-v1":
+        raise HTTPException(422, "Explicit supported signer consent is required")
+    from core_api.modules.enterprise.jobs import enqueue
+    from core_api.modules.enterprise.provider_operations import command_hash
+    return enqueue(context, "sign", {"session_secret": secret, "command": payload.model_dump(mode="json"),
+        "ip_address": request.client.host if request.client else "unknown", "user_agent": request.headers.get("user-agent", "unknown")[:1000]},
+        f"{secret}:{command_hash(payload)}")
 
 
 @router.post("/api/v1/signing-session/serproid/start")
@@ -112,15 +114,48 @@ def serproid_start(request: Request, payload: ConsentCommand, response: Response
 def serproid_callback(response: Response, state: str = Query(min_length=43, max_length=43),
                      code: str | None = Query(default=None, max_length=4096),
                      error: str | None = Query(default=None, max_length=256)):
-    from core_api.modules.enterprise.serproid_authorization import finish
+    from core_api.modules.enterprise.serproid_authorization import consume_attempt
+    from core_api.modules.enterprise.jobs import enqueue
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
-    if not _SIGNING_SLOTS.acquire(blocking=False):
-        raise HTTPException(429, "Signing capacity temporarily exhausted", headers={"Retry-After": "5"})
-    try:
-        return finish(state, code, error)
-    finally:
-        _SIGNING_SLOTS.release()
+    tenant_id, attempt = consume_attempt(state)
+    if error or not code:
+        return {"status": "authorization_denied"}
+    with SessionLocal() as db:
+        context, _, _, _ = resolve_session(db, attempt["session_secret"], False)
+    if context.tenant_id != tenant_id:
+        raise HTTPException(403, "Provider authorization context mismatch")
+    response.status_code = 202
+    return enqueue(context, "serpro_callback", {"attempt": attempt, "code": code, "tenant_id": str(tenant_id)}, state)
+
+
+@router.get("/api/v1/signing-session/jobs/{job_id}")
+@router.get("/api/v1/sandbox/signing-session/jobs/{job_id}")
+def signer_job(job_id: UUID, request: Request, secret: str = Depends(session_secret)):
+    from core_api.modules.enterprise.jobs import scoped_job, job_read
+    with SessionLocal() as db:
+        context, _, _, session = resolve_session(db, secret, is_sandbox(request))
+        item = scoped_job(db, context, job_id)
+        if item.signing_session_id != session.id:
+            raise HTTPException(404, "Processing job not found")
+        return job_read(item)
+
+
+@router.post("/api/v1/signing-session/jobs/{job_id}/retry", status_code=202)
+@router.post("/api/v1/sandbox/signing-session/jobs/{job_id}/retry", status_code=202)
+def retry_signer_job(job_id: UUID, request: Request, secret: str = Depends(session_secret)):
+    from core_api.modules.enterprise.jobs import scoped_job, job_read
+    from core_api.modules.enterprise.lifecycle import lock_operational
+    with SessionLocal.begin() as db:
+        context, _, _, session = resolve_session(db, secret, is_sandbox(request), lock=True)
+        lock_operational(db, context.tenant_id)
+        item = scoped_job(db, context, job_id)
+        if item.signing_session_id != session.id or item.kind != "sign":
+            raise HTTPException(404, "Retriable signer job not found")
+        if item.status not in {"failed", "uncertain"} or not item.encrypted_payload:
+            raise HTTPException(409, "Only retained failed/uncertain signer jobs can be retried")
+        item.status, item.error_code = "queued", None
+        return job_read(item)
 
 
 @router.get("/api/v1/compartments/{compartment_id}/signature-requests/{request_id}/artifact")

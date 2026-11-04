@@ -16,6 +16,60 @@ services:
       - r2_documents_secret_access_key
       - r2_documents_bucket
       - document_storage_encryption_key
+  enterprise-worker:
+    environment:
+      DOCUMENT_STORAGE_PROVIDER: r2
+      R2_DOCUMENTS_ENDPOINT_FILE: /run/secrets/r2_documents_endpoint
+      R2_DOCUMENTS_ACCESS_KEY_ID_FILE: /run/secrets/r2_documents_access_key_id
+      R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_documents_secret_access_key
+      R2_DOCUMENTS_BUCKET_FILE: /run/secrets/r2_documents_bucket
+      R2_DOCUMENTS_PREFIX: ${R2_DOCUMENTS_PREFIX-}
+      DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/document_storage_encryption_key
+      DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: ${DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT:-true}
+      DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES: ${DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES:-4194304}
+    secrets:
+      - r2_documents_endpoint
+      - r2_documents_access_key_id
+      - r2_documents_secret_access_key
+      - r2_documents_bucket
+      - document_storage_encryption_key
+
+  enterprise-sandbox-worker:
+    environment:
+      DOCUMENT_STORAGE_PROVIDER: r2
+      R2_DOCUMENTS_ENDPOINT_FILE: /run/secrets/r2_documents_endpoint
+      R2_DOCUMENTS_ACCESS_KEY_ID_FILE: /run/secrets/r2_documents_access_key_id
+      R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_documents_secret_access_key
+      R2_DOCUMENTS_BUCKET_FILE: /run/secrets/r2_documents_bucket
+      R2_DOCUMENTS_PREFIX: ${R2_DOCUMENTS_PREFIX-}
+      DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/document_storage_encryption_key
+      DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: ${DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT:-true}
+      DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES: ${DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES:-4194304}
+    secrets:
+      - r2_documents_endpoint
+      - r2_documents_access_key_id
+      - r2_documents_secret_access_key
+      - r2_documents_bucket
+      - document_storage_encryption_key
+
+  enterprise-maintenance:
+    environment:
+      DOCUMENT_STORAGE_PROVIDER: r2
+      R2_DOCUMENTS_ENDPOINT_FILE: /run/secrets/r2_documents_endpoint
+      R2_DOCUMENTS_ACCESS_KEY_ID_FILE: /run/secrets/r2_documents_access_key_id
+      R2_DOCUMENTS_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_documents_secret_access_key
+      R2_DOCUMENTS_BUCKET_FILE: /run/secrets/r2_documents_bucket
+      R2_DOCUMENTS_PREFIX: ${R2_DOCUMENTS_PREFIX-}
+      DOCUMENT_STORAGE_ENCRYPTION_KEY_FILE: /run/secrets/document_storage_encryption_key
+      DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT: ${DOCUMENT_STORAGE_ALLOW_LEGACY_PLAINTEXT:-true}
+      DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES: ${DOCUMENT_STORAGE_ENCRYPTION_CHUNK_BYTES:-4194304}
+    secrets:
+      - r2_documents_endpoint
+      - r2_documents_access_key_id
+      - r2_documents_secret_access_key
+      - r2_documents_bucket
+      - document_storage_encryption_key
+
 
 secrets:
   r2_documents_endpoint:

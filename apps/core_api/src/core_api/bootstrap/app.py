@@ -14,6 +14,9 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
         version="0.1.0",
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
         lifespan=lifespan,
     )
     apply_request_correlation(app, service_name=settings.SERVICE_NAME)

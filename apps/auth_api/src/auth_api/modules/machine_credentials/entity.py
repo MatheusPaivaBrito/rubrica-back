@@ -35,3 +35,10 @@ class MachineCredentialAuditEntity(BaseEntity):
     public_id: Mapped[str | None] = mapped_column(String(32))
     actor: Mapped[str] = mapped_column(String(255), nullable=False)
     action: Mapped[str] = mapped_column(String(32), nullable=False)
+
+
+class MachineRetirementEntity(BaseEntity):
+    __tablename__ = "machine_retirements"
+    tenant_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    environment: Mapped[str] = mapped_column(String(24), nullable=False)
+    operation_id: Mapped[UUID] = mapped_column(Uuid, nullable=False, unique=True)

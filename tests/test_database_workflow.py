@@ -43,6 +43,10 @@ def isolated_core_database() -> None:
 
 @pytest.fixture
 def trusted_timestamp(monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    from core_api.modules.signature_request.identity_client import IdentitySummary
+    # Isolate the Core database test from the separate Auth HTTP service.
+    monkeypatch.setattr("core_api.modules.signature_request.database_workflow_service.identity_summary",
+        lambda _: IdentitySummary(account_status="active", identifier_type="BR_CPF", issuing_country="BR", masked_display="***.***.***-**"))
     calls = {"count": 0, "failures_remaining": 0}
 
     def apply_timestamp(pdf: bytes) -> tuple[bytes, dict[str, object]]:
@@ -142,7 +146,8 @@ def test_database_workflow_round_trip(
             db.add(
                 BillingAccountEntity(
                     tenant_id=tenant.id,
-                    status="not_configured",
+                    status="active",
+                    current_product_code="rubrica_essential",
                 )
             )
         source = BytesIO()
@@ -173,12 +178,14 @@ def test_database_workflow_round_trip(
             )
         assert cross_tenant_error.value.status_code == 403
         request = service.create_request(SignatureRequestCreate(document_id=document.id, expires_at=DateTimeService.utc_now() + timedelta(hours=1), created_by="operator"))
-        service.add_signer(request.id, SignerCreate(name="Database User", email="database@example.com"), "operator")
-        service.add_signer(request.id, SignerCreate(name="Second User", email="second@example.com"), "operator")
+        from core_api.modules.signature_request.workflow_schema import SignatureMode
+        for name, email in (("Database User", "database@example.com"), ("Second User", "second@example.com")):
+            signer = service.add_signer(request.id, SignerCreate(name=name, email=email), "operator")
+            service.update_signer_signature_mode(request.id, signer.id, "operator", SignatureMode.SERPRO_TIMESTAMP)
         service.open_request(request.id, "operator")
         link = service.create_signing_link(request.id, "operator")
         token = link.signing_url.rsplit("/", maxsplit=1)[-1]
-        stamp = StampPosition(page=1, x=0.65, y=0.8)
+        stamp = StampPosition(page=1, x=0.65, y=0.8, template="BR", country_code="BR", show_flag=True, locale="pt-BR")
         trusted_timestamp["failures_remaining"] = 1
         with pytest.raises(RuntimeError, match="simulated timestamp outage"):
             service.sign(token, "database@example.com", True, stamp)
@@ -296,7 +303,7 @@ def test_database_workflow_round_trip(
                 )
             )
             assert billing_account is not None
-            assert billing_account.signatures_used == 2
+            assert billing_account.signatures_used == 0  # Paid acts do not consume the lifetime free allowance.
             assert billing_account.free_signatures_limit == 5
     finally:
         pass

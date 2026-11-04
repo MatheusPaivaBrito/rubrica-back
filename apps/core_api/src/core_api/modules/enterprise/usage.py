@@ -43,6 +43,10 @@ def reserve_api_request(db, context, *, now=None):
     if row.count >= limit:
         raise HTTPException(429, "Tenant API rate limit reached", headers={"Retry-After": str(60 - int(now.timestamp()) % 60)})
     row.count += 1
+    from core_api.modules.enterprise.administration import reserve_budget
+    token_limit = (settings.ENTERPRISE_SANDBOX_TOKEN_REQUESTS_PER_MINUTE if context.sandbox
+                   else settings.ENTERPRISE_TOKEN_REQUESTS_PER_MINUTE)
+    reserve_budget(db, f"machine:{context.tenant_id}:{context.sandbox}:{context.token_public_id}", token_limit, now)
 
 
 def reserve_storage(db, context, size, *, document=False):

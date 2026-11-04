@@ -192,6 +192,13 @@ class _ChunkDecryptReader(io.RawIOBase):
 
 
 class DocumentStorage(ABC):
+    def put_existing(self, storage_key, stream, *, sha256=None):
+        raise NotImplementedError("Deterministic writes are not supported")
+
+    def purge_enterprise_namespace(self, tenant_id, *, limit=100) -> bool:
+        """Only trusted closure workers call this after the tenant is frozen."""
+        raise NotImplementedError("Namespace erasure is not supported")
+
     def remove_copy(self, storage_key: str) -> None:
         """Remove the current object and confirm absence; never best effort."""
         raise NotImplementedError("Confirmed removal is not supported")
@@ -212,6 +219,48 @@ class DocumentStorage(ABC):
 
 
 class LocalDocumentStorage(DocumentStorage):
+    def put_existing(self, storage_key, stream, *, sha256=None):
+        from hashlib import sha256 as checksum
+        validate_storage_key(storage_key)
+        path = self.root / storage_key
+        if path.exists():
+            with path.open("rb") as existing:
+                digest = checksum()
+                size = 0
+                while chunk := existing.read(256 * 1024):
+                    digest.update(chunk)
+                    size += len(chunk)
+            if sha256 is not None and digest.hexdigest() == sha256:
+                return size
+            raise FileExistsError(storage_key)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with path.open("xb") as output:
+            size = 0
+            while chunk := stream.read(256 * 1024):
+                size += output.write(chunk)
+        path.chmod(0o400)
+        return size
+
+    def purge_enterprise_namespace(self, tenant_id, *, limit=100) -> bool:
+        from uuid import UUID
+        target = self.root / "tenants" / str(UUID(str(tenant_id))) / "enterprise"
+        if target.is_symlink() or target.resolve() != target.absolute():
+            raise PermissionError("A managed namespace cannot traverse symlinks")
+        if not target.exists():
+            return True
+        target.resolve().relative_to(self.root)
+        count = 0
+        for path in target.rglob("*"):
+            if path.is_symlink():
+                raise PermissionError("Symlinks are not managed document objects")
+            if path.is_file():
+                if count >= limit:
+                    return False
+                path.resolve().relative_to(self.root)
+                self.remove_copy(path.relative_to(self.root).as_posix())
+                count += 1
+        return True
+
     """Development backend. Keys are opaque and paths never derive from user input."""
 
     def __init__(self, root: Path) -> None:
@@ -255,6 +304,21 @@ class LocalDocumentStorage(DocumentStorage):
 
 
 class R2DocumentStorage(DocumentStorage):
+    def purge_enterprise_namespace(self, tenant_id, *, limit=100) -> bool:
+        from uuid import UUID
+        relative = f"tenants/{UUID(str(tenant_id))}/enterprise/"
+        prefix = self._object_key(relative)
+        result = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix, MaxKeys=min(limit, 1000))
+        for entry in result.get("Contents", []):
+            key = entry["Key"]
+            if not key.startswith(prefix):
+                raise ValueError("Storage inventory escaped its namespace")
+            relative_key = key[len(self.prefix) + 1:] if self.prefix else key
+            self.remove_copy(relative_key)
+        # A fresh inventory proves empty even if pagination changed while deleting.
+        remaining = self.client.list_objects_v2(Bucket=self.bucket, Prefix=prefix, MaxKeys=1)
+        return not remaining.get("Contents")
+
     def remove_copy(self, storage_key: str) -> None:
         self._validate_key(storage_key)
         self.client.delete_object(Bucket=self.bucket, Key=self._object_key(storage_key))

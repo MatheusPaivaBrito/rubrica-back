@@ -169,12 +169,15 @@ emails through notification_api with idempotency/retries, and dispatches signed
 webhooks. Optional current-copy purge commits intents before deletion and rechecks
 the contract under the account lock. Writers use account-before-resource order.
 Confirmed absence and counter/event changes commit together, with retry after a
-crash. Customer-owned destinations are never deleted. This is **not** complete
-internal erasure: metadata/evidence, orphan temporaries, bucket versions and backups
-still need retention adapters/procedures. `ENTERPRISE_RETENTION_PURGE_ENABLED`
+crash. Customer-owned destinations are never deleted. Closure (Core 0040/Auth 0014)
+additionally erases API metadata, provider/job secrets and managed orphan objects,
+and retires Auth credentials idempotently. Final completion requires receipts from
+every registered backup repository; deleting current objects alone is never proof
+of backup erasure. `ENTERPRISE_RETENTION_PURGE_ENABLED`
 defaults false until operational validation; it does not prolong authorization or
-promise data recovery after the deadline. Recontracting after purge and definitive
-Auth credential retirement remain gates before commercial availability.
+promise data recovery after the deadline. Recontracting starts an explicit empty
+contract after verified closure. See [Enterprise operations](enterprise-api-operations.md)
+for backup compaction, deployment and independent security release gates.
 
 Webhook outbox records are transactional, unique per endpoint/event and secret-free.
 Delivery is at least once/unordered, bounded to 16 KiB and operator-approved HTTPS
@@ -306,3 +309,17 @@ The Platform Infra stack is external to Rubrica. It is optional and safely degra
 3. Finish multi-tenant navigation and entitlement/downgrade flows without weakening tenant isolation or historical evidence.
 4. Complete the file lifecycle audit covering local/R2 integrity, retention, backup, migration and tested restoration.
 5. Keep plans and entitlements driven by confirmed Rubrica commercial requirements; do not import generic billing behavior from another product.
+
+### Enterprise execution and public contract (0041)
+
+Enterprise scan/consent return durable 202 jobs. Dedicated Core-owned live/sandbox
+workers execute isolated child processes, with distributed tenant/global leases and
+resource/deadline fencing. Embedded development uses the same child runner. A paid
+provider intent precedes the network and a verified artifact checkpoint precedes the
+business commit; uncertainty never permits reissuing a paid act. Independent queues,
+API-token/tenant budgets and administrator budgets bound admission.
+
+Public `/docs` contains only the API contract, fictional examples and no credentials.
+Nginx proxies it to Core; service-worker navigation excludes docs/API callbacks.
+See [Enterprise operations](enterprise-api-operations.md) for deployment, backup
+barriers, incident recovery and release gates.
