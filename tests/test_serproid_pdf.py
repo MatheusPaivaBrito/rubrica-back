@@ -62,3 +62,5 @@ def test_serpro_cms_is_embedded_and_wrong_certificate_is_rejected(tmp_path: Path
     assert len(result) > len(pdf.getvalue())
     with pytest.raises(WorkflowError, match="differs"):
         asyncio.run(_sign_pdf_with_serpro(pdf.getvalue(), Client(), "test-token", b"wrong certificate"))
+    with pytest.raises(WorkflowError, match="trust validation"):
+        asyncio.run(_sign_pdf_with_serpro(pdf.getvalue(), Client(), "test-token", der, require_trusted=True))

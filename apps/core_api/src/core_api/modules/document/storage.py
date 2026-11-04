@@ -35,6 +35,11 @@ _SCOPED_STORAGE_KEY = re.compile(
     r"^tenants/(?P<tenant>[A-Za-z0-9_-]+)/accounts/[A-Za-z0-9_-]+/"
     r"documents/(?P<document>[A-Za-z0-9_-]+)/(?:versions|signed-artifacts)/[A-Za-z0-9_-]+$"
 )
+_ENTERPRISE_STORAGE_KEY = re.compile(
+    r"^tenants/(?P<tenant>[A-Za-z0-9_-]+)/enterprise/(?P<mode>live|sandbox)/"
+    r"(?P<integration>[A-Za-z0-9_-]+)/(?P<compartment>[A-Za-z0-9_-]+)/"
+    r"(?P<document>[A-Za-z0-9_-]+)/[A-Za-z0-9_-]+$"
+)
 _STORAGE_STAGE_DURATION = Histogram(
     "rubrica_document_storage_stage_duration_seconds",
     "Time spent in each low-cardinality document storage stage",
@@ -187,6 +192,10 @@ class _ChunkDecryptReader(io.RawIOBase):
 
 
 class DocumentStorage(ABC):
+    def remove_copy(self, storage_key: str) -> None:
+        """Remove the current object and confirm absence; never best effort."""
+        raise NotImplementedError("Confirmed removal is not supported")
+
     @abstractmethod
     def put(
         self, stream: BinaryIO, *, filename: str, sha256: str | None = None,
@@ -239,8 +248,26 @@ class LocalDocumentStorage(DocumentStorage):
             destination.chmod(0o600)
             destination.unlink()
 
+    def remove_copy(self, storage_key: str) -> None:
+        self.discard_uncommitted(storage_key)
+        if (self.root / storage_key).exists():
+            raise OSError("Storage copy still exists")
+
 
 class R2DocumentStorage(DocumentStorage):
+    def remove_copy(self, storage_key: str) -> None:
+        self._validate_key(storage_key)
+        self.client.delete_object(Bucket=self.bucket, Key=self._object_key(storage_key))
+        try:
+            self.client.head_object(Bucket=self.bucket, Key=self._object_key(storage_key))
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            status = exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if code in {"NoSuchKey", "NotFound", "404"} or status == 404:
+                return
+            raise
+        raise OSError("Storage copy removal was not confirmed")
+
     """Private Cloudflare R2 storage accessed through its S3-compatible API."""
 
     def __init__(
@@ -294,6 +321,12 @@ class R2DocumentStorage(DocumentStorage):
 
     @staticmethod
     def _contexts(storage_key: str) -> tuple[str, str]:
+        enterprise = _ENTERPRISE_STORAGE_KEY.fullmatch(storage_key)
+        if enterprise:
+            return (
+                f"{enterprise.group('tenant')}/enterprise/{enterprise.group('mode')}",
+                "/".join(enterprise.group(name) for name in ("integration", "compartment", "document")),
+            )
         match = _SCOPED_STORAGE_KEY.fullmatch(storage_key)
         if match:
             return match.group("tenant"), match.group("document")

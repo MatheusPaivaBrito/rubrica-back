@@ -49,6 +49,25 @@ class Settings(BaseSettings):
         le=16 * 1024 * 1024,
     )
     DOCUMENT_MAX_SIZE_BYTES: int = Field(default=50 * 1024 * 1024, ge=1024, le=100 * 1024 * 1024)
+    ENTERPRISE_UPLOAD_CONCURRENCY: int = Field(default=2, ge=1, le=8)
+    ENTERPRISE_REQUESTS_PER_MINUTE: int = Field(default=600, ge=1)
+    ENTERPRISE_SANDBOX_REQUESTS_PER_MINUTE: int = Field(default=120, ge=1)
+    ENTERPRISE_SIGNATURES_PER_DAY: int = Field(default=10000, ge=1)
+    ENTERPRISE_SANDBOX_SIGNATURES_PER_DAY: int = Field(default=100, ge=1)
+    ENTERPRISE_SANDBOX_STORAGE_BYTES: int = Field(default=256_000_000, ge=1)
+    ENTERPRISE_SANDBOX_DOCUMENT_LIMIT: int = Field(default=20, ge=1)
+    OBSERVABILITY_API_URL: str = "http://localhost:8104"
+    OBSERVABILITY_INTERNAL_SERVICE_KEY: str = ""
+    OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE: str | None = None
+    ENTERPRISE_TELEMETRY_RELAY_ENABLED: bool = True
+    ENTERPRISE_STORAGE_WORKER_ENABLED: bool = True
+    ENTERPRISE_LIFECYCLE_WORKER_ENABLED: bool = True
+    ENTERPRISE_RETENTION_PURGE_ENABLED: bool = False
+    ENTERPRISE_WEBHOOK_ALLOWED_HOSTS: str = ""
+    ENTERPRISE_S3_ALLOWED_HOSTS: str = ""
+    ENTERPRISE_CLAMAV_HOST: str = ""
+    ENTERPRISE_SERPROID_TRUST_ROOTS_FILE: str | None = None
+    ENTERPRISE_CLAMAV_PORT: int = Field(default=3310, ge=1, le=65535)
     DOCUMENT_MAX_PAGES: int = Field(default=1000, ge=1, le=5000)
     SIGNING_APP_URL: str = "http://localhost:8080/signing"
     EVIDENCE_SECRET: str = "rubrica-development-evidence-secret-change-me"
@@ -120,6 +139,7 @@ class Settings(BaseSettings):
             {
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
                 "CORE_INTERNAL_SERVICE_KEY": "CORE_INTERNAL_SERVICE_KEY_FILE",
+                "OBSERVABILITY_INTERNAL_SERVICE_KEY": "OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE",
                 "NOTIFICATION_INTERNAL_SERVICE_KEY": "NOTIFICATION_INTERNAL_SERVICE_KEY_FILE",
                 "CONTACT_TURNSTILE_SECRET_KEY": "CONTACT_TURNSTILE_SECRET_KEY_FILE",
                 "EVIDENCE_SECRET": "EVIDENCE_SECRET_FILE",

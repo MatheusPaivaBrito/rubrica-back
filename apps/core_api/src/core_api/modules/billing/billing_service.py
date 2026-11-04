@@ -791,6 +791,9 @@ class BillingService:
             if event_type == "invoice.payment_succeeded":
                 account.status = "active"
                 account.grace_period_ends_at = None
+                if getattr(account, "current_product_code", None) == "rubrica_enterprise":
+                    from core_api.modules.enterprise.lifecycle import regularize_contract
+                    regularize_contract(database, account)
                 if (
                     getattr(account, "pending_provider_invoice_id", None)
                     and getattr(account, "pending_provider_invoice_id", None)
@@ -810,6 +813,10 @@ class BillingService:
                 )
             elif account.status != "past_due" or account.grace_period_ends_at is None:
                 account.status = "past_due"
+                if account.current_product_code == "rubrica_enterprise":
+                    from core_api.modules.enterprise.lifecycle import mark_payment_failure
+                    period_start, _ = BillingService._invoice_service_period(resource)
+                    mark_payment_failure(database, tenant_id, period_start or account.current_period_ends_at or DateTimeService.utc_now())
                 account.grace_period_ends_at = DateTimeService.utc_now() + timedelta(
                     days=settings.BILLING_GRACE_PERIOD_DAYS
                 )
@@ -845,6 +852,9 @@ class BillingService:
                 else None
             )
             if account.status == "active":
+                if account.current_product_code == "rubrica_enterprise":
+                    from core_api.modules.enterprise.lifecycle import regularize_contract
+                    regularize_contract(database, account)
                 BillingService._sync_usage_period(
                     account,
                     period_start,

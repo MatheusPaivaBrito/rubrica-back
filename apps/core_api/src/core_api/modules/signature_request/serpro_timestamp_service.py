@@ -70,14 +70,15 @@ def _validate_tsa_response(req: tsp.TimeStampReq, response: tsp.TimeStampResp) -
 
 
 class SerproTimeStamper(TimeStamper):
-    def __init__(self) -> None:
+    def __init__(self, *, credentials: tuple[str, str] | None = None) -> None:
         super().__init__(include_nonce=True)
+        self._credentials = credentials
         self.last_response: tsp.TimeStampResp | None = None
 
     async def async_request_tsa_response(self, req: tsp.TimeStampReq) -> tsp.TimeStampResp:
-        basic = base64.b64encode(
-            f"{settings.SERPRO_TIMESTAMP_CONSUMER_KEY}:{settings.SERPRO_TIMESTAMP_CONSUMER_SECRET}".encode()
-        ).decode()
+        consumer_key, consumer_secret = self._credentials if self._credentials is not None else (
+            settings.SERPRO_TIMESTAMP_CONSUMER_KEY, settings.SERPRO_TIMESTAMP_CONSUMER_SECRET)
+        basic = base64.b64encode(f"{consumer_key}:{consumer_secret}".encode()).decode()
         try:
             async with httpx.AsyncClient(timeout=30) as client:
                 token_response = await client.post(
@@ -232,10 +233,12 @@ def validate_pdf_timestamp(
     )
 
 
-def apply_serpro_timestamp(pdf: bytes) -> tuple[bytes, dict[str, object] | None]:
-    if not timestamp_enabled():
+def apply_serpro_timestamp(pdf: bytes, *, credentials: tuple[str, str] | None = None) -> tuple[bytes, dict[str, object] | None]:
+    if credentials is not None and (not all(credentials) or not settings.SERPRO_TIMESTAMP_TRUST_ROOTS_FILE or not _accepted_policy_oids()):
+        raise WorkflowError("Tenant timestamp credentials or trust configuration unavailable", 503)
+    if credentials is None and not timestamp_enabled():
         return pdf, None
-    timestamper = SerproTimeStamper()
+    timestamper = SerproTimeStamper(credentials=credentials) if credentials is not None else SerproTimeStamper()
     output = BytesIO()
     try:
         asyncio.run(

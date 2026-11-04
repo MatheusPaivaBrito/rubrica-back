@@ -156,7 +156,7 @@ def finish_authorization(state: str, code: str | None, error: str | None, subjec
     return attempt["token"]
 
 
-async def _sign_pdf_with_serpro(unsigned_pdf: bytes, client: httpx.Client, access_token: str, certificate_der: bytes) -> bytes:
+async def _sign_pdf_with_serpro(unsigned_pdf: bytes, client: httpx.Client, access_token: str, certificate_der: bytes, *, base_url: str | None = None, validation_context=None, require_trusted: bool = False) -> bytes:
     previous_signature_count = len(PdfFileReader(BytesIO(unsigned_pdf)).embedded_signatures)
     writer = IncrementalPdfFileWriter(BytesIO(unsigned_pdf))
     pdf_signer = signers.PdfSigner(
@@ -166,7 +166,7 @@ async def _sign_pdf_with_serpro(unsigned_pdf: bytes, client: httpx.Client, acces
     )
     digest, _tbs, output = await pdf_signer.async_digest_doc_for_signing(writer, bytes_reserved=131072)
     response = client.post(
-        f"{_serpro_base()}/signature",
+        f"{base_url or _serpro_base()}/signature",
         headers={"Authorization": f"Bearer {access_token}"},
         json={"hashes": [{"id": "rubrica-pdf", "alias": "Rubrica PDF", "hash": base64.b64encode(digest.document_digest).decode(),
                          "hash_algorithm": "2.16.840.1.101.3.4.2.1", "signature_format": "CMS"}]},
@@ -191,7 +191,10 @@ async def _sign_pdf_with_serpro(unsigned_pdf: bytes, client: httpx.Client, acces
         raise WorkflowError("PDF does not contain the expected certificate signature", 502)
     if signatures_in_pdf[-1].signer_cert.dump() != certificate_der:
         raise WorkflowError("Signed PDF certificate differs from the authorized certificate", 502)
-    verification = await async_validate_pdf_signature(signatures_in_pdf[-1])
+    verification = (await async_validate_pdf_signature(signatures_in_pdf[-1], signer_validation_context=validation_context)
+                    if validation_context is not None else await async_validate_pdf_signature(signatures_in_pdf[-1]))
     if not verification.intact or not verification.valid:
         raise WorkflowError("Certificate signature failed PDF verification", 502)
+    if require_trusted and (not verification.trusted or verification.revoked):
+        raise WorkflowError("Certificate signature trust validation failed", 502)
     return result

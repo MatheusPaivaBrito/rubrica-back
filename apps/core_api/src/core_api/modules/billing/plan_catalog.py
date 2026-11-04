@@ -6,6 +6,7 @@ ESSENTIAL = "rubrica_base"
 PROFESSIONAL = "rubrica_intermediate"
 TEAM = "rubrica_team"
 LIFETIME = "rubrica_lifetime"
+ENTERPRISE = "rubrica_enterprise"
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ TEAM_ENTITLEMENTS = frozenset(
 
 
 CATALOG = {
+    ENTERPRISE: PlanDefinition(ENTERPRISE, 10, 220, TEAM_ENTITLEMENTS, allows_seat_expansion=True),
     FREE: PlanDefinition(FREE, 1, None, frozenset({EVIDENCE})),
     ESSENTIAL: PlanDefinition(
         ESSENTIAL,

@@ -599,6 +599,7 @@ def test_missing_runtime_stripe_webhook_secret_uses_static_secret(
 
 def test_failed_invoice_starts_grace_period_and_records_payment(monkeypatch) -> None:
     account = SimpleNamespace(
+        current_product_code="rubrica_team",
         status="active",
         provider=None,
         provider_customer_id=None,

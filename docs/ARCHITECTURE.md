@@ -49,6 +49,15 @@ Each API owns its database. No service reads another service's tables.
 
 Owns identities, password hashes, roles and revocable sessions.
 
+Enterprise machine credentials also belong exclusively to Auth API:
+`modules/machine_credentials` owns token generation, digests, expiry, scopes,
+rotation/revocation and authentication, with its own audit in the Auth database.
+Core owns integrations and compartments and authorizes access to product resources.
+Cross-service identifiers are opaque UUID references, never cross-database foreign
+keys. Administrative credential operations require an authenticated authorization
+boundary; internal primitives are not public endpoints. Auth never imports Core
+modules or reads its membership tables to authorize token administration.
+
 - Database: `rubrica_auth`.
 - Redis stores access/refresh session state and user-session indexes.
 - Roles: `signature_admin`, `signature_operator`, `signature_auditor`, `signature_signer`.
@@ -78,6 +87,112 @@ Tenants can be personal or business. A business tenant protects and masks its CN
 Business signatures distinguish a person signing for themselves from a person explicitly representing an organization. Membership alone never implies representation. Issuer and representation data are frozen as masked snapshots when a request is opened. Corporate seals remain unavailable until an appropriate organizational credential provider and legal/security policy exist.
 
 ### Documents
+
+Enterprise API resources live in `modules/enterprise`, separately from interactive
+document tables. Core owns compartment-scoped intake, quarantine/scanning, request
+state, restricted signer sessions, immutable signature facts and encrypted tenant
+provider configurations. Long-lived machine credentials remain exclusively in Auth.
+Provider credentials are injected per tenant; changing global settings per request
+is prohibited. Sandbox signatures are visibly marked simulations and cannot call
+real providers. Deployments must configure a trusted ClamAV endpoint before clearing
+intake and a certificate trust bundle before enabling enterprise SerproID execution.
+Enterprise quotas are persisted per tenant and mode, with separate API rate buckets
+and storage/signing counters. Sandbox uses its own storage namespace/key and execution
+slots. Legacy namespace references remain readable after the usage migration.
+Current-copy retention scheduling is described below; complete internal retention
+and dedicated processing workers remain pending.
+
+Core transactionally records immutable enterprise usage facts and a telemetry outbox.
+A bounded background relay sends a versioned, secret-free contract to Observability,
+which stores an idempotent projection in its own database. It never reads Core tables.
+Failure of the projection/relay does not block signing; canonical financial facts
+remain in Core. Operational samples are best effort. All current prices are explicitly
+zero and versioned; sandbox usage cannot become billable by changing tokens.
+
+Enterprise storage destinations are owned by Core and immutable after creation.
+Customer S3 credentials are encrypted with tenant, mode, deployment environment
+and destination UUID bound as authenticated data; APIs never return them. Official
+S3/R2 HTTPS endpoints are permitted; other exact hostnames require operator approval
+through `ENTERPRISE_S3_ALLOWED_HOSTS`. Every operation resolves public addresses,
+pins the actual connection to an address and verifies TLS with the original
+hostname. Redirects and environment proxies are disabled. Transfer byte/time
+budgets bound responses; SigV4 signs the exact object path and known content hash.
+
+Migration records, per-document state and per-object receipts survive retries.
+An optional policy enrolls future uploads/requests, freezing a destination on each
+new job. A bounded background poller (`ENTERPRISE_STORAGE_WORKER_ENABLED`) processes
+jobs with row locks, waits for terminal signature requests and verifies originals,
+all signed artifacts and evidence JSON. Copying to S3 is conditional and successful
+only after the destination bytes match SHA-256 and size. Independent delivery needs
+a completed server stream and a separate administrator acknowledgement of durable
+storage; this acknowledgement is a customer assertion, not remote storage proof.
+Migration itself preserves Rubrica copies. A separate confirmed administrator
+action commits per-copy removal intents before a worker touches storage. The worker
+rechecks the complete manifest/terminal requests and current S3 bytes (or the
+explicit independent-delivery acknowledgement). Strict storage deletion must
+confirm absence; denial, Bucket Lock and inconclusive HEAD responses remain pending.
+Copy flags, quota changes, immutable storage.removed facts and audit commit together.
+If the process dies after physical deletion, the committed intent survives and the
+idempotent retry reconciles the same fact once. Retry has bounded exponential
+backoff. Compartment-before-intent lock order permits an administrator to explicitly
+replace a pending intent's receipt with a newly verified migration after credential
+rotation, retaining the canonical removal ID.
+
+Authorized reads prefer a retained verified Rubrica copy. After confirmed removal
+(or an absent source with a committed intent), they can read a tenant/mode-scoped
+verified S3 receipt, checking all bytes before returning plaintext. Local integrity
+failures never silently fall back. Independent-only exports return 410 after copy
+removal. No customer storage URL/credential is exposed. Starting another signature
+request is blocked while removal is pending or the original is external-only.
+Explicit S3 restoration writes fresh Rubrica keys through the configured encrypted
+storage backend, verifies them and commits counters/storage.added facts atomically;
+failed restorations roll back references/counters and attempt cleanup of new copies.
+No existing customer objects are removed by this operation.
+
+Schema 0038 adds only durable intents and indexes, with no object mutations.
+Removal affects current logical document/artifact copies, not metadata, evidence,
+provider credentials, bucket-version history or backups. Full internal retention,
+distributed worker/resource isolation and end-to-end
+PostgreSQL/provider tests remain required before external commercial release.
+
+Enterprise lifecycle (schema 0039) derives operational access from billing and an
+explicit contractual cutoff on every call, regardless of the background poller.
+The recovery deadline is fixed at suspension plus 30 days. Auth still owns token
+secrets; Core rejects all operational calls and token rotation while suspended.
+Human administrators retain scoped export/migration access during recovery,
+including after downgrade, and can cancel open requests without erasing completed
+signatures. Payment/contract regularization is persisted in the billing transaction
+before the deadline so delayed projection cannot purge already regularized data.
+
+The lifecycle poller projects states/notices, expires requests, relays administrator
+emails through notification_api with idempotency/retries, and dispatches signed
+webhooks. Optional current-copy purge commits intents before deletion and rechecks
+the contract under the account lock. Writers use account-before-resource order.
+Confirmed absence and counter/event changes commit together, with retry after a
+crash. Customer-owned destinations are never deleted. This is **not** complete
+internal erasure: metadata/evidence, orphan temporaries, bucket versions and backups
+still need retention adapters/procedures. `ENTERPRISE_RETENTION_PURGE_ENABLED`
+defaults false until operational validation; it does not prolong authorization or
+promise data recovery after the deadline. Recontracting after purge and definitive
+Auth credential retirement remain gates before commercial availability.
+
+Webhook outbox records are transactional, unique per endpoint/event and secret-free.
+Delivery is at least once/unordered, bounded to 16 KiB and operator-approved HTTPS
+hosts with public DNS pinning, original TLS hostname and no redirects/proxies.
+HMAC authenticates `timestamp + '.' + exact_body`; event ID and key version are
+headers, and receivers enforce a five-minute timestamp window plus ID deduplication.
+Retries retain event ID/body for 24 hours; permanent rejection or exhausted window
+enters a failed queue with audited manual replay. Endpoint URL changes require
+explicit disable and stop the old queue. Live/sandbox/environment bindings are
+checked again before transport. Secrets are encrypted and shown only on rotation.
+
+The storage calculator reads a coherent quota/journal snapshot and integrates
+logical bytes above the shared tenant allowance over time. Decimal GB is
+1,000,000,000 bytes and GB/month uses a fixed 30-day contractual cycle anchored on
+the billing account. Downloads and external exports do not add stored bytes; only
+confirmed source removal will reduce them. Sandbox has separate counters and no
+commercial fee. Current tariffs/estimates are zero; this is a usage estimate, not
+an invoice or retroactive debt.
 
 `documents` stores metadata and the current version. `document_versions` freezes filename, media type, storage key, SHA-256 and size for each immutable binary version. Binary content remains in `DocumentStorage`.
 
