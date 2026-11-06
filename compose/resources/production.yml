@@ -1,8 +1,6 @@
 services: {}
 
 secrets:
-  platform_grafana_service_token:
-    file: ${SECRETS_DIR:-/etc/rubrica/secrets}/platform_grafana_service_token
   observability_internal_service_key:
     file: ${SECRETS_DIR:-/etc/rubrica/secrets}/observability_internal_service_key
   postgres_password:

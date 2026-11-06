@@ -1,4 +1,6 @@
-from pydantic import AliasChoices, Field, model_validator
+from pathlib import Path
+
+from pydantic import AliasChoices, Field, PrivateAttr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from shared_kernel.config import apply_secret_files
@@ -21,23 +23,45 @@ class ObservabilitySettings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("OBSERVABILITY_DATABASE_URL", "DATABASE_URL"),
     )
-    PLATFORM_GRAFANA_URL: str = "http://grafana:3000"
-    PLATFORM_GRAFANA_TIMEOUT_SECONDS: float = Field(default=3.0, gt=0, le=30)
-    PLATFORM_GRAFANA_SERVICE_TOKEN: str | None = None
-    PLATFORM_GRAFANA_SERVICE_TOKEN_FILE: str | None = None
+    PLATFORM_URL: str = "https://grafana.7f3a9c2e8b.stream"
+    PLATFORM_TOKEN: str | None = Field(default=None, repr=False, exclude=True)
+    PLATFORM_TOKEN_FILE: str | None = None
+    PLATFORM_PROJECT: str = "rubrica"
+    PLATFORM_ENVIRONMENT: str = "staging"
+    PLATFORM_SERVICE: str = "observability_api"
+    PLATFORM_PUBLISH_ENABLED: bool = False
+    _platform_secret_errors: tuple[str, ...] = PrivateAttr(default=())
     OBSERVABILITY_INTERNAL_SERVICE_KEY: str = ""
     OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE: str | None = None
 
     @model_validator(mode="after")
     def load_secret_files(self) -> "ObservabilitySettings":
-        return apply_secret_files(
+        apply_secret_files(
             self,
             {
                 "POSTGRES_PASSWORD": "POSTGRES_PASSWORD_FILE",
-                "PLATFORM_GRAFANA_SERVICE_TOKEN": "PLATFORM_GRAFANA_SERVICE_TOKEN_FILE",
                 "OBSERVABILITY_INTERNAL_SERVICE_KEY": "OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE",
             },
         )
+        errors = []
+        for field in PLATFORM_SECRET_FIELDS:
+            filename = getattr(self, f"{field}_FILE")
+            if not filename:
+                continue
+            try:
+                path = Path(filename)
+                if not path.is_file() or path.stat().st_mode & 0o077:
+                    raise ValueError("Invalid protected secret")
+                with path.open(encoding="utf-8") as handle:
+                    value = handle.read(4097).strip()
+                if not value or len(value) > 4096 or any(ord(c) < 33 or ord(c) > 126 for c in value):
+                    raise ValueError("Invalid protected secret")
+                object.__setattr__(self, field, value)
+            except (OSError, ValueError):
+                object.__setattr__(self, field, None)
+                errors.append(field)
+        self._platform_secret_errors = tuple(errors)
+        return self
 
     @property
     def DATABASE_URL(self) -> str:
@@ -55,5 +79,7 @@ class ObservabilitySettings(BaseSettings):
         populate_by_name=True,
     )
 
+
+PLATFORM_SECRET_FIELDS = ("PLATFORM_TOKEN",)
 
 settings = ObservabilitySettings()

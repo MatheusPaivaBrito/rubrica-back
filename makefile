@@ -56,6 +56,14 @@ ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v
 .PHONY: staging-clone-core-from-production staging-clone-r2-documents staging-encrypt-r2-documents document-crypto-benchmark
 
 help:
+	@echo "  make observability-staging-up           Only local PostgreSQL + observability_api (8104), preserve volumes"
+	@echo "  make observability-staging-install-secret name=platform_token source=/protected/local/file"
+	@echo "  make observability-staging-connect      Enable publisher with the single protected integration key"
+	@echo "  make observability-staging-disconnect   Stop publisher only; keep API and PostgreSQL"
+	@echo "  make observability-staging-ensure       Read-only ingest status + scoped metric-name query"
+	@echo "  make observability-staging-test         Live read-only proof plus rejected credential/scope probes"
+	@echo "  make observability-staging-evidence     Save sanitized read-only proof in .runtime"
+	@echo "  make observability-staging-status / observability-staging-logs"
 	@echo "Rúbrica — comandos por ambiente"
 	@echo "============================================================"
 	@echo "Desenvolvimento — aplicações bare metal com hot reload"
@@ -406,7 +414,7 @@ seed-local-users:
 
 invite-lifetime: migrate
 	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: make invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
-	$(LOCAL_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
+	$(LOCAL_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(or $(name),platform_token)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
 	$(LOCAL_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(email)" --actor "$(actor)" --reason "$(reason)"
 
 create-lifetime-tenant: migrate
@@ -487,7 +495,7 @@ production-seed:
 
 production-invite-lifetime: production-migrate
 	@test -n "$(name)" -a -n "$(email)" -a -n "$(document_type)" -a -n "$(document_country)" -a -n "$(actor)" -a -n "$(reason)" || (echo "Usage: sudo make production-invite-lifetime name='Full name' email=EMAIL document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='business reason'"; exit 2)
-	$(PRODUCTION_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(name)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
+	$(PRODUCTION_COMPOSE) exec auth-api python toolbox/seeds/lifetime_invitation.py --name "$(or $(name),platform_token)" --email "$(email)" --document-type "$(document_type)" --document-country "$(document_country)" --locale "$(or $(locale),en)"
 	$(PRODUCTION_COMPOSE) exec -T core-api python toolbox/seeds/lifetime_account.py grant --owner-email "$(email)" --actor "$(actor)" --reason "$(reason)"
 
 production-create-lifetime-tenant: production-migrate
@@ -571,3 +579,15 @@ smoke-all:
 	@$(MAKE) --no-print-directory smoke-core-generator
 smoke-core-generator:
 	poetry run python toolbox/smoke/core_generator.py
+
+# Explicit, isolated two-service staging; never delegates to staging-bootstrap/up.
+.PHONY: observability-staging-up observability-staging-connect observability-staging-disconnect observability-staging-status observability-staging-logs observability-staging-ensure observability-staging-evidence observability-staging-install-secret
+observability-staging-up observability-staging-connect observability-staging-disconnect observability-staging-status observability-staging-logs observability-staging-ensure observability-staging-evidence:
+	python3 toolbox/operations/observability_staging.py $(patsubst observability-staging-%,%,$@)
+
+observability-staging-install-secret:
+	@python3 toolbox/operations/observability_staging.py install-secret --name "$(or $(name),platform_token)" --source "$(source)"
+
+.PHONY: observability-staging-test
+observability-staging-test:
+	python3 toolbox/operations/observability_staging.py test

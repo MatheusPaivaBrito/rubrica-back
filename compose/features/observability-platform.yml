@@ -1,0 +1,10 @@
+# One operator-installed integration key; no Grafana or Cloudflare credentials.
+services:
+  observability-api:
+    environment:
+      PLATFORM_PUBLISH_ENABLED: 'true'
+      PLATFORM_TOKEN_FILE: /run/secrets/platform_token
+    secrets: [platform_token]
+secrets:
+  platform_token:
+    file: ${OBSERVABILITY_STAGING_PLATFORM_TOKEN_SOURCE:-../.runtime/observability-staging/secrets/platform_token}

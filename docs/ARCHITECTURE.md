@@ -323,3 +323,20 @@ Public `/docs` contains only the API contract, fictional examples and no credent
 Nginx proxies it to Core; service-worker navigation excludes docs/API callbacks.
 See [Enterprise operations](enterprise-api-operations.md) for deployment, backup
 barriers, incident recovery and release gates.
+
+### Optional remote Platform publisher (observability_api)
+
+The local two-service staging now lives in compose/observability-staging-local.yml,
+preserving its PostgreSQL volume and loopback port 8104. The optional
+observability-platform overlay mounts one protected platform_token file secret. No extra
+collector/Tunnel or product APIs are started. Presence and a full filtered metrics
+snapshot are published as JSON every 30 seconds to the admitted rubrica/staging
+service; no logs/traces are sent to this endpoint. Background transport is bounded
+and failure never changes API health/readiness. Development is disabled by default.
+
+Read-only ensure checks ingestion status and a metric-name query via /ingest/v1/query,
+using the same Bearer key, receiver time and actual sample timestamps. No Grafana
+or Cloudflare Access credentials are required. Server-enforced scope isolates projects. See
+[staging Platform runbook](observability-staging-platform.md) for Make commands,
+operator-owned secret installation and sanitized evidence. No remote server
+configuration or credential issuance is performed by this workflow.

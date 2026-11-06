@@ -201,3 +201,13 @@ Prove that a backup is restorable without touching production:
 Verification checks SHA-256 hashes, restores every database into a disposable
 PostgreSQL container and checks that the document archive can be read. Run this
 after the first deployment and periodically thereafter.
+
+### Testar somente observability_api local com Platform Infra remota
+
+Use `make observability-staging-up` para manter apenas PostgreSQL e a API em
+127.0.0.1:8104, preservando volumes. Depois de instalar o único Docker Secret de integração do
+operador, `make observability-staging-connect` habilita heartbeat/snapshot JSON a
+cada 30s. `make observability-staging-ensure` verifica presença e consulta real ao
+Prometheus pela rota `/ingest/v1/query`, sem publicar sinais. A instalação dos arquivos existentes,
+limites e evidências estão em [observability staging](docs/observability-staging-platform.md).
+Este fluxo não usa o token do Tunnel, não gera chaves e não modifica a Platform Infra.

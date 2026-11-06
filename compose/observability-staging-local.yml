@@ -1,0 +1,64 @@
+# Only these two services; retain the existing project/volume identities.
+name: rubrica-observability-staging-local
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rubrica_observability_local
+      POSTGRES_DB: rubrica_observability
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    networks: [private]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U rubrica_observability_local -d rubrica_observability]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  observability-api:
+    image: rubrica-observability-staging-local:latest
+    build:
+      context: ..
+      dockerfile: apps/observability_api/dockerfile
+    restart: unless-stopped
+    command: [sh, -c, 'exec gunicorn observability_api.main:app -k uvicorn.workers.UvicornWorker --config python:shared_kernel.observability.gunicorn --bind 0.0.0.0:8000 --workers 1 --access-logfile - --error-logfile -']
+    environment:
+      ENVIRONMENT: staging
+      OBSERVABILITY_SERVICE_NAME: observability_api
+      POSTGRES_USER: rubrica_observability_local
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: '5432'
+      OBSERVABILITY_POSTGRES_DB: rubrica_observability
+      OBSERVABILITY_INTERNAL_SERVICE_KEY_FILE: /run/secrets/observability_internal_service_key
+      PLATFORM_URL: https://grafana.7f3a9c2e8b.stream
+      PLATFORM_PROJECT: rubrica
+      PLATFORM_ENVIRONMENT: staging
+      PLATFORM_SERVICE: observability_api
+      PLATFORM_PUBLISH_ENABLED: 'false'
+      # The presence/metrics contract is JSON, not OTLP; no collector or remote traces.
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ''
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus-multiproc
+    secrets: [postgres_password, observability_internal_service_key]
+    ports: ['127.0.0.1:8104:8000']
+    volumes: [api_logs:/var/log/rubrica]
+    networks: [private, egress]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+secrets:
+  postgres_password:
+    file: ${OBSERVABILITY_STAGING_SECRETS_DIR:-../.runtime/observability-staging/secrets}/postgres_password
+  observability_internal_service_key:
+    file: ${OBSERVABILITY_STAGING_SECRETS_DIR:-../.runtime/observability-staging/secrets}/observability_internal_service_key
+volumes:
+  postgres_data: {}
+  api_logs: {}
+networks:
+  private: {internal: true}
+  egress: {}

@@ -1,11 +1,8 @@
 import asyncio
 
-import httpx
-import pytest
 from httpx import ASGITransport, AsyncClient
 
 from observability_api.bootstrap.app import create_app
-from observability_api.infrastructure.grafana_client import GrafanaClient, GrafanaStatus
 from observability_api.infrastructure.settings import settings
 
 
@@ -27,10 +24,10 @@ def test_health_does_not_depend_on_platform_infra() -> None:
 
 
 def test_platform_status_reports_unavailable(monkeypatch) -> None:
-    async def unavailable(_self) -> GrafanaStatus:
-        return GrafanaStatus(available=False, reason="connection")
+    async def unavailable():
+        return {"operational": False, "authorized": False, "reason": "connection"}
 
-    monkeypatch.setattr("observability_api.infrastructure.grafana_client.GrafanaClient.status", unavailable)
+    monkeypatch.setattr("observability_api.modules.platform_status.service.ensure", unavailable)
     monkeypatch.setattr(settings, "OBSERVABILITY_INTERNAL_SERVICE_KEY", "test-service-key")
 
     response = request(
@@ -76,77 +73,3 @@ def test_metrics_use_rubrica_namespace_without_sensitive_labels() -> None:
         for sample in family.samples:
             # Route templates may contain {document_id}; actual identity labels may not.
             assert not forbidden.intersection(sample.labels)
-
-
-class StubAsyncClient:
-    def __init__(self, outcome, **_kwargs) -> None:
-        self.outcome = outcome
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *_args) -> None:
-        return None
-
-    async def get(self, url: str, **_kwargs):
-        if isinstance(self.outcome, Exception):
-            raise self.outcome
-        return self.outcome(url)
-
-
-@pytest.mark.parametrize(
-    ("outcome", "reason"),
-    (
-        (httpx.TimeoutException("timeout"), "timeout"),
-        (httpx.ConnectError("connection"), "connection"),
-        (lambda url: httpx.Response(401, request=httpx.Request("GET", url)), "http_401"),
-        (lambda url: httpx.Response(403, request=httpx.Request("GET", url)), "http_403"),
-        (lambda url: httpx.Response(429, request=httpx.Request("GET", url)), "http_429"),
-        (lambda url: httpx.Response(500, request=httpx.Request("GET", url)), "http_500"),
-        (
-            lambda url: httpx.Response(
-                200,
-                request=httpx.Request("GET", url),
-                content=b"not-json",
-            ),
-            "invalid_response",
-        ),
-    ),
-)
-def test_grafana_client_degrades_without_leaking_credentials(
-    monkeypatch, outcome, reason
-) -> None:
-    monkeypatch.setattr(
-        "observability_api.infrastructure.grafana_client.httpx.AsyncClient",
-        lambda **kwargs: StubAsyncClient(outcome, **kwargs),
-    )
-    client = GrafanaClient(
-        base_url="http://grafana:3000",
-        timeout_seconds=1,
-        service_token="secret-token",
-    )
-
-    status = asyncio.run(client.status())
-
-    assert status == GrafanaStatus(available=False, reason=reason)
-    assert "secret-token" not in repr(status)
-
-
-def test_grafana_client_reports_platform_version(monkeypatch) -> None:
-    def outcome(url: str) -> httpx.Response:
-        return httpx.Response(
-            200,
-            request=httpx.Request("GET", url),
-            json={"version": "12.0.0"},
-        )
-
-    monkeypatch.setattr(
-        "observability_api.infrastructure.grafana_client.httpx.AsyncClient",
-        lambda **kwargs: StubAsyncClient(outcome, **kwargs),
-    )
-
-    status = asyncio.run(
-        GrafanaClient(base_url="http://grafana:3000", timeout_seconds=1).status()
-    )
-
-    assert status == GrafanaStatus(available=True, version="12.0.0")

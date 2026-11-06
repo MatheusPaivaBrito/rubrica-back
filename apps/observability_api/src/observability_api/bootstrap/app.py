@@ -5,11 +5,12 @@ from observability_api.infrastructure.settings import settings
 from observability_api.observability_metrics import collect_business_metrics
 from shared_kernel.http import apply_request_correlation, apply_request_logging
 from shared_kernel.observability import apply_metrics, apply_tracing
+from observability_api.modules.platform_publish.publisher import lifespan
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title=settings.APP_NAME, version="0.1.0", docs_url=None, redoc_url=None
+        title=settings.APP_NAME, version="0.1.0", docs_url=None, redoc_url=None, lifespan=lifespan
     )
     apply_request_correlation(app, service_name=settings.SERVICE_NAME)
     apply_request_logging(

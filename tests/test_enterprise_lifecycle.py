@@ -256,6 +256,9 @@ def test_retry_window_and_manual_replay_keep_event_id(contract_db):
 def test_notice_email_retries_with_stable_recipient_idempotency_key(contract_db, monkeypatch):
     env = contract_db
     suspend(env)
+    # Server-default creation time follows the real date; retries use this test's fixed clock.
+    with env.sessions.begin() as db:
+        db.scalar(select(EnterpriseNotice)).next_attempt_at = NOW
     from core_api.modules.billing import notification_client
     calls = []
     def failure(**kwargs):
