@@ -31,7 +31,7 @@ from shared_kernel.time.datetime_service import DateTimeService
 
 
 from toolbox.seeds.lifetime_account import change_lifetime_access
-from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, TEAM
+from toolbox.seeds.local_accounts_catalog import ACCOUNTS, ENTERPRISE, LIFETIME, PROFESSIONAL, TEAM
 
 
 def require_test_environment() -> str:
@@ -246,7 +246,7 @@ def _archive_empty_legacy_personal_tenants(users: dict[str, UUID]) -> None:
                 if fk["referred_table"] == "tenants":
                     table = Table(table_name, MetaData(), autoload_with=connection)
                     references.extend(table.c[column] for column in fk["constrained_columns"])
-        for email, name in (*PROFESSIONAL, *TEAM):
+        for email, name in (*PROFESSIONAL, *TEAM, *ENTERPRISE):
             tenants = db.scalars(select(TenantEntity).join(TenantMemberEntity).where(
                 TenantEntity.kind == "personal", TenantEntity.name == name,
                 TenantEntity.deleted_at.is_(None),
@@ -369,12 +369,13 @@ def main() -> None:
     _essential_plan(users)
     _business_tenant(users, PROFESSIONAL, "11.444.777/0001-61", "Empresa Local de Testes Ltda.", "rubrica_intermediate")
     _business_tenant(users, TEAM, "11.222.333/0001-81", "Equipe Local de Testes Ltda.", "rubrica_team")
+    _business_tenant(users, ENTERPRISE, "90000000000184", "Empresarial API Local de Testes Ltda.", "rubrica_enterprise")
     _lifetime_tenant(users)
     _archive_empty_legacy_personal_tenants(users)
     _expired_signature_request_fixture()
     print(
         f"[ok] {len(ACCOUNTS)} {environment} test accounts are ready "
-        "(free, essential, professional 3, team 6, lifetime 3)"
+        "(free, essential, professional 3, team 6, lifetime 3, enterprise 3)"
     )
     for email, _ in ACCOUNTS:
         print(f"  {email}")

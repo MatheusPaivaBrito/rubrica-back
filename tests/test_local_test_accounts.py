@@ -54,13 +54,13 @@ def test_seed_preserves_downgrade_and_membership_state(monkeypatch):
     seed.main()
     with auth() as db:
         users = db.scalars(select(seed.UserEntity)).all()
-        assert len(users) == 14
+        assert len(users) == 17
         assert all(u.email_verified and u.mfa_exempt and not u.mfa_enabled and u.is_active for u in users)
         ids = {u.id for u in users}
     with core.begin() as db:
         accounts = db.scalars(select(seed.BillingAccountEntity)).all()
         assert sum(a.current_product_code == "rubrica_base" for a in accounts) == 1
-        for product, count in (("rubrica_intermediate", 3), ("rubrica_team", 6)):
+        for product, count in (("rubrica_intermediate", 3), ("rubrica_team", 6), ("rubrica_enterprise", 3)):
             account = next(a for a in accounts if a.current_product_code == product)
             assert not account.complimentary_lifetime
             assert db.scalar(select(func.count()).select_from(seed.TenantMemberEntity).where(
@@ -69,6 +69,7 @@ def test_seed_preserves_downgrade_and_membership_state(monkeypatch):
         assert lifetime.provider is None
         assert db.scalar(select(func.count()).select_from(seed.TenantMemberEntity).where(
             seed.TenantMemberEntity.tenant_id == lifetime.tenant_id)) == 3
+        account = next(a for a in accounts if a.current_product_code == "rubrica_team")
         team_id = account.tenant_id
         account.current_product_code = "rubrica_intermediate"
         account.files_uploaded_in_period = 17
@@ -97,4 +98,4 @@ def test_seed_preserves_downgrade_and_membership_state(monkeypatch):
         assert account.files_uploaded_in_period == 17
         assert db.get(seed.TenantMemberEntity, member_id).status == "suspended"
         assert db.get(seed.TenantEntity, legacy_id).deleted_at is not None
-        assert db.scalar(select(func.count()).select_from(seed.TenantEntity).where(seed.TenantEntity.deleted_at.is_(None))) == 5
+        assert db.scalar(select(func.count()).select_from(seed.TenantEntity).where(seed.TenantEntity.deleted_at.is_(None))) == 6

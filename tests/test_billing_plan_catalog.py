@@ -32,3 +32,10 @@ def test_lifetime_is_team_capability_with_ten_seats_and_unlimited_documents() ->
     assert document_limit(plan, 10) is None
     assert TRUSTED_TIMESTAMP in plan.entitlements
     assert SERPROID in plan.entitlements
+
+
+def test_api_capability_is_exclusive_to_enterprise_including_lifetime():
+    from core_api.modules.billing.plan_catalog import ENTERPRISE, ENTERPRISE_API, account_plan
+    assert {code for code, plan in CATALOG.items() if ENTERPRISE_API in plan.entitlements} == {ENTERPRISE}
+    lifetime = account_plan(product_code=ENTERPRISE, paid=True, lifetime=True)
+    assert lifetime.code == LIFETIME and ENTERPRISE_API not in lifetime.entitlements

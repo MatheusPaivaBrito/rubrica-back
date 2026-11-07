@@ -51,3 +51,36 @@ def test_auth_rejects_environment_mismatch(monkeypatch):
     with pytest.raises(HTTPException) as error:
         validate_environment("staging")
     assert error.value.status_code == 403
+
+
+@pytest.mark.parametrize("product,lifetime", [
+    ("rubrica_free", False), ("rubrica_base", False), ("rubrica_intermediate", False),
+    ("rubrica_team", False), ("rubrica_lifetime", True), ("rubrica_enterprise", True),
+])
+def test_non_enterprise_and_lifetime_cannot_administer_api(monkeypatch, product, lifetime):
+    from datetime import UTC, datetime
+    from core_api.modules.enterprise.router import require_enterprise, tenant_service
+    monkeypatch.setattr(tenant_service, "require_role", lambda *args: None)
+    now = datetime.now(UTC)
+    account = SimpleNamespace(current_product_code=product, complimentary_lifetime=lifetime,
+        status="active", cancel_at_period_end=False, created_at=now, updated_at=now,
+        usage_period_starts_at=now)
+    rows = iter([account, None])
+    with pytest.raises(HTTPException) as error:
+        require_enterprise(SimpleNamespace(scalar=lambda _: next(rows)), uuid4(), SimpleNamespace(subject="admin"))
+    assert error.value.status_code == 403
+
+
+def test_machine_api_rejects_lifetime_even_with_a_stale_enterprise_code():
+    from datetime import UTC, datetime
+    from core_api.modules.enterprise.machine_context import AuthClaims, authorize_binding
+    now = datetime.now(UTC)
+    claims = AuthClaims(tenant_id=uuid4(), integration_id=uuid4(), public_id="fictional",
+        environment="development", sandbox=True, scopes={"documents:create"})
+    account = SimpleNamespace(tenant_id=claims.tenant_id, current_product_code="rubrica_enterprise", complimentary_lifetime=True,
+        status="active", cancel_at_period_end=False, created_at=now, updated_at=now,
+        usage_period_starts_at=now)
+    rows = iter([object(), account, None])
+    with pytest.raises(HTTPException) as error:
+        authorize_binding(SimpleNamespace(scalar=lambda _: next(rows)), claims, uuid4())
+    assert error.value.status_code == 403

@@ -15,10 +15,16 @@ LIFETIME = (
     ("local.vitalicio.membro1@example.local", "Membro Vitalício Local 1"),
     ("local.vitalicio.membro2@example.local", "Membro Vitalício Local 2"),
 )
+ENTERPRISE = (
+    ("local.enterprise.admin@example.local", "Administrador Empresarial Local"),
+    ("local.enterprise.membro1@example.local", "Membro Empresarial Local 1"),
+    ("local.enterprise.membro2@example.local", "Membro Empresarial Local 2"),
+)
 ACCOUNTS = (
     ("local.pessoal@example.local", "Conta Gratuita Local"),
     ("local.essencial@example.local", "Conta Essencial Local"),
     *PROFESSIONAL,
     *TEAM,
     *LIFETIME,
+    *ENTERPRISE,
 )

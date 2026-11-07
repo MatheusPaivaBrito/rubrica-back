@@ -226,3 +226,10 @@ continuam específicos do produto.
 No staging, o portal MkDocs fica em `/docs/`, as contas em
 `/docs/test-accounts/` e a documentação da API empresarial em `/docs/api/`.
 Os endereços antigos `/test-accounts/` redirecionam para o novo portal.
+
+O seed local/staging inclui um tenant Empresarial com três contas:
+`local.enterprise.admin@example.local`, `local.enterprise.membro1@example.local`
+e `local.enterprise.membro2@example.local`. Usam a mesma senha de teste configurada
+para o catálogo e identidades sintéticas, sem cadastrar provedores ou tokens automaticamente.
+A API é exclusiva de Empresarial; a conta vitalícia mantém Equipe e documentos
+ilimitados, sem acesso à API. O seed é idempotente e não deve ser executado em produção.

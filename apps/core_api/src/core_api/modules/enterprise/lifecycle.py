@@ -25,7 +25,7 @@ def contract_view(account, state=None, *, now=None):
     if account is None:
         return {"status": "unavailable", "operational": False, "recovery": False, "suspends_at": None, "delete_after": None}
     end = cycle_end(account, now)
-    eligible = account.current_product_code == "rubrica_enterprise"
+    eligible = account.current_product_code == "rubrica_enterprise" and not getattr(account, "complimentary_lifetime", False)
     delinquent = account.status in {"past_due", "unpaid", "paused", "cancelled"} or not eligible
     cutoff = None
     if account.cancel_at_period_end:

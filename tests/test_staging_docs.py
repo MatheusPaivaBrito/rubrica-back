@@ -45,6 +45,10 @@ def test_portal_generates_account_subpage_and_preserves_api_link(portal):
     assert "(/docs/api/)" in (portal/"index.md").read_text()
     assert "fictional-test-password" in (portal/"test-accounts.md").read_text()
     assert not (portal/"accounts.md").exists()
+    content = (portal/"test-accounts.md").read_text()
+    assert "local.enterprise.admin@example.local" in content
+    assert "local.enterprise.membro1@example.local" in content
+    assert "Empresarial / API" in content and "17 contas" in content
 
 
 def test_mkdocs_serves_nested_pages_and_assets_under_docs_prefix(portal, tmp_path):

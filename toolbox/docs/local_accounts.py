@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 from shutil import copyfile
 
-from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, TEAM
+from toolbox.seeds.local_accounts_catalog import ACCOUNTS, ENTERPRISE, LIFETIME, PROFESSIONAL, TEAM
 
 
 DOCUMENT_ROUTES = {
@@ -48,11 +48,16 @@ def main() -> None:
         f'<span class="eyebrow">{environment_label}</span>',
         f"# {account_title}",
         "<p>Copie uma conta completa e cole no primeiro campo do login do Rubrica.</p>",
-        f'<div class="summary"><strong>5 tenants</strong><span>14 contas</span><code>{password}</code></div>',
+        f'<div class="summary"><strong>6 tenants</strong><span>{len(ACCOUNTS)} contas</span><code>{password}</code></div>',
         "</section>",
         '<p class="local-note">Contas confirmadas pelo seed, sem Microsoft Authenticator. '
         "No login, cole no campo de e-mail: o Rubrica separa e-mail e senha automaticamente.</p>",
+        '<p class="local-note">A integração por API é exclusiva do plano Empresarial. '
+        'A conta vitalícia tem recursos de Equipe e documentos ilimitados, sem acesso à API. '
+        'No Empresarial, use o administrador para configurar integrações e gerar tokens; '
+        'as contas de membro permitem testar as restrições de acesso.</p>',
         '<section class="plan-card seed-commands"><h2>Preparar contas de teste</h2>',
+
         '<p>Na primeira preparação do desenvolvimento, crie a configuração, aplique migrations, '
         'execute o seed e inicie o Rubrica:</p>',
         '<div class="seed-command"><code>make dev-bootstrap</code><button type="button" '
@@ -72,7 +77,8 @@ def main() -> None:
                             ("Essencial — 1 conta", ACCOUNTS[1:2]),
                             ("Profissional — 3 contas", PROFESSIONAL),
                             ("Equipe — 6 contas", TEAM),
-                            ("Vitalício — 3 contas", LIFETIME)):
+                            ("Vitalício — 3 contas", LIFETIME),
+                            ("Empresarial / API — 3 contas", ENTERPRISE)):
         lines += ["", f'<section class="plan-card"><h2>{title}</h2>', '<div class="account-list">']
         for index, (email, _) in enumerate(accounts):
             escaped_email = html.escape(email, quote=True)
