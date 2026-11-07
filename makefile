@@ -215,6 +215,8 @@ staging-smoke: staging-ensure
 	$(STAGING_COMPOSE) ps --status running
 	@test -n "$$($(STAGING_COMPOSE) ps --services --status running cloudflared)" || (echo "[error] staging named Cloudflare Tunnel is not running"; exit 2)
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
+	@redirect="$$(curl -fsSI "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/docs" | tr -d '\r' | sed -n 's/^[Ll]ocation: //p')"; \
+		test "$$redirect" = "/docs/" || (echo "[error] staging /docs must redirect relatively to /docs/"; exit 2)
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/docs/" >/dev/null
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/docs/test-accounts/" >/dev/null
 	@echo "[ok] staging gateway, test accounts, named Cloudflare Tunnel and required containers are operational"
