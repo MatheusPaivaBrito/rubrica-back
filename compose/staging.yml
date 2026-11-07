@@ -39,7 +39,8 @@ services:
     volumes:
       - clamav_database:/var/lib/clamav
     networks: [rubrica_internal, rubrica_external]
-    mem_limit: 1536m
+    # ClamAV needs at least 3 GiB to load/reload the signature database.
+    mem_limit: 3g
     cpus: 1.0
     pids_limit: 128
     security_opt: [no-new-privileges:true]
