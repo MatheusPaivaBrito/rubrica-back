@@ -211,3 +211,14 @@ cada 30s. `make observability-staging-ensure` verifica presença e consulta real
 Prometheus pela rota `/ingest/v1/query`, sem publicar sinais. A instalação dos arquivos existentes,
 limites e evidências estão em [observability staging](docs/observability-staging-platform.md).
 Este fluxo não usa o token do Tunnel, não gera chaves e não modifica a Platform Infra.
+
+
+### Manutenção geral do servidor
+
+O inventário Docker e a limpeza de imagens de staging foram centralizados em
+[server-maintenance-scripts](https://github.com/MatheusPaivaBrito/server-maintenance-scripts).
+Os antigos `toolbox/operations/audit_docker_cleanup.sh` e
+`toolbox/operations/clean_staging_images.sh` foram migrados; use o Makefile e os
+critérios de retenção documentados naquele repositório. A manutenção geral não
+gerencia backups do Rubrica: os comandos de backup/restauração deste projeto
+continuam específicos do produto.
