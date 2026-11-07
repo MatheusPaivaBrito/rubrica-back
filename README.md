@@ -222,3 +222,7 @@ Os antigos `toolbox/operations/audit_docker_cleanup.sh` e
 critérios de retenção documentados naquele repositório. A manutenção geral não
 gerencia backups do Rubrica: os comandos de backup/restauração deste projeto
 continuam específicos do produto.
+
+No staging, o portal MkDocs fica em `/docs/`, as contas em
+`/docs/test-accounts/` e a documentação da API empresarial em `/docs/api/`.
+Os endereços antigos `/test-accounts/` redirecionam para o novo portal.

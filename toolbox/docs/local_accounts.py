@@ -106,7 +106,7 @@ def main() -> None:
     home.write_text(
         "# Portal de desenvolvimento Rubrica\n\n"
         "Documentação técnica e referências locais em um único lugar.\n\n"
-        "- [Contas de desenvolvimento](accounts.md)\n"
+        "- [Contas de desenvolvimento](test-accounts.md)\n"
         "- [Arquitetura](architecture.md)\n"
         "- [Preparação de produção](production.md)\n"
         "- [Carimbo do tempo SERPRO](serpro-timestamp.md)\n"
@@ -114,8 +114,13 @@ def main() -> None:
         "- [Cloudflare R2](cloudflare-r2.md)\n",
         encoding="utf-8",
     )
+    if environment == "staging":
+        with home.open("a", encoding="utf-8") as handle:
+            handle.write("- [API empresarial — contrato e exemplos](/docs/api/)\n")
     home.chmod(0o600)
-    page = target / "accounts.md"
+    # Remove the generated legacy page so stale credentials are not served.
+    (target / "accounts.md").unlink(missing_ok=True)
+    page = target / "test-accounts.md"
     page.write_text("\n\n".join(lines) + "\n", encoding="utf-8")
     page.chmod(0o600)
 

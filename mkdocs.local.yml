@@ -1,4 +1,5 @@
 site_name: Desenvolvimento — Rubrica
+site_url: !ENV [LOCAL_DOCS_SITE_URL, "http://127.0.0.1:7190/"]
 docs_dir: .artifacts/local-docs
 site_dir: .artifacts/local-docs-site
 theme:
@@ -14,7 +15,7 @@ theme:
     - navigation.tabs
 nav:
   - Início: index.md
-  - Contas de desenvolvimento: accounts.md
+  - Contas de desenvolvimento: test-accounts.md
   - Arquitetura: architecture.md
   - Operação:
       - Produção: production.md

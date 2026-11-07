@@ -91,7 +91,7 @@ help:
 	@echo "  make staging-smoke             Valida stack e gateway"
 	@echo "  make staging-logs              Acompanha os logs"
 	@echo "  make staging-public-url        Mostra a URL pública estável do staging"
-	@echo "  make staging-docs-url          Mostra a URL pública das contas de teste"
+	@echo "  make staging-docs-url          Mostra a URL pública do portal MkDocs"
 	@echo "  make staging-down              Encerra preservando volumes"
 	@echo "  make staging-clone-core-from-production confirm=CLONE_PRODUCTION_CORE_TO_STAGING"
 	@echo "  make staging-clone-r2-documents [apply=1]  Clona objetos referenciados"
@@ -195,12 +195,13 @@ staging-public-url:
 	@base="$$(sed -n 's/^PUBLIC_WEB_URL=//p' "$(STAGING_ENV_FILE)" | tail -n 1)"; \
 		test -n "$$base" || (echo "[error] PUBLIC_WEB_URL não está configurada em $(STAGING_ENV_FILE)"; exit 2); \
 		echo "[ok] Rubrica staging: $$base"; \
-		echo "[ok] Contas de teste: $$base/test-accounts/"
+		echo "[ok] Documentação: $$base/docs/"; \
+		echo "[ok] Contas de teste: $$base/docs/test-accounts/"
 
 staging-docs-url:
 	@base="$$(sed -n 's/^PUBLIC_WEB_URL=//p' "$(STAGING_ENV_FILE)" | tail -n 1)"; \
 		test -n "$$base" || (echo "[error] PUBLIC_WEB_URL não está configurada em $(STAGING_ENV_FILE)"; exit 2); \
-		echo "$$base/test-accounts/"
+		echo "$$base/docs/"
 
 staging-migrate: staging-ensure
 	$(STAGING_COMPOSE) up -d --wait postgres
@@ -214,7 +215,8 @@ staging-smoke: staging-ensure
 	$(STAGING_COMPOSE) ps --status running
 	@test -n "$$($(STAGING_COMPOSE) ps --services --status running cloudflared)" || (echo "[error] staging named Cloudflare Tunnel is not running"; exit 2)
 	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/" >/dev/null
-	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/test-accounts/" >/dev/null
+	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/docs/" >/dev/null
+	@curl -fsS "http://127.0.0.1:$${STAGING_GATEWAY_HOST_PORT:-7271}/docs/test-accounts/" >/dev/null
 	@echo "[ok] staging gateway, test accounts, named Cloudflare Tunnel and required containers are operational"
 
 .PHONY: staging-encrypt-r2-documents
