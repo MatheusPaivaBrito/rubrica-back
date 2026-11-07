@@ -33,7 +33,8 @@ services:
     extends: {file: ./services/enterprise-worker.yml, service: production}
     command: sh -c "mkdir -p /tmp/prometheus-multiproc && exec python -m core_api.modules.enterprise.worker --lane maintenance"
   clamav:
-    image: clamav/clamav:stable
+    # Official Debian manifest supports Oracle ARM64 and local AMD64.
+    image: clamav/clamav:stable-debian@sha256:c21aa18cc0a358678255a3dfb343a4555b58f71b97d7b869df8fdf7ea0a5b4b1
     restart: unless-stopped
     volumes:
       - clamav_database:/var/lib/clamav
