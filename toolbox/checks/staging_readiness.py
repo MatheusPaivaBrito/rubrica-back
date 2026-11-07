@@ -15,7 +15,7 @@ REQUIRED_SECRETS = (
     "auth_identity_encryption_key", "auth_identity_hmac_key",
     "notification_internal_service_key", "core_internal_service_key", "resend_api_key",
     "evidence_secret", "tenant_identity_encryption_key", "tenant_identity_hmac_key",
-    "stripe_secret_key", "stripe_webhook_secret", "contact_turnstile_secret_key",
+    "stripe_secret_key", "stripe_webhook_secret",
     "serproid_client_secret",
     "observability_internal_service_key", "cloudflare_tunnel_token",
     "serpro_timestamp_consumer_secret", "serpro_timestamp_trust_roots.pem",

@@ -203,7 +203,6 @@ services:
       ENTERPRISE_SANDBOX_SIGNATURES_PER_DAY: ${ENTERPRISE_SANDBOX_SIGNATURES_PER_DAY:-100}
       ENTERPRISE_SANDBOX_STORAGE_BYTES: ${ENTERPRISE_SANDBOX_STORAGE_BYTES:-256000000}
       ENTERPRISE_SANDBOX_DOCUMENT_LIMIT: ${ENTERPRISE_SANDBOX_DOCUMENT_LIMIT:-20}
-      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
       SIGNING_APP_URL: ${SIGNING_APP_URL:-https://rubricasignature.com/signing}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://rubricasignature.com}
       SERPROID_CLIENT_ID: ${SERPROID_CLIENT_ID:-}
@@ -226,7 +225,6 @@ services:
       - core_internal_service_key
       - observability_internal_service_key
       - notification_internal_service_key
-      - contact_turnstile_secret_key
       - serproid_client_secret
       - stripe_secret_key
       - stripe_webhook_secret

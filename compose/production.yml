@@ -26,6 +26,9 @@ services:
     extends:
       file: ./services/core-api.yml
       service: production
+    environment:
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
+    secrets: [contact_turnstile_secret_key]
     networks:
       rubrica_internal:
       rubrica_external:
@@ -34,11 +37,20 @@ services:
 
   enterprise-worker:
     extends: {file: ./services/enterprise-worker.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
+    secrets: [contact_turnstile_secret_key]
   enterprise-sandbox-worker:
     extends: {file: ./services/enterprise-worker.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
+    secrets: [contact_turnstile_secret_key]
     command: sh -c "mkdir -p /tmp/prometheus-multiproc && exec python -m core_api.modules.enterprise.worker --lane sandbox"
   enterprise-maintenance:
     extends: {file: ./services/enterprise-worker.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: /run/secrets/contact_turnstile_secret_key
+    secrets: [contact_turnstile_secret_key]
     command: sh -c "mkdir -p /tmp/prometheus-multiproc && exec python -m core_api.modules.enterprise.worker --lane maintenance"
   clamav:
     image: clamav/clamav:stable

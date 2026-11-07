@@ -35,6 +35,14 @@ def validate(level: str, config: dict[str, object]) -> list[str]:
         if "cloudflared" not in services or "gateway" not in services:
             errors.append("production requires cloudflared and gateway")
     elif level == "staging":
+        for name in ("core-api", "enterprise-worker", "enterprise-sandbox-worker", "enterprise-maintenance"):
+            service = services.get(name, {})
+            if service.get("environment", {}).get("CONTACT_TURNSTILE_SECRET_KEY_FILE"):
+                errors.append(f"staging must not load a Turnstile secret: {name}")
+            for secret in service.get("secrets", []):
+                source = secret.get("source") if isinstance(secret, dict) else secret
+                if source == "contact_turnstile_secret_key":
+                    errors.append(f"staging must not mount the Turnstile secret: {name}")
         forbidden = {"quick-tunnel", "stripe-cli", "seed"} & services.keys()
         if forbidden:
             errors.append(f"staging contains forbidden services: {', '.join(sorted(forbidden))}")

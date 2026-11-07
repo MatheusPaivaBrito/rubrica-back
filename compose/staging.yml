@@ -17,6 +17,10 @@ services:
       AUTH_MFA_REQUIRED: "false"
   core-api:
     extends: {file: ./services/core-api.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SITE_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: ""
     volumes:
       - document_storage:/var/lib/rubrica/documents
     networks:
@@ -26,11 +30,23 @@ services:
         aliases: [rubrica-core-api]
   enterprise-worker:
     extends: {file: ./services/enterprise-worker.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SITE_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: ""
   enterprise-sandbox-worker:
     extends: {file: ./services/enterprise-worker.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SITE_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: ""
     command: sh -c "mkdir -p /tmp/prometheus-multiproc && exec python -m core_api.modules.enterprise.worker --lane sandbox"
   enterprise-maintenance:
     extends: {file: ./services/enterprise-worker.yml, service: production}
+    environment:
+      CONTACT_TURNSTILE_SITE_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY: ""
+      CONTACT_TURNSTILE_SECRET_KEY_FILE: ""
     command: sh -c "mkdir -p /tmp/prometheus-multiproc && exec python -m core_api.modules.enterprise.worker --lane maintenance"
   clamav:
     # Official Debian manifest supports Oracle ARM64 and local AMD64.

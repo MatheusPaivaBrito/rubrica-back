@@ -41,3 +41,35 @@ def test_service_database_and_provider_secrets_are_loaded(tmp_path, monkeypatch)
     assert core.POSTGRES_PASSWORD == "database-secret"
     assert core.STRIPE_SECRET_KEY == "sk_test_secret"
     assert eventing.POSTGRES_PASSWORD == "database-secret"
+
+
+def test_staging_core_and_workers_do_not_mount_or_load_turnstile(tmp_path, monkeypatch):
+    from pathlib import Path
+    import yaml
+    from toolbox.checks.staging_readiness import REQUIRED_SECRETS
+    root = Path(__file__).resolve().parents[1]
+    staging = yaml.safe_load((root/"compose/staging.yml").read_text())["services"]
+    shared = yaml.safe_load((root/"compose/services/core-api.yml").read_text())["services"]["production"]
+    production = yaml.safe_load((root/"compose/production.yml").read_text())["services"]
+    missing = tmp_path/"unavailable-turnstile"
+    monkeypatch.setenv("CONTACT_TURNSTILE_SECRET_KEY_FILE", str(missing))
+    monkeypatch.setenv("CONTACT_TURNSTILE_SECRET_KEY", "should-not-enable-staging")
+    assert "contact_turnstile_secret_key" not in REQUIRED_SECRETS
+    assert "contact_turnstile_secret_key" not in shared["secrets"]
+    assert "CONTACT_TURNSTILE_SECRET_KEY_FILE" not in shared["environment"]
+    for name in ("core-api", "enterprise-worker", "enterprise-sandbox-worker", "enterprise-maintenance"):
+        config = staging[name]["environment"]
+        assert config["CONTACT_TURNSTILE_SECRET_KEY_FILE"] == ""
+        settings = CoreSettings(_env_file=None, ENVIRONMENT="staging",
+                                TENANT_IDENTITY_ENCRYPTION_KEY="e"*48,
+                                TENANT_IDENTITY_HMAC_KEY="h"*48, **config)
+        assert settings.CONTACT_TURNSTILE_SECRET_KEY == settings.CONTACT_TURNSTILE_SITE_KEY == ""
+        assert "contact_turnstile_secret_key" in production[name]["secrets"]
+        assert production[name]["environment"]["CONTACT_TURNSTILE_SECRET_KEY_FILE"] == "/run/secrets/contact_turnstile_secret_key"
+
+
+def test_production_still_requires_configured_turnstile_file(tmp_path):
+    import pytest
+    with pytest.raises(FileNotFoundError):
+        CoreSettings(_env_file=None, ENVIRONMENT="production",
+                     CONTACT_TURNSTILE_SECRET_KEY_FILE=str(tmp_path/"missing-turnstile"))
