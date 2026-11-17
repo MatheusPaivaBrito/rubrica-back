@@ -1991,6 +1991,33 @@ Esse desenho multiplicaria Products e Prices por quantidade, moeda e periodicida
 - Webhooks repetidos, fora de ordem ou após timeout são idempotentes.
 - Landing page, billing, e-mails, Stripe e API apresentam os mesmos preços, limites e nomes.
 
+### Correção prioritária — sessões de checkout duplicadas e troca de moeda
+
+Pendente. Em 17/11/2026, três tentativas de teste criaram sessões de assinatura
+em USD para o mesmo cliente Stripe. As três ficaram abertas e sem pagamento.
+Ao corrigir a moeda do workspace para BRL, o Stripe rejeitou o novo checkout
+com HTTP 400 por conflito de moeda, apresentado como 502 no Rubrica. Após
+expirar as três sessões de teste, o checkout em BRL passou e a compra foi concluída.
+
+- Reutilizar uma sessão aberta e válida para o mesmo workspace, plano,
+  periodicidade, moeda e Price. Proteger contra duplo clique, chamadas
+  concorrentes, timeout e retries com idempotência no backend e no Stripe.
+- Ao mudar a moeda ou o preço antes da compra, reconciliar as sessões antigas.
+  Expirar somente sessões abertas e sem pagamento, pertencentes ao mesmo
+  workspace e cliente, após verificar o estado atual no Stripe. Se houver
+  pagamento, sessão concluída, assinatura ou fatura relevante, preservar o
+  histórico e encaminhar ao fluxo de cobrança adequado.
+- Retornar mensagem acionável para conflitos, sem expor detalhes internos.
+  Registrar categoria, status e ID da requisição Stripe para diagnóstico.
+- Na criação da conta, exigir país de cobrança no frontend e no backend,
+  separado do país emissor do documento. Para contas existentes sem país,
+  solicitar o dado antes de abrir checkout, em vez de presumir USD.
+  Preservar a moeda de assinaturas existentes e tratar sua mudança separadamente.
+- Validar em sandbox: repetir o clique e requests concorrentes, cancelar e
+  retornar ao checkout, trocar USD por BRL, proteger compras já concluídas
+  e confirmar ativação por webhook. Verificar o caso em que o Stripe criou
+  a sessão mas a resposta se perdeu.
+
 ## Parte 14 — API Empresarial, integrações e armazenamento externo
 
 Status: **ESCOPO INICIAL IMPLEMENTADO E TESTADO LOCALMENTE — LIBERAÇÃO EXTERNA PENDENTE**. Desenho aprovado e implementação autorizada. Vinculada ao plano Empresarial da Parte 13.
