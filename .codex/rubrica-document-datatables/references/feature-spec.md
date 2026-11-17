@@ -2009,10 +2009,17 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
   histórico e encaminhar ao fluxo de cobrança adequado.
 - Retornar mensagem acionável para conflitos, sem expor detalhes internos.
   Registrar categoria, status e ID da requisição Stripe para diagnóstico.
-- Na criação da conta, exigir país de cobrança no frontend e no backend,
-  separado do país emissor do documento. Para contas existentes sem país,
-  solicitar o dado antes de abrir checkout, em vez de presumir USD.
-  Preservar a moeda de assinaturas existentes e tratar sua mudança separadamente.
+- Em todo cadastro público novo, exigir país da conta e documento de
+  identificação no frontend e no backend. O documento deve incluir tipo,
+  país emissor e número válido para o tipo selecionado. Usar os tipos de
+  documento suportados pelo produto para cada país emissor.
+- O país da conta é uma escolha obrigatória e independente do país emissor
+  do documento. O país da conta define a moeda de cobrança. Rejeitar payloads
+  sem país ou com documento ausente, incompleto ou inválido antes de criar
+  o usuário, provisionar o workspace ou enviar e-mail de confirmação.
+- Para contas existentes sem país, solicitar o dado antes de abrir checkout,
+  em vez de presumir USD. Preservar a moeda de assinaturas existentes e
+  tratar sua mudança separadamente.
 - Validar em sandbox: repetir o clique e requests concorrentes, cancelar e
   retornar ao checkout, trocar USD por BRL, proteger compras já concluídas
   e confirmar ativação por webhook. Verificar o caso em que o Stripe criou
