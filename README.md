@@ -165,3 +165,50 @@ Prove that a backup is restorable without touching production:
 Verification checks SHA-256 hashes, restores every database into a disposable
 PostgreSQL container and checks that the document archive can be read. Run this
 after the first deployment and periodically thereafter.
+
+### Diagnóstico temporário: produção pelo domínio de staging
+
+Os alvos abaixo são exclusivos da `main` e do servidor. Mantêm o banco, o R2,
+os secrets e as imagens dos containers de produção existentes. Não executam
+build, pull de imagens, migrations ou seed. Não são um staging isolado: qualquer
+cadastro ou assinatura nesse acesso altera os dados reais de produção.
+
+Pré-requisitos: manutenção já aplicada no container `rubrica-prod-web-1`, backup
+original em `/tmp/rubrica-before-maintenance.conf`, túnel de staging existente
+publicando `staging.rubricasignature.com` para `http://gateway:8080` e sua rede
+`rubrica-staging_rubrica_internal`. O Access existente do staging permanece.
+O hostname deve ser aceito pelo widget Turnstile usado na produção para testar
+cadastros. Não trocar a chave, o remetente Resend nem provedores por placeholders.
+
+```bash
+make production-diagnostic-prepare LOCAL_ENV_FILE=/dev/null
+make production-diagnostic-staging LOCAL_ENV_FILE=/dev/null
+```
+
+A preparação salva apenas IDs de imagens, vínculos não sensíveis, caminhos dos
+mounts e configurações Nginx em `~/rubrica-production-staging-switch`, com modo
+0700/0600. Recusa divergência nos bancos, armazenamento e origens dos secrets.
+Também testa o Nginx em um container temporário da mesma imagem, sem iniciar
+aplicações. Não para containers existentes durante a preparação.
+
+A aplicação para os containers do staging antigo, preservando seu túnel e seus
+volumes; conecta temporariamente o gateway de produção à rede desse túnel e
+recria somente Auth, Core e Web com as mesmas imagens. Ajusta os links para o
+hostname staging. O site público permanece em manutenção com o mecanismo de
+limpeza do SW já instalado, e `/billing/webhooks/stripe` continua sendo recebido.
+O hostname interno `web` é aceito para o healthcheck já existente do gateway.
+
+Não recriar o gateway nem usar `make production-up` durante esse diagnóstico:
+a conexão adicional de rede e os overrides são temporários. O gerador não
+altera `.env.production`, configurações Cloudflare ou dados dos bancos.
+
+Para voltar às URLs originais e retirar a conexão ao túnel de staging, mantendo
+o site público em manutenção:
+
+```bash
+make production-diagnostic-rollback LOCAL_ENV_FILE=/dev/null
+```
+
+Esse rollback reverte a configuração, não transações de dados realizadas no
+período. Reabrir o site público e restaurar backups são operações separadas.
+Guarde o diretório de estado até concluir a recuperação; não o versione.

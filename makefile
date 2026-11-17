@@ -62,6 +62,9 @@ help:
 	@echo "  make bootstrap           Migrate, seed local plan accounts, then start the stack"
 	@echo "  make production-config  Validate the production Compose and secrets"
 	@echo "  make production-up      Build and start the production stack"
+	@echo "  make production-diagnostic-prepare  Prepare production access via staging hostname"
+	@echo "  make production-diagnostic-staging  Apply prepared switch, keep public maintenance"
+	@echo "  make production-diagnostic-rollback Restore original URLs, keep public maintenance"
 	@echo "  make production-migrate Apply every production migration"
 	@echo "  make production-sign-ecnpj input=documento.pdf output=documento_assinado.pdf"
 	@echo "  sudo make production-invite-lifetime name='...' email=... document_type=BR_CPF document_country=BR locale=pt-BR actor=EMAIL reason='...'"
@@ -339,3 +342,15 @@ smoke-all:
 	@$(MAKE) --no-print-directory smoke-core-generator
 smoke-core-generator:
 	poetry run python toolbox/smoke/core_generator.py
+
+# Temporary production diagnostics: same production data and images, staging hostname.
+PRODUCTION_DIAGNOSTIC_STATE_DIR ?= $(HOME)/rubrica-production-staging-switch
+.PHONY: production-diagnostic-prepare production-diagnostic-staging production-diagnostic-rollback
+production-diagnostic-prepare:
+	python3 toolbox/operations/production_staging_domain.py prepare --state-dir "$(PRODUCTION_DIAGNOSTIC_STATE_DIR)"
+
+production-diagnostic-staging:
+	python3 toolbox/operations/production_staging_domain.py apply --state-dir "$(PRODUCTION_DIAGNOSTIC_STATE_DIR)"
+
+production-diagnostic-rollback:
+	python3 toolbox/operations/production_staging_domain.py rollback --state-dir "$(PRODUCTION_DIAGNOSTIC_STATE_DIR)"
