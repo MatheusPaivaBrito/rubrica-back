@@ -2017,6 +2017,17 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
   do documento. O país da conta define a moeda de cobrança. Rejeitar payloads
   sem país ou com documento ausente, incompleto ou inválido antes de criar
   o usuário, provisionar o workspace ou enviar e-mail de confirmação.
+- Validar a unicidade do e-mail normalizado e do documento normalizado
+  (tipo, país emissor e número), inclusive para cadastros pendentes de
+  confirmação. Garantir ambas as restrições no banco para impedir duplicatas
+  em requisições simultâneas. Usar o índice de busca protegido do documento,
+  sem expor o número completo.
+- Se houver conflito, impedir a criação de outra conta e não provisionar
+  workspace nem enviar e-mail de novo cadastro. No formulário público, usar
+  uma resposta neutra que oriente login ou recuperação sem confirmar qual
+  dado já está registrado. Não afirmar que a conta foi criada.
+- Testar e-mail repetido com variação de maiúsculas, CPF com e sem máscara,
+  mesmo documento com outro e-mail, cadastros pendentes e tentativas concorrentes.
 - Para contas existentes sem país, solicitar o dado antes de abrir checkout,
   em vez de presumir USD. Preservar a moeda de assinaturas existentes e
   tratar sua mudança separadamente.
