@@ -2384,9 +2384,9 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
   em requisições simultâneas. Usar o índice de busca protegido do documento,
   sem expor o número completo.
 - Se houver conflito, impedir a criação de outra conta e não provisionar
-  workspace nem enviar e-mail de novo cadastro. No formulário público, usar
-  uma resposta neutra que oriente login ou recuperação sem confirmar qual
-  dado já está registrado. Não afirmar que a conta foi criada.
+  workspace nem enviar e-mail de novo cadastro. O formulário público exibe
+  “E-mail ou documento já em uso” para HTTP 409, sem identificar qual dado
+  causou o conflito.
 - Testar e-mail repetido com variação de maiúsculas, CPF com e sem máscara,
   mesmo documento com outro e-mail, cadastros pendentes e tentativas concorrentes.
 - Para contas existentes sem país, solicitar o dado antes de abrir checkout,

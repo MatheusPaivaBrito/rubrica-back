@@ -27,8 +27,11 @@ async def register(payload: PublicRegistration, request: Request) -> AccountActi
     verify_turnstile(payload.turnstile_token, "register", request.headers.get("x-real-ip") or (request.client.host if request.client else None))
     try:
         account_service.register(payload)
-    except AccountConflictError:
-        pass
+    except AccountConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="E-mail or identity document is already registered",
+        ) from exc
     except (AccountEmailDeliveryError, TenantProvisioningError) as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
