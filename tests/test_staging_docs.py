@@ -40,9 +40,8 @@ def portal(tmp_path, monkeypatch):
     return tmp_path/".artifacts/local-docs"
 
 
-def test_portal_generates_account_subpage_and_preserves_api_link(portal):
+def test_portal_generates_account_subpage(portal):
     assert "(test-accounts.md)" in (portal/"index.md").read_text()
-    assert "(/docs/api/)" in (portal/"index.md").read_text()
     assert "fictional-test-password" in (portal/"test-accounts.md").read_text()
     assert not (portal/"accounts.md").exists()
 

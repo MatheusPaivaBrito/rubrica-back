@@ -224,5 +224,5 @@ gerencia backups do Rubrica: os comandos de backup/restauração deste projeto
 continuam específicos do produto.
 
 No staging, o portal MkDocs fica em `/docs/`, as contas em
-`/docs/test-accounts/` e a documentação da API empresarial em `/docs/api/`.
+`/docs/test-accounts/`.
 Os endereços antigos `/test-accounts/` redirecionam para o novo portal.

@@ -191,3 +191,20 @@ The Platform Infra stack is external to Rubrica. It is optional and safely degra
 3. Finish multi-tenant navigation and entitlement/downgrade flows without weakening tenant isolation or historical evidence.
 4. Complete the file lifecycle audit covering local/R2 integrity, retention, backup, migration and tested restoration.
 5. Keep plans and entitlements driven by confirmed Rubrica commercial requirements; do not import generic billing behavior from another product.
+
+### Optional remote Platform publisher (observability_api)
+
+The local two-service staging now lives in compose/observability-staging-local.yml,
+preserving its PostgreSQL volume and loopback port 8104. The optional
+observability-platform overlay mounts one protected platform_token file secret. No extra
+collector/Tunnel or product APIs are started. Presence and a full filtered metrics
+snapshot are published as JSON every 30 seconds to the admitted rubrica/staging
+service; no logs/traces are sent to this endpoint. Background transport is bounded
+and failure never changes API health/readiness. Development is disabled by default.
+
+Read-only ensure checks ingestion status and a metric-name query via /ingest/v1/query,
+using the same Bearer key, receiver time and actual sample timestamps. No Grafana
+or Cloudflare Access credentials are required. Server-enforced scope isolates projects. See
+[staging Platform runbook](observability-staging-platform.md) for Make commands,
+operator-owned secret installation and sanitized evidence. No remote server
+configuration or credential issuance is performed by this workflow.

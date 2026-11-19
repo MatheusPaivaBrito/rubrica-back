@@ -114,9 +114,6 @@ def main() -> None:
         "- [Cloudflare R2](cloudflare-r2.md)\n",
         encoding="utf-8",
     )
-    if environment == "staging":
-        with home.open("a", encoding="utf-8") as handle:
-            handle.write("- [API empresarial — contrato e exemplos](/docs/api/)\n")
     home.chmod(0o600)
     # Remove the generated legacy page so stale credentials are not served.
     (target / "accounts.md").unlink(missing_ok=True)
