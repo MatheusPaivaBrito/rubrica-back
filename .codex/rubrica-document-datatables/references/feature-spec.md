@@ -2354,6 +2354,14 @@ Acrescente aqui a Parte 15 e as seguintes conforme o usuário as definir. Separe
 
 ## Parte 15 — Stripe Checkout, moeda e validação do cadastro
 
+### Checklist para o merge em main
+
+- Agendar a janela de manutenção no domínio de produção. Ativar a regra de manutenção existente no Cloudflare com exceção para o IP público atual do operador. Verificar o acesso normal pelo PC autorizado e a resposta 503 de manutenção de outra origem.
+- Conferir se o diagnóstico temporário que encaminha produção pelo túnel de staging está ativo. Se estiver, executar `make production-diagnostic-rollback LOCAL_ENV_FILE=/dev/null` pelo checkout que ainda contém o alvo, antes de removê-lo. Confirmar que o túnel de staging atende o ambiente isolado e que a produção permanece acessível pelo domínio de produção durante a manutenção para o operador autorizado.
+- Incluir no merge para `main` o revert explícito de `4684fa8` com `git revert 4684fa8` no ramo de integração que já contém esse commit. Confirmar que os alvos `production-diagnostic-*` e o runbook temporário saíram do resultado. O revert remove o ferramental do Git. A configuração em execução depende do rollback no servidor.
+- Liberar o acesso público após validar os fluxos de cadastro, assinatura, checkout e webhook no domínio de produção.
+
+
 Checkout implementado no corte da release. Validação com Stripe em staging e correções de cadastro continuam pendentes. Em 17/11/2026, três tentativas de teste criaram sessões de assinatura
 em USD para o mesmo cliente Stripe. As três ficaram abertas e sem pagamento.
 Ao corrigir a moeda do workspace para BRL, o Stripe rejeitou o novo checkout
