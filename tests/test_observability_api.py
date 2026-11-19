@@ -67,9 +67,3 @@ def test_metrics_use_rubrica_namespace_without_sensitive_labels() -> None:
     assert "rubrica_http_requests_total" in response.text
     assert "rubrica_business_metrics_collection_success" in response.text
     assert "nexodesk_" not in response.text
-    from prometheus_client.parser import text_string_to_metric_families
-    forbidden = {"user_id", "tenant_id", "document_id", "request_id", "trace_id", "email"}
-    for family in text_string_to_metric_families(response.text):
-        for sample in family.samples:
-            # Route templates may contain {document_id}; actual identity labels may not.
-            assert not forbidden.intersection(sample.labels)

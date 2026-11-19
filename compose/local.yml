@@ -70,12 +70,6 @@ services:
       retries: 12
     restart: unless-stopped
 
-  clamav:
-    image: clamav/clamav:stable
-    volumes: [clamav_database:/var/lib/clamav]
-    mem_limit: 1536m
-    restart: unless-stopped
-
   k6:
     extends:
       file: ./services/k6.yml
@@ -85,6 +79,3 @@ networks:
   platform_observability:
     name: platform-observability
     external: true
-
-volumes:
-  clamav_database:

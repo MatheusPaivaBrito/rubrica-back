@@ -14,13 +14,6 @@
 backups
 data
 secrets
-.secrets
-.runtime
-.aws
-private-recovery
-*.tar.gz
-*.enc
-*.pfx
 site
 dist
 build

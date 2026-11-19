@@ -6,7 +6,6 @@ ESSENTIAL = "rubrica_base"
 PROFESSIONAL = "rubrica_intermediate"
 TEAM = "rubrica_team"
 LIFETIME = "rubrica_lifetime"
-ENTERPRISE = "rubrica_enterprise"
 
 
 @dataclass(frozen=True)
@@ -27,7 +26,6 @@ CUSTOM_STAMP_BRANDING = "custom_stamp_branding"
 BUSINESS_REPRESENTATION = "business_representation"
 TEAM_MANAGEMENT = "team_management"
 EMAIL_INVITATIONS = "email_invitations"
-ENTERPRISE_API = "enterprise_api"
 
 TEAM_ENTITLEMENTS = frozenset(
     {
@@ -45,7 +43,6 @@ TEAM_ENTITLEMENTS = frozenset(
 
 
 CATALOG = {
-    ENTERPRISE: PlanDefinition(ENTERPRISE, 10, 220, TEAM_ENTITLEMENTS | {ENTERPRISE_API}, allows_seat_expansion=True),
     FREE: PlanDefinition(FREE, 1, None, frozenset({EVIDENCE})),
     ESSENTIAL: PlanDefinition(
         ESSENTIAL,

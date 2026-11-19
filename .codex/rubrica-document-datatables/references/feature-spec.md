@@ -1991,51 +1991,6 @@ Esse desenho multiplicaria Products e Prices por quantidade, moeda e periodicida
 - Webhooks repetidos, fora de ordem ou após timeout são idempotentes.
 - Landing page, billing, e-mails, Stripe e API apresentam os mesmos preços, limites e nomes.
 
-### Correção prioritária — sessões de checkout duplicadas e troca de moeda
-
-Pendente. Em 17/11/2026, três tentativas de teste criaram sessões de assinatura
-em USD para o mesmo cliente Stripe. As três ficaram abertas e sem pagamento.
-Ao corrigir a moeda do workspace para BRL, o Stripe rejeitou o novo checkout
-com HTTP 400 por conflito de moeda, apresentado como 502 no Rubrica. Após
-expirar as três sessões de teste, o checkout em BRL passou e a compra foi concluída.
-
-- Reutilizar uma sessão aberta e válida para o mesmo workspace, plano,
-  periodicidade, moeda e Price. Proteger contra duplo clique, chamadas
-  concorrentes, timeout e retries com idempotência no backend e no Stripe.
-- Ao mudar a moeda ou o preço antes da compra, reconciliar as sessões antigas.
-  Expirar somente sessões abertas e sem pagamento, pertencentes ao mesmo
-  workspace e cliente, após verificar o estado atual no Stripe. Se houver
-  pagamento, sessão concluída, assinatura ou fatura relevante, preservar o
-  histórico e encaminhar ao fluxo de cobrança adequado.
-- Retornar mensagem acionável para conflitos, sem expor detalhes internos.
-  Registrar categoria, status e ID da requisição Stripe para diagnóstico.
-- Em todo cadastro público novo, exigir país da conta e documento de
-  identificação no frontend e no backend. O documento deve incluir tipo,
-  país emissor e número válido para o tipo selecionado. Usar os tipos de
-  documento suportados pelo produto para cada país emissor.
-- O país da conta é uma escolha obrigatória e independente do país emissor
-  do documento. O país da conta define a moeda de cobrança. Rejeitar payloads
-  sem país ou com documento ausente, incompleto ou inválido antes de criar
-  o usuário, provisionar o workspace ou enviar e-mail de confirmação.
-- Validar a unicidade do e-mail normalizado e do documento normalizado
-  (tipo, país emissor e número), inclusive para cadastros pendentes de
-  confirmação. Garantir ambas as restrições no banco para impedir duplicatas
-  em requisições simultâneas. Usar o índice de busca protegido do documento,
-  sem expor o número completo.
-- Se houver conflito, impedir a criação de outra conta e não provisionar
-  workspace nem enviar e-mail de novo cadastro. No formulário público, usar
-  uma resposta neutra que oriente login ou recuperação sem confirmar qual
-  dado já está registrado. Não afirmar que a conta foi criada.
-- Testar e-mail repetido com variação de maiúsculas, CPF com e sem máscara,
-  mesmo documento com outro e-mail, cadastros pendentes e tentativas concorrentes.
-- Para contas existentes sem país, solicitar o dado antes de abrir checkout,
-  em vez de presumir USD. Preservar a moeda de assinaturas existentes e
-  tratar sua mudança separadamente.
-- Validar em sandbox: repetir o clique e requests concorrentes, cancelar e
-  retornar ao checkout, trocar USD por BRL, proteger compras já concluídas
-  e confirmar ativação por webhook. Verificar o caso em que o Stripe criou
-  a sessão mas a resposta se perdeu.
-
 ## Parte 14 — API Empresarial, integrações e armazenamento externo
 
 Status: **ADIADA PARA UMA RELEASE POSTERIOR**. O escopo inicial já foi implementado e testado localmente. A Parte 14 continua vinculada ao plano Empresarial da Parte 13.
@@ -2044,7 +1999,7 @@ Status: **ADIADA PARA UMA RELEASE POSTERIOR**. O escopo inicial já foi implemen
 
 - Priorizar as melhorias e correções do produto atual, com validação em staging antes de promover para produção.
 - Adiar a oferta empresarial por API, a emissão e rotação de tokens de integração, o OAuth delegado, o sandbox, o portal público de integração e o armazenamento externo dessa oferta.
-- Antes de promover a atualização, validar que as rotas e a interface de integração empresarial ficam indisponíveis em produção e que o deploy dispensa workers, ClamAV e credenciais exclusivos da Parte 14. Se a branch de staging não permitir esse isolamento, preparar o corte a partir de main com as mudanças validadas que serão publicadas.
+- O código da integração foi retirado do corte `release/sem-api-empresarial` no backend e no frontend. A implementação segue em `feature/document-signing-workflow`. Validar o corte em staging com um banco na revisão compatível antes de promover. Bancos que já receberam as migrações da Parte 14 exigem uma estratégia própria de compatibilidade ou restauração.
 - O histórico de implementação abaixo fica como referência para retomar a Parte 14 em uma entrega própria.
 
 ### Progresso de implementação
@@ -2396,3 +2351,48 @@ Referências de segurança: [OWASP REST Security](https://cheatsheetseries.owasp
 ## Próximas partes
 
 Acrescente aqui a Parte 15 e as seguintes conforme o usuário as definir. Separe requisitos confirmados de sugestões e atualize os critérios de aceitação sem apagar decisões anteriores.
+
+## Parte 15 — Stripe Checkout, moeda e validação do cadastro
+
+Pendente. Em 17/11/2026, três tentativas de teste criaram sessões de assinatura
+em USD para o mesmo cliente Stripe. As três ficaram abertas e sem pagamento.
+Ao corrigir a moeda do workspace para BRL, o Stripe rejeitou o novo checkout
+com HTTP 400 por conflito de moeda, apresentado como 502 no Rubrica. Após
+expirar as três sessões de teste, o checkout em BRL passou e a compra foi concluída.
+
+- Reutilizar uma sessão aberta e válida para o mesmo workspace, plano,
+  periodicidade, moeda e Price. Proteger contra duplo clique, chamadas
+  concorrentes, timeout e retries com idempotência no backend e no Stripe.
+- Ao mudar a moeda ou o preço antes da compra, reconciliar as sessões antigas.
+  Expirar somente sessões abertas e sem pagamento, pertencentes ao mesmo
+  workspace e cliente, após verificar o estado atual no Stripe. Se houver
+  pagamento, sessão concluída, assinatura ou fatura relevante, preservar o
+  histórico e encaminhar ao fluxo de cobrança adequado.
+- Retornar mensagem acionável para conflitos, sem expor detalhes internos.
+  Registrar categoria, status e ID da requisição Stripe para diagnóstico.
+- Em todo cadastro público novo, exigir país da conta e documento de
+  identificação no frontend e no backend. O documento deve incluir tipo,
+  país emissor e número válido para o tipo selecionado. Usar os tipos de
+  documento suportados pelo produto para cada país emissor.
+- O país da conta é uma escolha obrigatória e independente do país emissor
+  do documento. O país da conta define a moeda de cobrança. Rejeitar payloads
+  sem país ou com documento ausente, incompleto ou inválido antes de criar
+  o usuário, provisionar o workspace ou enviar e-mail de confirmação.
+- Validar a unicidade do e-mail normalizado e do documento normalizado
+  (tipo, país emissor e número), inclusive para cadastros pendentes de
+  confirmação. Garantir ambas as restrições no banco para impedir duplicatas
+  em requisições simultâneas. Usar o índice de busca protegido do documento,
+  sem expor o número completo.
+- Se houver conflito, impedir a criação de outra conta e não provisionar
+  workspace nem enviar e-mail de novo cadastro. No formulário público, usar
+  uma resposta neutra que oriente login ou recuperação sem confirmar qual
+  dado já está registrado. Não afirmar que a conta foi criada.
+- Testar e-mail repetido com variação de maiúsculas, CPF com e sem máscara,
+  mesmo documento com outro e-mail, cadastros pendentes e tentativas concorrentes.
+- Para contas existentes sem país, solicitar o dado antes de abrir checkout,
+  em vez de presumir USD. Preservar a moeda de assinaturas existentes e
+  tratar sua mudança separadamente.
+- Validar em sandbox: repetir o clique e requests concorrentes, cancelar e
+  retornar ao checkout, trocar USD por BRL, proteger compras já concluídas
+  e confirmar ativação por webhook. Verificar o caso em que o Stripe criou
+  a sessão mas a resposta se perdeu.
