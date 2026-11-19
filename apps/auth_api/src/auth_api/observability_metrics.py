@@ -32,6 +32,10 @@ def collect_business_metrics():
         "Usuarios criados dentro de uma janela recente.",
         labels=["window"],
     )
+    latest = GaugeMetricFamily(
+        "rubrica_users_last_created_timestamp_seconds",
+        "Timestamp Unix do cadastro mais recente entre contas não excluídas.",
+    )
     try:
         now = datetime.now(UTC)
         with Session(_engine) as session:
@@ -49,6 +53,12 @@ def collect_business_metrics():
                     .where(UserEntity.deleted_at.is_(None), UserEntity.created_at >= now - delta)
                 ) or 0
                 created.add_metric([label], count)
+            last_created_at = session.scalar(
+                select(func.max(UserEntity.created_at)).where(UserEntity.deleted_at.is_(None))
+            )
+        if last_created_at is not None:
+            latest.add_metric([], last_created_at.timestamp())
+            yield latest
         success.add_metric(["auth_api"], 1)
         yield users
         yield created

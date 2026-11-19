@@ -1,0 +1,115 @@
+{
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "Prometheus",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "uid": "rubrica-cadastros",
+  "title": "Rúbrica / Cadastros",
+  "schemaVersion": 39,
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Novos cadastros",
+      "description": "As janelas são móveis e se sobrepõem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (window) (rubrica_users_created_window{job=\"rubrica-apis\",service=\"auth-api\"})",
+          "legendFormat": "{{window}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 6
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Último cadastro registrado",
+      "description": "Horário UTC do cadastro mais recente entre as contas não excluídas.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(rubrica_users_last_created_timestamp_seconds{job=\"rubrica-apis\",service=\"auth-api\"}) * 1000",
+          "legendFormat": "Último cadastro",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeAsIso"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 6
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Cadastros nas últimas 24h ao longo do tempo",
+      "description": "Cada ponto representa a contagem das 24 horas anteriores.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(rubrica_users_created_window{job=\"rubrica-apis\",service=\"auth-api\",window=\"24h\"})",
+          "legendFormat": "Cadastros em 24h",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 6,
+        "w": 24,
+        "h": 9
+      }
+    }
+  ]
+}
