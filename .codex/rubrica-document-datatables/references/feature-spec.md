@@ -2354,7 +2354,7 @@ Acrescente aqui a Parte 15 e as seguintes conforme o usuário as definir. Separe
 
 ## Parte 15 — Stripe Checkout, moeda e validação do cadastro
 
-Pendente. Em 17/11/2026, três tentativas de teste criaram sessões de assinatura
+Checkout implementado no corte da release. Validação com Stripe em staging e correções de cadastro continuam pendentes. Em 17/11/2026, três tentativas de teste criaram sessões de assinatura
 em USD para o mesmo cliente Stripe. As três ficaram abertas e sem pagamento.
 Ao corrigir a moeda do workspace para BRL, o Stripe rejeitou o novo checkout
 com HTTP 400 por conflito de moeda, apresentado como 502 no Rubrica. Após

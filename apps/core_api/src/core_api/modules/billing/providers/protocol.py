@@ -6,6 +6,10 @@ class BillingProviderError(Exception):
     pass
 
 
+class CheckoutConflictError(BillingProviderError):
+    pass
+
+
 class InvalidWebhookSignatureError(BillingProviderError):
     pass
 

@@ -1,3 +1,5 @@
+import logging
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -6,6 +8,7 @@ import stripe
 from core_api.infrastructure.settings import settings
 from core_api.modules.billing.providers.protocol import (
     BillingProviderError,
+    CheckoutConflictError,
     InvalidWebhookSignatureError,
     ProviderCustomer,
     ProviderBusinessIdentity,
@@ -13,6 +16,9 @@ from core_api.modules.billing.providers.protocol import (
     ProviderSubscriptionChange,
     ProviderTaxId,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class StripeBillingProvider:
@@ -29,7 +35,8 @@ class StripeBillingProvider:
         metadata: Mapping[str, str],
     ) -> ProviderCustomer:
         customer = stripe.Customer.create(
-            email=email, name=name, metadata=dict(metadata)
+            email=email, name=name, metadata=dict(metadata),
+            idempotency_key=f"rubrica-customer-{metadata['tenant_id']}" if "tenant_id" in metadata else None,
         )
         return ProviderCustomer(id=str(customer.id))
 
@@ -53,20 +60,65 @@ class StripeBillingProvider:
             "subscription_data": {
                 "metadata": {"tenant_id": tenant_id, "product_code": product_code}
             },
-            "metadata": {"tenant_id": tenant_id, "product_code": product_code},
+            "metadata": {"tenant_id": tenant_id, "product_code": product_code, "price_id": price_id},
         }
         if product_code in {"rubrica_intermediate", "rubrica_team"}:
             parameters["tax_id_collection"] = {"enabled": True}
             parameters["customer_update"] = {"name": "auto", "address": "auto"}
         try:
-            checkout = stripe.checkout.Session.create(**parameters)
+            reusable, latest_id = self._reconcile_checkout(customer_id, tenant_id, price_id)
+            if reusable:
+                return ProviderSession(url=reusable)
+            key = sha256(f"{tenant_id}:{customer_id}:{price_id}:{latest_id}".encode()).hexdigest()
+            checkout = stripe.checkout.Session.create(**parameters, idempotency_key=f"rubrica-checkout-{key}")
+        except CheckoutConflictError:
+            raise
         except Exception as exc:
+            logger.warning(
+                "Stripe checkout failed category=%s status=%s request_id=%s",
+                type(exc).__name__, getattr(exc, "http_status", None), getattr(exc, "request_id", None),
+            )
             raise BillingProviderError(
                 "Stripe checkout could not be opened"
             ) from exc
         if not checkout.url:
             raise BillingProviderError("Stripe did not return a checkout URL")
         return ProviderSession(url=str(checkout.url))
+
+    @staticmethod
+    def _reconcile_checkout(customer_id: str, tenant_id: str, price_id: str) -> tuple[str | None, str]:
+        latest_id = ""
+        reusable = None
+        obsolete = []
+        for session in stripe.checkout.Session.list(customer=customer_id).auto_paging_iter():
+            if session.get("client_reference_id") != tenant_id or session.get("mode") != "subscription":
+                continue
+            latest_id = latest_id or session.id
+            if session.get("status") == "complete":
+                if session.get("subscription"):
+                    subscription = stripe.Subscription.retrieve(session["subscription"])
+                    if subscription.get("status") not in {"canceled", "incomplete_expired"}:
+                        raise CheckoutConflictError("An existing subscription must be resolved before starting another checkout")
+                elif session.get("payment_status") == "paid" or session.get("invoice"):
+                    raise CheckoutConflictError("A checkout payment is already in progress")
+            if session.get("status") != "open":
+                continue
+            if session.get("payment_status") != "unpaid" or session.get("invoice") or session.get("subscription"):
+                raise CheckoutConflictError("A checkout payment is already in progress")
+            items = stripe.checkout.Session.list_line_items(session.id, limit=2).get("data", [])
+            matches = len(items) == 1 and items[0].get("quantity") == 1 and (
+                items[0].get("price") or {}
+            ).get("id") == price_id
+            if matches and session.get("url") and reusable is None:
+                reusable = session["url"]
+            else:
+                obsolete.append(session.id)
+        for session_id in obsolete:
+            try:
+                stripe.checkout.Session.expire(session_id)
+            except stripe.InvalidRequestError as exc:
+                raise CheckoutConflictError("Checkout changed while processing. Reload billing and try again") from exc
+        return reusable, latest_id
 
     def create_portal_session(
         self,

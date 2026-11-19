@@ -9,6 +9,14 @@ from core_api.modules.billing.providers.protocol import (
 from core_api.modules.billing.providers.stripe_provider import StripeBillingProvider
 
 
+@pytest.fixture(autouse=True)
+def empty_checkout_history(monkeypatch):
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.checkout.Session.list",
+        lambda **_: SimpleNamespace(auto_paging_iter=lambda: iter(())),
+    )
+
+
 def test_stripe_provider_requires_secret_key(monkeypatch) -> None:
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
@@ -48,6 +56,7 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch, produ
     assert session.url == "https://checkout.stripe.test/session"
     assert captured["client_reference_id"] == "019c-tenant"
     assert captured["metadata"] == {
+        "price_id": "price_jpy",
         "tenant_id": "019c-tenant",
         "product_code": product_code,
     }
@@ -304,3 +313,64 @@ def test_stripe_plan_change_restores_cancellation_if_portal_fails(monkeypatch) -
         )
 
     assert updates == [False, True]
+
+
+@pytest.mark.parametrize("matching", [True, False])
+def test_checkout_reuses_only_the_requested_price(monkeypatch, matching):
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
+    existing = stripe.StripeObject.construct_from({
+        "id": "cs_old", "client_reference_id": "tenant", "mode": "subscription",
+        "status": "open", "payment_status": "unpaid", "url": "https://stripe.test/old",
+    }, None)
+    expired = []
+    created = []
+    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_: SimpleNamespace(auto_paging_iter=lambda: iter([existing])))
+    monkeypatch.setattr(stripe.checkout.Session, "list_line_items", lambda *_args, **_kwargs: {
+        "data": [{"quantity": 1, "price": {"id": "price_brl" if matching else "price_usd"}}],
+    })
+    monkeypatch.setattr(stripe.checkout.Session, "expire", expired.append)
+
+    def create(**kwargs):
+        created.append(kwargs)
+        return SimpleNamespace(url="https://stripe.test/new")
+
+    monkeypatch.setattr(stripe.checkout.Session, "create", create)
+    result = StripeBillingProvider().create_checkout_session(
+        customer_id="cus_test", tenant_id="tenant", price_id="price_brl",
+        product_code="rubrica_base", success_url="https://rubrica.test/success",
+        cancel_url="https://rubrica.test/cancel",
+    )
+    if matching:
+        assert result.url == "https://stripe.test/old"
+        assert not expired and not created
+    else:
+        assert result.url == "https://stripe.test/new"
+        assert expired == ["cs_old"]
+        assert created[0]["idempotency_key"].startswith("rubrica-checkout-")
+
+
+def test_checkout_retry_after_timeout_uses_same_idempotency_key(monkeypatch):
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
+    keys = []
+
+    def create(**kwargs):
+        keys.append(kwargs["idempotency_key"])
+        if len(keys) == 1:
+            raise TimeoutError
+        return SimpleNamespace(url="https://stripe.test/existing")
+
+    monkeypatch.setattr(stripe.checkout.Session, "create", create)
+    provider = StripeBillingProvider()
+    parameters = {
+        "customer_id": "cus_test", "tenant_id": "tenant", "price_id": "price_brl",
+        "product_code": "rubrica_base", "success_url": "https://rubrica.test/success",
+        "cancel_url": "https://rubrica.test/cancel",
+    }
+    with pytest.raises(BillingProviderError):
+        provider.create_checkout_session(**parameters)
+    assert provider.create_checkout_session(**parameters).url == "https://stripe.test/existing"
+    assert keys[0] == keys[1]

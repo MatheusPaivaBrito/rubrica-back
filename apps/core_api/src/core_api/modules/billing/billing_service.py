@@ -43,12 +43,13 @@ from core_api.modules.billing.providers import billing_provider
 from core_api.modules.billing.providers.protocol import (
     BillingProvider,
     BillingProviderError,
+    CheckoutConflictError,
     InvalidWebhookSignatureError,
     ProviderBusinessIdentity,
 )
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
-from core_api.modules.tenant.tenant_service import tenant_service
+from core_api.modules.tenant.tenant_service import billing_currency_for_country, tenant_service
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -370,10 +371,12 @@ class BillingService:
         provider = self._get_provider()
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
-            tenant = database.get(TenantEntity, tenant_id)
+            tenant = database.get(TenantEntity, tenant_id, with_for_update=True)
             if tenant is None or tenant.deleted_at is not None:
                 raise WorkflowError("Tenant not found", 404)
-            account = self._account_entity(database, tenant_id)
+            if not (tenant.country_code or "").strip():
+                raise WorkflowError("Set the workspace country before opening checkout", 409)
+            account = self._account_entity(database, tenant_id, lock=True)
             if account.complimentary_lifetime:
                 raise WorkflowError(
                     "This account already has complimentary lifetime access",
@@ -391,7 +394,8 @@ class BillingService:
                     "The selected plan is already active",
                     409,
                 )
-            price_id = self._price_for_currency(tenant.currency, product_code, billing_interval)
+            currency = billing_currency_for_country(tenant.country_code.strip())
+            price_id = self._price_for_currency(currency, product_code, billing_interval)
             try:
                 if not account.provider_customer_id:
                     customer = provider.create_customer(
@@ -409,6 +413,8 @@ class BillingService:
                     success_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?checkout=success",
                     cancel_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?checkout=cancelled",
                 )
+            except CheckoutConflictError as exc:
+                raise WorkflowError(str(exc), 409) from exc
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 502) from exc
             return BillingCheckoutRead(checkout_url=checkout.url)
