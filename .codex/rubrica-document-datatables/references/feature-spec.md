@@ -2038,7 +2038,14 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
 
 ## Parte 14 — API Empresarial, integrações e armazenamento externo
 
-Status: **ESCOPO INICIAL IMPLEMENTADO E TESTADO LOCALMENTE — LIBERAÇÃO EXTERNA PENDENTE**. Desenho aprovado e implementação autorizada. Vinculada ao plano Empresarial da Parte 13.
+Status: **ADIADA PARA UMA RELEASE POSTERIOR**. O escopo inicial já foi implementado e testado localmente. A Parte 14 continua vinculada ao plano Empresarial da Parte 13.
+
+### Escopo da próxima atualização
+
+- Priorizar as melhorias e correções do produto atual, com validação em staging antes de promover para produção.
+- Adiar a oferta empresarial por API, a emissão e rotação de tokens de integração, o OAuth delegado, o sandbox, o portal público de integração e o armazenamento externo dessa oferta.
+- Antes de promover a atualização, validar que as rotas e a interface de integração empresarial ficam indisponíveis em produção e que o deploy dispensa workers, ClamAV e credenciais exclusivos da Parte 14. Se a branch de staging não permitir esse isolamento, preparar o corte a partir de main com as mudanças validadas que serão publicadas.
+- O histórico de implementação abaixo fica como referência para retomar a Parte 14 em uma entrega própria.
 
 ### Progresso de implementação
 
