@@ -2354,6 +2354,14 @@ Acrescente aqui a Parte 15 e as seguintes conforme o usuário as definir. Separe
 
 ## Parte 15 — Stripe Checkout, moeda e validação do cadastro
 
+### Teste de acesso após exclusão de workspace
+
+1. Preparar staging com bancos novos e rodar as migrações, o seed e o smoke. Usar apenas contas e documentos de teste. Guardar a referência dos commits e confirmar o bucket exclusivo de staging.
+2. Criar uma conta comum fora do seed, confirmar o e-mail, entrar e conferir que o cadastro provisionou seu workspace inicial. Anotar os estados de `GET /tenants` e `GET /tenants/access-state`.
+3. Com um administrador do seed, convidar a conta para um segundo workspace de teste, aceitar o convite e confirmar o acesso. Excluir esse segundo workspace pela interface e verificar que o acesso a ele foi revogado e que o workspace inicial continua acessível.
+4. Com um usuário de teste cujo workspace a excluir seja o último vínculo ativo, repetir a exclusão. Confirmar que o login continua funcionando e que a interface distingue conta sem workspace de vínculo suspenso. Se a API devolver zero vínculos ativos e suspensos, a tela deve indicar uma saída utilizável. A política de criação ou recuperação para esse estado fica pendente de validação.
+5. Comparar com um vínculo suspenso de verdade. Para uma conta sem workspace ativo e com um vínculo suspenso, esperar o formulário de criação do espaço pessoal. Criar o espaço, conferir o redirecionamento ao painel e validar que o acesso ao workspace suspenso continua bloqueado.
+
 ### Checklist para o merge em main
 
 - Agendar a janela de manutenção no domínio de produção. Ativar a regra de manutenção existente no Cloudflare com exceção para o IP público atual do operador. Verificar o acesso normal pelo PC autorizado e a resposta 503 de manutenção de outra origem.
