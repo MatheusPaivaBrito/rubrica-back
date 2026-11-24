@@ -2433,6 +2433,15 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 - Um administrador ativo pode consultar o acervo do workspace que administra, inclusive documentos de membros atuais ou desligados. O convite para uma empresa não concede acesso a arquivos pessoais nem a arquivos de outra empresa.
 - Um novo membro começa com acesso **somente aos próprios arquivos** no acervo empresarial. O administrador pode ampliar esse escopo. Um convite de assinatura dá acesso somente à solicitação designada e não amplia o acesso ao acervo.
 
+### Múltiplos documentos de identidade
+
+Proposta para revisão. O cadastro deve permitir que a mesma pessoa mantenha documentos emitidos por países diferentes e escolha um documento elegível para cada assinatura, sem abrir outra conta. Nacionalidade, país do workspace para cobrança e país emissor do documento são dados independentes. Morar em outro país ou cadastrar um novo documento pode mudar a escolha para assinaturas futuras, sem substituir os dados registrados nas assinaturas anteriores.
+
+- Exemplo: uma pessoa brasileira que vive no Japão mantém o CPF e adiciona um documento japonês de tipo aceito. No perfil, ela pode escolher um documento padrão e usar o outro em uma assinatura quando a modalidade e a solicitação permitirem.
+- A modalidade de assinatura e as permissões do workspace determinam quais documentos podem ser usados. Cadastrar um documento local não habilita, por si só, um provedor ou certificado daquele país. Confirmar os tipos suportados e os requisitos de verificação antes de exibi-los como opções.
+- Manter a unicidade protegida por tipo, país emissor e número normalizado. Exibir o número mascarado na seleção e preservar a identidade e a evidência da assinatura já concluída se o documento for trocado, removido ou deixar de ser o padrão.
+- Testar dois documentos na mesma conta, país de cobrança diferente do emissor, seleção padrão e alternativa, modalidade incompatível, tentativa de reutilizar o mesmo documento em outra conta e preservação da evidência histórica.
+
 ### Upgrade empresarial e permissões por membro
 
 - Exigir CNPJ antes de iniciar o upgrade para Profissional ou Equipe. Validar o vínculo com a empresa antes de conceder administração. Um CNPJ já associado a outro workspace segue o fluxo de solicitação de acesso. Após confirmação do upgrade, cadastrar ou habilitar o workspace empresarial e atribuir o papel de administrador ao mesmo login, preservando os vínculos anteriores e o espaço pessoal.
