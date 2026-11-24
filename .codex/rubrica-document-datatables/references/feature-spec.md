@@ -2422,7 +2422,7 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
 
 ## Parte 16 — Seletor de workspace e separação de acervo e cobrança
 
-Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O escopo de leitura do acervo empresarial por membro já tem migração, API e controle na tela Time. O provisionamento dos espaços pessoais ausentes, as permissões de assinatura empresarial e os demais fluxos ainda precisam ser implementados e validados de ponta a ponta.
+Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O escopo de leitura do acervo empresarial por membro já tem migração, API e controle na tela Time. A tela de reativação permite recuperar um espaço pessoal quando a conta está sem workspace ativo, inclusive se não houver vínculo suspenso. Ainda faltam a criação de espaço pessoal para contas legadas com um workspace empresarial ativo, as permissões de assinatura empresarial e os demais fluxos. A validação integrada em staging permanece pendente.
 
 ### Identidade, acervo e franquia
 
@@ -2494,7 +2494,7 @@ Proposta para revisão. O cadastro deve permitir que a mesma pessoa mantenha doc
 
 | Ponto | Proposta para revisão |
 |---|---|
-| Conta sem workspace elegível | Definir o fluxo de recuperação para contas antigas sem espaço pessoal e sem acesso a um espaço empresarial. |
+| Conta legada com acesso empresarial e sem espaço pessoal | Definir o ponto de entrada para criar o espaço pelo frontend enquanto a empresa estiver ativa. A recuperação pela tela de reativação já existe para contas sem workspace ativo. |
 | Permissões de membros existentes | Definir a transição dos vínculos existentes e se leitura inclui baixar o PDF. O padrão para novos membros é **somente próprios**. |
 | Acompanhamento de solicitações após desligamento | Definir como o administrador reassume solicitações abertas e emite um novo convite específico quando necessário. |
 | Upgrade e vínculo com o CNPJ | Definir a prova de representação aceita, quando o workspace é criado e o que acontece se o pagamento confirmar após uma disputa pelo mesmo CNPJ. Impedir criação duplicada e concessão incorreta de administração. |

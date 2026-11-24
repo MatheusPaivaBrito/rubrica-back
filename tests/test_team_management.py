@@ -132,15 +132,21 @@ def test_suspended_member_can_create_personal_workspace_without_restoring_busine
         assert old_membership.status == 'suspended'
 
 
-def test_personal_reactivation_requires_suspended_access_and_no_active_workspace(team_db):
-    with pytest.raises(WorkflowError):
-        module.tenant_service.create_personal_after_suspension(
-            TenantCreate(name='Duplicate'), 'member0@example.local', None
+def test_personal_reactivation_recovers_account_with_no_workspace(team_db):
+    service = module.tenant_service
+    with pytest.raises(WorkflowError, match="An active workspace already exists"):
+        service.create_personal_after_suspension(
+            TenantCreate(name="Duplicate"), "member0@example.local", None
         )
-    with pytest.raises(WorkflowError):
-        module.tenant_service.create_personal_after_suspension(
-            TenantCreate(name='Outsider'), 'outsider@example.local', None
-        )
+    subject = "outsider@example.local"
+    assert service.access_state(subject).can_create_personal_tenant
+    with pytest.raises(WorkflowError, match="Choose the country"):
+        service.create_personal_after_suspension(TenantCreate(name="Outsider"), subject, None)
+    payload = TenantCreate(name="Outsider", country_code="JP", currency="USD")
+    personal = service.create_personal_after_suspension(payload, subject, None)
+    assert personal.currency == "JPY"
+    assert service.create_personal_after_suspension(payload, subject, None).id == personal.id
+    assert [tenant.id for tenant in service.list_for(subject)] == [personal.id]
 
 
 @pytest.mark.parametrize('selection', ['over_limit', 'without_admin', 'foreign'])

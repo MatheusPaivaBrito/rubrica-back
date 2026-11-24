@@ -171,7 +171,7 @@ class TenantService:
             return TenantAccessState(
                 active_tenant_count=active_count,
                 suspended_tenants=suspended,
-                can_create_personal_tenant=active_count == 0 and bool(suspended),
+                can_create_personal_tenant=active_count == 0,
             )
 
     def create_personal_after_suspension(
@@ -180,23 +180,31 @@ class TenantService:
         subject: str,
         user_id: str | None,
     ) -> TenantRead:
+        try:
+            auth_user_uuid = UUID(user_id) if user_id else None
+        except ValueError:
+            auth_user_uuid = None
         with SessionLocal.begin() as db:
-            memberships = db.scalars(
-                select(TenantMemberEntity)
+            if db.get_bind().dialect.name == "postgresql":
+                identity = str(auth_user_uuid) if auth_user_uuid else subject.strip().lower()
+                db.execute(select(func.pg_advisory_xact_lock(func.hashtext(f"personal-workspace:{identity}"))))
+            memberships = db.execute(
+                select(TenantEntity, TenantMemberEntity)
+                .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
                 .where(
-                    self.membership_identity_filter(subject),
+                    self.membership_identity_filter(subject, auth_user_uuid),
+                    TenantEntity.deleted_at.is_(None),
                     TenantMemberEntity.deleted_at.is_(None),
                 )
                 .with_for_update()
             ).all()
-            if any(member.status == "active" for member in memberships):
+            for workspace, member in memberships:
+                if workspace.kind == "personal" and member.status == "active":
+                    return self._read(workspace, member.role)
+            if any(member.status == "active" for _, member in memberships):
                 raise WorkflowError("An active workspace already exists", 409)
-            if not any(member.status == "suspended" for member in memberships):
-                raise WorkflowError("No suspended workspace access was found", 409)
-            try:
-                auth_user_uuid = UUID(user_id) if user_id else None
-            except ValueError:
-                auth_user_uuid = None
+            if not payload.country_code:
+                raise WorkflowError("Choose the country for your personal workspace", 422)
             tenant = TenantEntity(
                 name=payload.name.strip(),
                 slug=_public_slug(),
@@ -204,7 +212,7 @@ class TenantService:
                 default_locale=payload.default_locale,
                 country_code=payload.country_code,
                 timezone=payload.timezone,
-                currency=payload.currency,
+                currency=billing_currency_for_country(payload.country_code),
                 kind="personal",
             )
             db.add(tenant)
@@ -223,8 +231,8 @@ class TenantService:
                 db,
                 tenant.id,
                 subject,
-                "tenant.personal_created_after_suspension",
-                {"suspended_membership_count": len(memberships)},
+                "tenant.personal_workspace_recovered",
+                {},
             )
             db.flush()
             return self._read(tenant, member.role)
