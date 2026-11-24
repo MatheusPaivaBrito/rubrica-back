@@ -2443,7 +2443,7 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 
 ### Seletor e contexto antes de enviar
 
-- Exibir o seletor somente quando a pessoa tiver acesso a pelo menos dois workspaces com planos ativos. Mostrar os nomes dos espaços elegíveis e indicar o contexto atual. Com um único plano ativo, abrir diretamente o workspace correspondente e ocultar o seletor.
+- Exibir o seletor somente quando a pessoa tiver acesso a pelo menos dois workspaces com planos ativos. O plano gratuito vigente também conta, mesmo com a franquia esgotada. Mostrar os nomes dos espaços elegíveis e indicar o contexto atual. Com um único plano ativo, abrir diretamente o workspace correspondente e ocultar o seletor.
 - Antes de confirmar um upload, informar onde o documento será salvo e de qual plano sairá o consumo. Exemplos de texto são “Salvar em Empresa X · usa o plano da empresa” e “Salvar no meu espaço pessoal · usa meu plano”.
 - Uma troca de contexto ou a perda do workspace selecionado deve atualizar o acervo visível. Informar qualquer redirecionamento ao espaço pessoal e exigir nova confirmação de destino para uploads já iniciados na interface. Validar no backend vínculos, permissões e a franquia do destino antes de gravar.
 - Contas existentes sem workspace pessoal precisam de um fluxo idempotente de provisionamento ou recuperação. Distinguir conta sem workspace, vínculo suspenso e vínculo sem assento. Se houver espaço pessoal ativo, ele deve continuar acessível em todos esses cenários.
@@ -2470,7 +2470,7 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 
 | Ponto | Proposta para revisão |
 |---|---|
-| O que conta como plano ativo no seletor | Definir se o plano gratuito vigente conta. Caso não conte, definir como abrir o espaço pessoal e contratar um plano quando o único espaço no seletor for empresarial. Tratar também conta com zero planos elegíveis. |
+| Conta sem workspace elegível | Definir o fluxo de recuperação para contas antigas sem espaço pessoal e sem acesso a um espaço empresarial. |
 | Permissão inicial de um membro | Começar em **somente próprios**. O administrador amplia manualmente. Definir a política de transição para vínculos existentes e confirmar se leitura permite baixar o PDF. |
 | Readmissão e retorno de assento | Distinguir o retorno após uma suspensão de uma nova admissão após o desligamento. Usar a data da nova admissão para o filtro temporal e exigir nova concessão explícita para recuperar acesso histórico mais amplo. Confirmar se arquivos de autoria antiga continuam visíveis no nível **somente próprios**. |
 | Convite de assinatura e acesso ao acervo | Permitir acesso específico à solicitação quando houver convite válido. Definir revogação, responsável por solicitações abertas e direito a cópia após a assinatura, independentemente do acesso ao acervo. |
@@ -2481,6 +2481,6 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 ### Validação em staging
 
 1. Criar uma conta, confirmar o workspace pessoal e enviar um PDF pessoal. Convidar a conta para duas empresas de teste e confirmar que seus administradores não listam nem abrem o documento pessoal por URL direta.
-2. Validar que o seletor fica oculto com um único plano ativo e aparece quando houver dois ou mais, sempre respeitando os vínculos da conta. Em cada workspace, enviar um PDF e confirmar acervo, autoria e consumo separadamente. Testar que esgotar a franquia pessoal não consome a empresarial e que contratar o plano pessoal não altera os planos dos demais espaços.
+2. Validar que o seletor fica oculto com um único plano ativo e aparece quando houver dois ou mais, inclusive com workspace pessoal gratuito e workspace empresarial ativo. O esgotamento da franquia gratuita preserva o espaço no seletor. Em cada workspace, enviar um PDF e confirmar acervo, autoria e consumo separadamente. Testar que esgotar a franquia pessoal não consome a empresarial e que contratar o plano pessoal não altera os planos dos demais espaços.
 3. Suspender, remover e retirar o assento em cenários separados. Conferir a virada normal e o atalho de staging. Testar seletor, URL antiga, preview e download após a mudança, com sessão já aberta e após novo login. Validar que o administrador ainda vê o acervo empresarial e que o usuário ainda abre o acervo pessoal.
 4. Cobrir readmissão, mudança de papel, assinatura em andamento, documento assinado, troca de destino e encerramento conforme as regras decididas para cada caso da matriz.
