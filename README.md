@@ -116,6 +116,12 @@ fixture catalog used in development, starts the stack and runs the smoke. Use
 `make staging-seed` to reapply only those fixtures explicitly; production never
 runs test-account seeds.
 
+Para começar com um banco limpo em staging:
+
+- `make staging-reset-db` para a aplicação e apaga o volume PostgreSQL de staging.
+- `make staging-reset-db-seed` valida staging, apaga o banco e executa o bootstrap com migrações, seed e smoke.
+- Os dois comandos preservam Redis, R2 e os demais volumes. São exclusivos de staging.
+
 Remote staging uses a dedicated remotely managed Cloudflare Tunnel published at
 `https://staging.rubricasignature.com`. Configure the tunnel's public hostname
 with the service origin `http://gateway:8080` and store its dedicated token in

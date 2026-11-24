@@ -30,7 +30,8 @@ DEV_COMPOSE = docker compose --env-file $(DEV_ENV_FILE) -f $(DEV_COMPOSE_FILE)
 DOCS_COMPOSE = docker compose --env-file $(DOCS_ENV_FILE) -f $(DEV_COMPOSE_FILE)
 # Prevent values exported from the development .env above from overriding the
 # explicit staging/production env files (shell variables outrank --env-file).
-ISOLATED_COMPOSE = env -i PATH="$(PATH)" HOME="$(HOME)" docker compose
+ISOLATED_DOCKER = env -i PATH="$(PATH)" HOME="$(HOME)" docker
+ISOLATED_COMPOSE = $(ISOLATED_DOCKER) compose
 STAGING_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(STAGING_ENV_FILE) -f $(STAGING_COMPOSE_FILE) -f compose/features/r2-documents.yml -f compose/features/serpro-timestamp.yml
 PRODUCTION_COMPOSE = $(ISOLATED_COMPOSE) --env-file $(PRODUCTION_ENV_FILE) -f $(PRODUCTION_COMPOSE_FILE) -f $(PRODUCTION_R2_COMPOSE_FILE) -f $(PRODUCTION_TIMESTAMP_COMPOSE_FILE)
 LOCAL_MAINTENANCE = $(LOCAL_COMPOSE) -f compose/services/alembic.yml
@@ -52,7 +53,7 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-status staging-logs staging-public-url staging-docs-url staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-reset-db staging-reset-db-seed staging-status staging-logs staging-public-url staging-docs-url staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 .PHONY: staging-clone-core-from-production staging-clone-r2-documents staging-encrypt-r2-documents document-crypto-benchmark
 
 help:
@@ -93,6 +94,8 @@ help:
 	@echo "  make staging-public-url        Mostra a URL pública estável do staging"
 	@echo "  make staging-docs-url          Mostra a URL pública do portal MkDocs"
 	@echo "  make staging-down              Encerra preservando volumes"
+	@echo "  make staging-reset-db          Apaga o PostgreSQL de staging e deixa a aplicação parada"
+	@echo "  make staging-reset-db-seed     Apaga o PostgreSQL de staging e recria a aplicação com seed"
 	@echo "  make staging-clone-core-from-production confirm=CLONE_PRODUCTION_CORE_TO_STAGING"
 	@echo "  make staging-clone-r2-documents [apply=1]  Clona objetos referenciados"
 	@echo "  make staging-encrypt-r2-documents [apply=1] Audita/migra criptografia"
@@ -184,6 +187,19 @@ staging-up: staging-ensure
 
 staging-down:
 	$(STAGING_COMPOSE) down --remove-orphans
+
+staging-reset-db:
+	@set -eu; \
+		volume=rubrica-staging_postgres_data; \
+		$(STAGING_COMPOSE) config --format json | python3 -c 'import json, sys; c = json.load(sys.stdin); sys.exit(0 if c.get("name") == "rubrica-staging" and c.get("volumes", {}).get("postgres_data", {}).get("name") == "rubrica-staging_postgres_data" else "Reset recusado: projeto ou volume PostgreSQL fora do staging.")'; \
+		labels="$$($(ISOLATED_DOCKER) volume inspect --format '{{index .Labels "com.docker.compose.project"}}/{{index .Labels "com.docker.compose.volume"}}' "$$volume")"; \
+		test "$$labels" = rubrica-staging/postgres_data || { echo "[error] Volume PostgreSQL sem os rótulos esperados de staging"; exit 2; }; \
+		$(STAGING_COMPOSE) down --remove-orphans; \
+		$(ISOLATED_DOCKER) volume rm "$$volume"
+
+staging-reset-db-seed: staging-ensure
+	$(MAKE) --no-print-directory staging-reset-db
+	$(MAKE) --no-print-directory staging-bootstrap
 
 staging-status:
 	$(STAGING_COMPOSE) ps -a
