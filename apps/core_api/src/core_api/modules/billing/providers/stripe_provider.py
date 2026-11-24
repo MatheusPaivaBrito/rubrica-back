@@ -73,6 +73,8 @@ class StripeBillingProvider:
             checkout = stripe.checkout.Session.create(**parameters, idempotency_key=f"rubrica-checkout-{key}")
         except CheckoutConflictError:
             raise
+        except stripe.CardError as exc:
+            raise CheckoutConflictError("The payment method was declined") from exc
         except Exception as exc:
             logger.warning(
                 "Stripe checkout failed category=%s status=%s request_id=%s",

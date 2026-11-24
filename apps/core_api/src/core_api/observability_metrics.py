@@ -1,3 +1,6 @@
+import os
+
+from prometheus_client import Counter
 from prometheus_client.core import GaugeMetricFamily
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -7,6 +10,13 @@ from core_api.infrastructure.settings import settings
 from core_api.modules.document.document_entity import DocumentEntity
 from core_api.modules.signature_request.signature_request_entity import SignatureRequestEntity
 from core_api.modules.tenant.tenant_entity import TenantEntity
+
+
+PAYMENT_TECHNICAL_FAILURES = Counter(
+    "rubrica_payment_technical_failures_total",
+    "Falhas tecnicas ao criar checkout ou processar webhook Stripe validado.",
+    registry=None,
+)
 
 
 _engine = create_engine(
@@ -19,6 +29,9 @@ _engine = create_engine(
 
 
 def collect_business_metrics():
+    # In production the shared MultiProcessCollector already reads this counter.
+    if not os.getenv("PROMETHEUS_MULTIPROC_DIR"):
+        yield from PAYMENT_TECHNICAL_FAILURES.collect()
     success = GaugeMetricFamily(
         "rubrica_business_metrics_collection_success",
         "Indica se a coleta de metricas de negocio foi concluida.",

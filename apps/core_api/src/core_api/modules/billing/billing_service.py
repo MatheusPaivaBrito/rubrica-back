@@ -1,6 +1,8 @@
 import logging
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -50,6 +52,7 @@ from core_api.modules.billing.providers.protocol import (
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import billing_currency_for_country, tenant_service
+from core_api.observability_metrics import PAYMENT_TECHNICAL_FAILURES
 from shared_kernel.time.datetime_service import DateTimeService
 
 
@@ -368,6 +371,19 @@ class BillingService:
     def create_checkout(
         self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str = "month"
     ) -> BillingCheckoutRead:
+        try:
+            return self._create_checkout(tenant_id, subject, product_code, billing_interval)
+        except WorkflowError as exc:
+            if exc.status_code >= 500:
+                PAYMENT_TECHNICAL_FAILURES.inc()
+            raise
+        except Exception:
+            PAYMENT_TECHNICAL_FAILURES.inc()
+            raise
+
+    def _create_checkout(
+        self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str
+    ) -> BillingCheckoutRead:
         provider = self._get_provider()
         with SessionLocal.begin() as database:
             tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
@@ -469,6 +485,15 @@ class BillingService:
         except BillingProviderError as exc:
             raise WorkflowError(str(exc), 503) from exc
 
+        try:
+            return self._process_webhook(provider, event, payload)
+        except Exception:
+            PAYMENT_TECHNICAL_FAILURES.inc()
+            raise
+
+    def _process_webhook(
+        self, provider: BillingProvider, event: Mapping[str, Any], payload: bytes
+    ) -> BillingWebhookRead:
         event_id = str(event["id"])
         with SessionLocal() as database:
             existing_status = database.scalar(
