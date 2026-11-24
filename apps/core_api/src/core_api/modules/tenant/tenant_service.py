@@ -632,6 +632,32 @@ class TenantService:
             db.flush()
             return self._team_read(db, tenant_id, actor)
 
+    def update_document_scope(
+        self, tenant_id: UUID, member_id: UUID, scope: str, subject: str
+    ) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            actor = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            member = db.scalar(
+                select(TenantMemberEntity).where(
+                    TenantMemberEntity.id == member_id,
+                    TenantMemberEntity.tenant_id == tenant_id,
+                    TenantMemberEntity.deleted_at.is_(None),
+                ).with_for_update()
+            )
+            if member is None:
+                raise WorkflowError("Member does not belong to this tenant", 404)
+            if member.role == "admin":
+                raise WorkflowError("Administrators already have full workspace access", 409)
+            previous = member.document_scope
+            member.document_scope = scope
+            if previous != scope:
+                self._audit(db, tenant_id, subject, "tenant.document_scope_updated", {
+                    "member_id": str(member.id), "previous_scope": previous, "scope": scope,
+                })
+            db.flush()
+            return self._team_read(db, tenant_id, actor)
+
     def convert_to_business(
         self,
         tenant_id: UUID,

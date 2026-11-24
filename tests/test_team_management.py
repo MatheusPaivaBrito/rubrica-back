@@ -7,7 +7,9 @@ from sqlalchemy.orm import sessionmaker
 
 from core_api.infrastructure.auth_context import AuthContext, _active_auth_context
 from core_api.modules.billing.billing_entity import BillingAccountEntity
-from core_api.modules.signature_request.signature_request_entity import AuditEventEntity
+from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
+from core_api.modules.signature_request.database_workflow_service import DatabaseSignatureWorkflowService
+from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant import tenant_service as module
 from core_api.modules.tenant.tenant_entity import (
@@ -35,6 +37,10 @@ def team_db(monkeypatch):
         TenantSeatRosterEntity,
         BillingAccountEntity,
         AuditEventEntity,
+        DocumentEntity,
+        DocumentVersionEntity,
+        SignatureRequestEntity,
+        SignerEntity,
     ):
         entity.__table__.create(engine)
     factory = sessionmaker(engine, expire_on_commit=False)
@@ -359,3 +365,49 @@ def test_only_active_plan_workspaces_are_selectable(team_db):
 
     workspaces = module.tenant_service.list_for("member0@example.local")
     assert [space.kind for space in workspaces if space.workspace_selectable] == ["personal"]
+
+def test_document_scope_updates_listing_and_direct_access(team_db, monkeypatch):
+    from core_api.modules.signature_request import database_workflow_service as workflow
+
+    factory, tenant_id, ids = team_db
+    monkeypatch.setattr(workflow, "SessionLocal", factory)
+    service = DatabaseSignatureWorkflowService(None)
+    now = DateTimeService.utc_now()
+    member = "member1@example.local"
+    admin = "member0@example.local"
+    with factory.begin() as db:
+        db.get(TenantMemberEntity, ids[1]).joined_at = now
+        documents = []
+        for title, author, created_at in (
+            ("Own", member, now + timedelta(seconds=1)),
+            ("Earlier", admin, now - timedelta(days=1)),
+            ("Later", admin, now + timedelta(seconds=1)),
+        ):
+            record = DocumentEntity(
+                tenant_id=tenant_id, organization_id="team-test", title=title,
+                original_filename=f"{title}.pdf", content_type="application/pdf",
+                storage_key=title, sha256="f" * 64, version=1, status="ready",
+                created_by=author, created_at=created_at,
+            )
+            db.add(record)
+            documents.append(record)
+        db.flush()
+        ids_by_title = {record.title: record.id for record in documents}
+
+    assert {record.title for record in service.list_documents(member)} == {"Own"}
+    for scope, expected in (
+        ("all", {"Own", "Earlier", "Later"}),
+        ("since_joined", {"Own", "Later"}),
+        ("own", {"Own"}),
+    ):
+        module.tenant_service.update_document_scope(tenant_id, ids[1], scope, admin)
+        assert {record.title for record in service.list_documents(member)} == expected
+        assert {record.title for record in service.list_documents(admin)} == set(ids_by_title)
+        for title, document_id in ids_by_title.items():
+            if title in expected:
+                assert service.get_document(str(document_id), member).title == title
+            else:
+                with pytest.raises(WorkflowError, match="Document access is not allowed"):
+                    service.get_document(str(document_id), member)
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        module.tenant_service.update_document_scope(tenant_id, ids[1], "all", member)

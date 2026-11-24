@@ -122,12 +122,20 @@ class TenantMemberInvitation(BaseModel):
     role: str = Field(default="member", pattern=r"^(member|auditor)$")
 
 
+DocumentScope = Literal["own", "all", "since_joined"]
+
+
+class TenantDocumentScopeUpdate(BaseModel):
+    document_scope: DocumentScope
+
+
 class TenantMemberRead(BaseModel):
     id: UUID
     auth_user_id: str
     role: Literal["admin", "member", "auditor"]
     status: str
     joined_at: datetime | None = None
+    document_scope: Literal["legacy", "own", "all", "since_joined"] = "own"
 
 
 class TenantProvision(BaseModel):

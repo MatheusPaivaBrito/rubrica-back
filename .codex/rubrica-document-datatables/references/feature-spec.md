@@ -2422,7 +2422,7 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
 
 ## Parte 16 — Seletor de workspace e separação de acervo e cobrança
 
-Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O provisionamento dos espaços pessoais ausentes, as permissões empresariais e os demais fluxos ainda precisam ser implementados e validados de ponta a ponta.
+Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O escopo de leitura do acervo empresarial por membro já tem migração, API e controle na tela Time. O provisionamento dos espaços pessoais ausentes, as permissões de assinatura empresarial e os demais fluxos ainda precisam ser implementados e validados de ponta a ponta.
 
 ### Identidade, acervo e franquia
 

@@ -58,6 +58,7 @@ class TenantMemberEntity(BaseEntity):
     role: Mapped[str] = mapped_column(String(24), nullable=False, default="member", index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active", index=True)
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    document_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="own", server_default="own")
 
 
 class TenantSeatRosterEntity(BaseEntity):

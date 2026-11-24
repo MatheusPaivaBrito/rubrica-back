@@ -6,6 +6,7 @@ from core_api.infrastructure.settings import settings
 from core_api.modules.tenant.tenant_schema import (
     TenantBusinessConversion,
     TenantCreate,
+    TenantDocumentScopeUpdate,
     TenantMemberCreate,
     TenantMemberInvitation,
     TenantMemberRoleUpdate,
@@ -146,4 +147,15 @@ async def update_team_member_role(
 ) -> TenantTeamRead:
     return tenant_service.update_member_role(
         tenant_id, member_id, payload.role, context.subject
+    )
+
+@router.patch("/{tenant_id}/team/{member_id}/document-scope", response_model=TenantTeamRead)
+async def update_member_document_scope(
+    tenant_id: UUID,
+    member_id: UUID,
+    payload: TenantDocumentScopeUpdate,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantTeamRead:
+    return tenant_service.update_document_scope(
+        tenant_id, member_id, payload.document_scope, context.subject
     )

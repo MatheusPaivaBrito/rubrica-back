@@ -9,7 +9,7 @@ from secrets import token_urlsafe
 from typing import Callable, Iterator
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 
 from core_api.infrastructure.database.connection import SessionLocal
@@ -176,7 +176,7 @@ class DatabaseSignatureWorkflowService:
             statement = select(DocumentEntity).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(
                 DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None),
                 TenantMemberEntity.status == "active", tenant_service.membership_identity_filter(actor_id),
-                or_(TenantMemberEntity.role == "admin", func.lower(DocumentEntity.created_by) == normalized_actor, invited),
+                self._document_read_scope(normalized_actor, invited),
             ).order_by(DocumentEntity.created_at.desc(), DocumentEntity.id.desc())
             return [self._document_read(db, item) for item in db.scalars(statement).all() if not tenant_service.team_over_limit(db, item.tenant_id)]
 
@@ -1611,20 +1611,55 @@ class DatabaseSignatureWorkflowService:
         DatabaseSignatureWorkflowService._require_document_access(db, document, actor_id, request=request)
 
     @staticmethod
+    def _document_read_scope(actor_id: str, invited):
+        return or_(
+            TenantMemberEntity.role == "admin",
+            TenantMemberEntity.document_scope == "all",
+            and_(
+                TenantMemberEntity.document_scope == "since_joined",
+                DocumentEntity.created_at >= func.coalesce(
+                    TenantMemberEntity.joined_at, TenantMemberEntity.created_at
+                ),
+            ),
+            and_(
+                TenantMemberEntity.document_scope.in_(("own", "legacy")),
+                func.lower(DocumentEntity.created_by) == actor_id,
+            ),
+            and_(TenantMemberEntity.document_scope == "legacy", invited),
+        )
+
+    @staticmethod
     def _require_document_access(db, document: DocumentEntity, actor_id: str, *, request: SignatureRequestEntity | None = None) -> None:
         member = tenant_service.require_role(db, document.tenant_id, actor_id)
         normalized_actor = actor_id.lower()
-        if member.role == "admin" or document.created_by.lower() == normalized_actor:
-            return
         signer_query = select(SignerEntity.id).join(SignatureRequestEntity, SignatureRequestEntity.id == SignerEntity.signature_request_id).where(
             SignatureRequestEntity.document_id == document.id,
             SignatureRequestEntity.deleted_at.is_(None),
             or_(SignerEntity.auth_user_id == normalized_actor, SignerEntity.email == normalized_actor),
         )
         if request is not None:
-            signer_query = signer_query.where(SignatureRequestEntity.id == request.id)
-        if db.scalar(signer_query.limit(1)) is None:
-            raise WorkflowError("Document access is not allowed", 403)
+            # A document-listing permission never grants control of another person's request.
+            if member.role == "admin" or document.created_by.lower() == normalized_actor:
+                return
+            if db.scalar(signer_query.where(SignatureRequestEntity.id == request.id).limit(1)) is not None:
+                return
+        else:
+            allowed = db.scalar(
+                select(DocumentEntity.id)
+                .join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id)
+                .where(
+                    DocumentEntity.id == document.id,
+                    TenantMemberEntity.id == member.id,
+                    TenantMemberEntity.deleted_at.is_(None),
+                    TenantMemberEntity.status == "active",
+                    DatabaseSignatureWorkflowService._document_read_scope(
+                        normalized_actor, signer_query.exists()
+                    ),
+                )
+            )
+            if allowed is not None:
+                return
+        raise WorkflowError("Document access is not allowed", 403)
 
     def _request_read(self, db, item: SignatureRequestEntity) -> SignatureRequestRead:
         signer_count = db.scalar(select(func.count()).select_from(SignerEntity).where(SignerEntity.signature_request_id == item.id)) or 0
