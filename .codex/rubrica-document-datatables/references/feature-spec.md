@@ -2427,6 +2427,7 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 ### Identidade, acervo e franquia
 
 - A pessoa usa a mesma conta para o espaço pessoal e para todos os espaços empresariais aos quais tem acesso. O CPF é da pessoa. Um CNPJ identifica um workspace compartilhado, e as pessoas que o administram com seus próprios cadastros conservam seus espaços pessoais.
+- O espaço pessoal é administrado pela própria pessoa. O tenant empresarial não administra, consulta nem assume responsabilidade por documentos, assinaturas, cobrança, franquia ou histórico pessoais. Convite, alteração de papel, perda de assento e desligamento não alteram o espaço pessoal. Um compartilhamento explícito pode dar acesso a uma solicitação específica, sem conceder gestão do workspace de origem.
 - Cada workspace tem acervo, plano, cobrança e franquia próprios. Uma pessoa pode contratar um plano pessoal mesmo quando tem assento em uma empresa. Esgotar a franquia pessoal nunca transfere automaticamente consumo para a empresa.
 - O documento, suas versões, solicitações e evidências permanecem vinculados ao workspace em que foram criados. A autoria e as assinaturas continuam atribuídas às pessoas responsáveis. O escopo do workspace vale para o upload, preview, download e autorização no backend.
 - Um administrador ativo pode consultar o acervo do workspace que administra, inclusive documentos de membros atuais ou desligados. O convite para uma empresa não concede acesso a arquivos pessoais nem a arquivos de outra empresa.
@@ -2464,6 +2465,18 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 | Último administrador sai | Definir sucessão e como manter acesso administrativo ao acervo. |
 | Empresa encerra o workspace | Definir exportação, prazos de acesso e retenção e destino das solicitações pendentes. |
 | Pessoa exclui a própria conta | Definir destino do acervo pessoal e acesso de recuperação. Preservar a atribuição histórica das ações e assinaturas nos espaços empresariais. |
+
+### Decisões para fechar antes da implementação
+
+| Ponto | Proposta para revisão |
+|---|---|
+| O que conta como plano ativo no seletor | Definir se o plano gratuito vigente conta. Caso não conte, definir como abrir o espaço pessoal e contratar um plano quando o único espaço no seletor for empresarial. Tratar também conta com zero planos elegíveis. |
+| Permissão inicial de um membro | Começar em **somente próprios**. O administrador amplia manualmente. Definir a política de transição para vínculos existentes e confirmar se leitura permite baixar o PDF. |
+| Readmissão e retorno de assento | Distinguir o retorno após uma suspensão de uma nova admissão após o desligamento. Usar a data da nova admissão para o filtro temporal e exigir nova concessão explícita para recuperar acesso histórico mais amplo. Confirmar se arquivos de autoria antiga continuam visíveis no nível **somente próprios**. |
+| Convite de assinatura e acesso ao acervo | Permitir acesso específico à solicitação quando houver convite válido. Definir revogação, responsável por solicitações abertas e direito a cópia após a assinatura, independentemente do acesso ao acervo. |
+| Upgrade e vínculo com o CNPJ | Definir a prova de representação aceita, quando o workspace é criado e o que acontece se o pagamento confirmar após uma disputa pelo mesmo CNPJ. Impedir criação duplicada e concessão incorreta de administração. |
+| Arquivos no workspace errado | Definir quem pode corrigir rascunhos e como funciona cópia ou transferência entre espaços. Preservar origem e evidências de documentos já assinados. |
+| Exclusão e sucessão | Definir sucessor para o último administrador, exportação e retenção em encerramento, descarte do acervo pessoal e preservação das atribuições de autoria. |
 
 ### Validação em staging
 
