@@ -55,7 +55,8 @@ def main() -> None:
         "</section>",
         '<p class="local-note">Contas confirmadas pelo seed, sem Microsoft Authenticator. '
         "No login, cole no campo de e-mail: o Rubrica separa e-mail e senha automaticamente.</p>",
-        '<section class="plan-card seed-commands"><h2>Preparar contas de teste</h2>',
+        '## Preparar contas de teste',
+        '<section class="plan-card seed-commands">',
         '<p>Na primeira preparação do desenvolvimento, crie a configuração, aplique migrations, '
         'execute o seed e inicie o Rubrica:</p>',
         '<div class="seed-command"><code>make dev-bootstrap</code><button type="button" '
@@ -71,12 +72,13 @@ def main() -> None:
         'data-copy-command="make staging-seed">Copiar comando</button></div>',
         '</section>',
     ]
+    lines += ["", "## Contas por plano"]
     for title, accounts in (("Gratuito — 1 conta", ACCOUNTS[:1]),
                             ("Essencial — 1 conta", ACCOUNTS[1:2]),
                             ("Profissional — 3 contas", PROFESSIONAL),
                             ("Equipe — 6 contas", TEAM),
                             ("Vitalício — 3 contas", LIFETIME)):
-        lines += ["", f'<section class="plan-card"><h2>{title}</h2>', '<div class="account-list">']
+        lines += ["", f"### {title}", '<section class="plan-card">', '<div class="account-list">']
         for index, (email, _) in enumerate(accounts):
             escaped_email = html.escape(email, quote=True)
             role = "Administrador" if index == 0 else "Membro"
@@ -90,18 +92,30 @@ def main() -> None:
             )
         lines += ["</div></section>"]
     if environment == "staging":
-        lines += ["", '<section class="plan-card"><h2>Cenários de staging</h2>', '<div class="account-list">']
-        for email, scenario in STAGING_ACCOUNTS:
-            lines.append(
-                '<article class="account-row">'
-                f'<div class="account-identity"><strong>{html.escape(scenario)}</strong><span>{html.escape(email)}</span></div>'
-                '<div class="account-actions">'
-                f'<button type="button" class="copy-credentials" data-email="{html.escape(email, quote=True)}" '
-                f'data-password="{html.escape(raw_password, quote=True)}">Copiar conta</button>'
-                "</div></article>"
-            )
+        lines += ["", "## Cenários de staging"]
+        groups = (
+            ("Recuperação do espaço pessoal", STAGING_ACCOUNTS[:5]),
+            ("Troca de workspace e franquia", STAGING_ACCOUNTS[5:8]),
+            ("Permissões e readmissão", STAGING_ACCOUNTS[8:14]),
+            ("Sede, filiais e sucessão", STAGING_ACCOUNTS[14:19]),
+            ("Identidades e assinatura", STAGING_ACCOUNTS[19:20]),
+            ("Exportação e encerramento", (*STAGING_ACCOUNTS[20:22], STAGING_ACCOUNTS[25])),
+            ("Checkout, upgrade e virada de ciclo", STAGING_ACCOUNTS[22:25]),
+        )
+        for title, accounts in groups:
+            lines += ["", f"### {title}", '<section class="plan-card"><div class="account-list">']
+            for email, scenario in accounts:
+                lines.append(
+                    '<article class="account-row">'
+                    f'<div class="account-identity"><strong>{html.escape(scenario)}</strong><span>{html.escape(email)}</span></div>'
+                    '<div class="account-actions">'
+                    f'<button type="button" class="copy-credentials" data-email="{html.escape(email, quote=True)}" '
+                    f'data-password="{html.escape(raw_password, quote=True)}">Copiar conta</button>'
+                    "</div></article>"
+                )
+            lines += ["</div></section>"]
         lines += [
-            "</div></section>", "", "## PDFs para upload",
+            "", "## PDFs para upload",
             "- [Documento pessoal fictício](assets/teste-pessoal.pdf)",
             "- [Documento empresarial fictício, com duas páginas](assets/teste-empresa.pdf)",
             "",
