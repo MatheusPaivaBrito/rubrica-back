@@ -2422,7 +2422,7 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
 
 ## Parte 16 — Seletor de workspace e separação de acervo e cobrança
 
-Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O escopo de leitura do acervo empresarial por membro já tem migração, API e controle na tela Time. A tela de reativação permite recuperar um espaço pessoal quando a conta está sem workspace ativo, inclusive se não houver vínculo suspenso. Ainda faltam a criação de espaço pessoal para contas legadas com um workspace empresarial ativo, as permissões de assinatura empresarial e os demais fluxos. A validação integrada em staging permanece pendente.
+Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O escopo de leitura do acervo empresarial por membro já tem migração, API e controle na tela Time. A tela de reativação permite criar ou recuperar o espaço pessoal mesmo se a conta já tiver acesso empresarial. O administrador do workspace pode desligar e readmitir membros pela tela Time, com ou sem restauração de histórico. A opção de assinar somente em nome da empresa é verificada pelo Core no início e no encerramento da assinatura. Ainda faltam a gestão de organização e filiais, a seleção de múltiplos documentos na assinatura e o tratamento completo de encerramento e sucessão. A validação integrada em staging permanece pendente.
 
 ### Identidade, acervo e franquia
 
@@ -2496,7 +2496,6 @@ A aprovação manual antes do checkout e a ativação de filiais após confirma�
 
 | Ponto | Proposta para revisão |
 |---|---|
-| Conta legada com acesso empresarial e sem espaço pessoal | Definir o ponto de entrada para criar o espaço pelo frontend enquanto a empresa estiver ativa. A recuperação pela tela de reativação já existe para contas sem workspace ativo. |
 | Permissões de membros existentes | Definir a transição dos vínculos existentes e se leitura inclui baixar o PDF. O padrão para novos membros é **somente próprios**. |
 | Acompanhamento de solicitações após desligamento | Definir como o administrador reassume solicitações abertas e emite um novo convite específico quando necessário. |
 | Upgrade e vínculo com o CNPJ | Definir a prova de representação aceita, quando o workspace é criado e o que acontece se o pagamento confirmar após uma disputa pelo mesmo CNPJ. Impedir criação duplicada e concessão incorreta de administração. |

@@ -134,10 +134,14 @@ def test_suspended_member_can_create_personal_workspace_without_restoring_busine
 
 def test_personal_reactivation_recovers_account_with_no_workspace(team_db):
     service = module.tenant_service
-    with pytest.raises(WorkflowError, match="An active workspace already exists"):
-        service.create_personal_after_suspension(
-            TenantCreate(name="Duplicate"), "member0@example.local", None
-        )
+    business_member = "member0@example.local"
+    assert service.access_state(business_member).can_create_personal_tenant
+    personal = service.create_personal_after_suspension(
+        TenantCreate(name="Personal", country_code="BR"), business_member, None
+    )
+    assert personal.kind == "personal"
+    assert not service.access_state(business_member).can_create_personal_tenant
+    assert {workspace.kind for workspace in service.list_for(business_member)} == {"business", "personal"}
     subject = "outsider@example.local"
     assert service.access_state(subject).can_create_personal_tenant
     with pytest.raises(WorkflowError, match="Choose the country"):
@@ -501,3 +505,91 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
     with factory() as db:
         assert db.get(TenantEntity, tenant_id).kind == "personal"
         assert db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)).current_product_code == "rubrica_base"
+
+
+def test_offboarding_revokes_seat_links_and_readmission_can_reset_history(team_db, monkeypatch):
+    from core_api.modules.signature_request import database_workflow_service as workflow
+
+    factory, tenant_id, ids = team_db
+    tenant_service = module.tenant_service
+    monkeypatch.setattr(workflow, "SessionLocal", factory)
+    documents = DatabaseSignatureWorkflowService(None)
+    admin = "member0@example.local"
+    member = "member1@example.local"
+    now = DateTimeService.utc_now()
+    with factory.begin() as db:
+        db.scalar(select(BillingAccountEntity)).current_period_ends_at = now + timedelta(days=1)
+        document = DocumentEntity(
+            tenant_id=tenant_id, organization_id="team-test", title="Old file",
+            original_filename="test.pdf", content_type="application/pdf", storage_key="old",
+            sha256="f" * 64, version=1, status="ready", created_by=member,
+            created_at=now - timedelta(days=1),
+        )
+        db.add(document)
+        db.flush()
+        document_id = document.id
+        request = SignatureRequestEntity(
+            document_id=document.id, document_version=1, document_sha256="f" * 64,
+            status="open", expires_at=now + timedelta(days=2), created_by=member,
+        )
+        db.add(request)
+        db.flush()
+        db.add(SignerEntity(
+            signature_request_id=request.id, auth_user_id=member, name="Test member", email=member,
+            signing_token_hash="s" * 64, token_expires_at=now + timedelta(days=2), status="pending",
+        ))
+
+    tenant_service.schedule_seat_roster(tenant_id, TenantSeatRosterUpdate(member_ids=ids), admin)
+    tenant_service.update_member_access(tenant_id, ids[1], "offboard", admin)
+    assert tenant_service.list_for(member) == []
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        documents.get_document(str(document_id), member)
+    with factory.begin() as db:
+        roster = db.scalar(select(TenantSeatRosterEntity))
+        assert str(ids[1]) not in roster.member_ids
+        assert db.scalar(select(SignerEntity)).link_revoked_at is not None
+        tenant_service.apply_due_seat_roster(db, tenant_id, through=roster.cycle_starts_at)
+        assert db.get(TenantMemberEntity, ids[1]).status == "offboarded"
+
+    tenant_service.update_member_access(tenant_id, ids[1], "restore", admin)
+    assert documents.get_document(str(document_id), member).title == "Old file"
+    tenant_service.update_member_access(tenant_id, ids[1], "offboard", admin)
+    tenant_service.update_member_access(tenant_id, ids[1], "fresh", admin)
+    assert documents.list_documents(member) == []
+    assert documents.list_requests(member) == []
+    assert documents.get_document(str(document_id), admin).title == "Old file"
+
+
+def test_company_only_signing_scopes_immediate_policy_to_issuing_workspace(team_db):
+    from types import SimpleNamespace
+
+    factory, tenant_id, ids = team_db
+    admin = "member0@example.local"
+    member = "member1@example.local"
+    with factory.begin() as db:
+        doc = DocumentEntity(
+            tenant_id=tenant_id, organization_id="team-test", title="Business PDF",
+            original_filename="test.pdf", content_type="application/pdf", storage_key="company",
+            sha256="f" * 64, version=1, status="ready", created_by=admin,
+        )
+        db.add(doc)
+        db.flush()
+        request = SimpleNamespace(document_id=doc.id)
+    signer = SimpleNamespace(
+        link_revoked_at=None, participant_role="external_signer", represented_tenant_id=None,
+    )
+    check = DatabaseSignatureWorkflowService._require_workspace_signing_permission
+    with factory() as db:
+        check(db, request, signer, member)
+    module.tenant_service.update_document_scope(tenant_id, ids[1], None, admin, sign_company_only=True)
+    with factory() as db:
+        with pytest.raises(WorkflowError, match="can only sign as a representative"):
+            check(db, request, signer, member)
+        signer.participant_role = "company_representative"
+        signer.represented_tenant_id = tenant_id
+        check(db, request, signer, member)
+        db.get(TenantEntity, tenant_id).kind = "personal"
+        db.flush()
+        signer.participant_role = "external_signer"
+        signer.represented_tenant_id = None
+        check(db, request, signer, member)

@@ -126,7 +126,12 @@ DocumentScope = Literal["own", "all", "since_joined"]
 
 
 class TenantDocumentScopeUpdate(BaseModel):
-    document_scope: DocumentScope
+    document_scope: DocumentScope | None = None
+    sign_company_only: bool | None = None
+
+
+class TenantMemberAccessUpdate(BaseModel):
+    action: Literal["offboard", "restore", "fresh"]
 
 
 class TenantMemberRead(BaseModel):
@@ -136,6 +141,7 @@ class TenantMemberRead(BaseModel):
     status: str
     joined_at: datetime | None = None
     document_scope: Literal["legacy", "own", "all", "since_joined"] = "own"
+    sign_company_only: bool = False
 
 
 class TenantProvision(BaseModel):

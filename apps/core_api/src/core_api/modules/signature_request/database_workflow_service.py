@@ -172,6 +172,7 @@ class DatabaseSignatureWorkflowService:
                 SignatureRequestEntity.document_id == DocumentEntity.id,
                 SignatureRequestEntity.deleted_at.is_(None),
                 or_(SignerEntity.auth_user_id == normalized_actor, SignerEntity.email == normalized_actor),
+                SignerEntity.link_revoked_at.is_(None),
             ).exists()
             statement = select(DocumentEntity).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(
                 DocumentEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None),
@@ -382,12 +383,23 @@ class DatabaseSignatureWorkflowService:
             invited = select(SignerEntity.id).where(
                 SignerEntity.signature_request_id == SignatureRequestEntity.id,
                 or_(SignerEntity.auth_user_id == normalized_actor, SignerEntity.email == normalized_actor),
+                SignerEntity.link_revoked_at.is_(None),
             ).exists()
             statement = select(SignatureRequestEntity).join(DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id).join(TenantMemberEntity, TenantMemberEntity.tenant_id == DocumentEntity.tenant_id).where(
                 SignatureRequestEntity.deleted_at.is_(None), DocumentEntity.deleted_at.is_(None),
                 TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active",
                 tenant_service.membership_identity_filter(actor_id),
-                or_(TenantMemberEntity.role == "admin", func.lower(SignatureRequestEntity.created_by) == normalized_actor, invited),
+                or_(
+                    TenantMemberEntity.role == "admin",
+                    and_(
+                        func.lower(SignatureRequestEntity.created_by) == normalized_actor,
+                        or_(
+                            TenantMemberEntity.own_files_since.is_(None),
+                            DocumentEntity.created_at >= TenantMemberEntity.own_files_since,
+                        ),
+                    ),
+                    invited,
+                ),
             ).order_by(SignatureRequestEntity.created_at.desc(), SignatureRequestEntity.id.desc())
             return [self._request_read(db, item) for item in db.scalars(statement).all() if not tenant_service.team_over_limit(db, self._document(db, item.document_id).tenant_id)]
 
@@ -990,6 +1002,7 @@ class DatabaseSignatureWorkflowService:
             )
             if signer.status == SignerStatus.SIGNED.value:
                 return self._signer_read(signer)
+            self._require_workspace_signing_permission(db, request, signer, auth_user_id)
             if operation is not None and operation.status == "completed":
                 return self._signer_read(signer)
             if operation is not None and operation.status == "artifact_ready":
@@ -1217,6 +1230,7 @@ class DatabaseSignatureWorkflowService:
             signer = self._signer(db, str(operation.signer_id), request.id, lock=True)
             if operation.status == "completed" and signer.status == SignerStatus.SIGNED.value:
                 return self._signer_read(signer)
+            self._require_workspace_signing_permission(db, request, signer, auth_user_id)
             from core_api.modules.signature_request.serpro_timestamp_service import timestamp_required
 
             signature_mode = str(
@@ -1611,6 +1625,28 @@ class DatabaseSignatureWorkflowService:
         DatabaseSignatureWorkflowService._require_document_access(db, document, actor_id, request=request)
 
     @staticmethod
+    def _require_workspace_signing_permission(db, request, signer, actor_id: str) -> None:
+        if signer.link_revoked_at is not None:
+            raise WorkflowError("Signing access has been revoked", 410)
+        row = db.execute(
+            select(TenantEntity.id, TenantMemberEntity.sign_company_only)
+            .join(DocumentEntity, DocumentEntity.tenant_id == TenantEntity.id)
+            .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
+            .where(
+                DocumentEntity.id == request.document_id,
+                TenantEntity.kind == "business",
+                TenantMemberEntity.status == "active",
+                TenantMemberEntity.deleted_at.is_(None),
+                tenant_service.membership_identity_filter(actor_id),
+            )
+        ).first()
+        if row and row.sign_company_only and (
+            signer.participant_role != ParticipantRole.COMPANY_REPRESENTATIVE.value
+            or signer.represented_tenant_id != row.id
+        ):
+            raise WorkflowError("This member can only sign as a representative of the workspace company", 403)
+
+    @staticmethod
     def _document_read_scope(actor_id: str, invited):
         return or_(
             TenantMemberEntity.role == "admin",
@@ -1624,6 +1660,10 @@ class DatabaseSignatureWorkflowService:
             and_(
                 TenantMemberEntity.document_scope.in_(("own", "legacy")),
                 func.lower(DocumentEntity.created_by) == actor_id,
+                or_(
+                    TenantMemberEntity.own_files_since.is_(None),
+                    DocumentEntity.created_at >= TenantMemberEntity.own_files_since,
+                ),
             ),
             and_(TenantMemberEntity.document_scope == "legacy", invited),
         )
@@ -1639,9 +1679,16 @@ class DatabaseSignatureWorkflowService:
         )
         if request is not None:
             # A document-listing permission never grants control of another person's request.
-            if member.role == "admin" or document.created_by.lower() == normalized_actor:
+            if member.role == "admin":
                 return
-            if db.scalar(signer_query.where(SignatureRequestEntity.id == request.id).limit(1)) is not None:
+            if document.created_by.lower() == normalized_actor and (
+                member.own_files_since is None
+                or DateTimeService.to_utc(document.created_at) >= DateTimeService.to_utc(member.own_files_since)
+            ):
+                return
+            if db.scalar(signer_query.where(
+                SignatureRequestEntity.id == request.id, SignerEntity.link_revoked_at.is_(None)
+            ).limit(1)) is not None:
                 return
         else:
             allowed = db.scalar(
@@ -1653,7 +1700,7 @@ class DatabaseSignatureWorkflowService:
                     TenantMemberEntity.deleted_at.is_(None),
                     TenantMemberEntity.status == "active",
                     DatabaseSignatureWorkflowService._document_read_scope(
-                        normalized_actor, signer_query.exists()
+                        normalized_actor, signer_query.where(SignerEntity.link_revoked_at.is_(None)).exists()
                     ),
                 )
             )

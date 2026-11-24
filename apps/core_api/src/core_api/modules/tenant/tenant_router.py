@@ -8,6 +8,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantCreate,
     TenantDocumentScopeUpdate,
     TenantMemberCreate,
+    TenantMemberAccessUpdate,
     TenantMemberInvitation,
     TenantMemberRoleUpdate,
     TenantMemberRead,
@@ -158,7 +159,8 @@ async def update_member_document_scope(
     context: AuthContext = Depends(require_permission("users:write")),
 ) -> TenantTeamRead:
     return tenant_service.update_document_scope(
-        tenant_id, member_id, payload.document_scope, context.subject
+        tenant_id, member_id, payload.document_scope, context.subject,
+        sign_company_only=payload.sign_company_only,
     )
 
 @router.post("/{tenant_id}/business-upgrade-review", response_model=BusinessUpgradeReviewRead)
@@ -175,3 +177,12 @@ async def read_business_upgrade_review(
     context: AuthContext = Depends(require_permission("users:write")),
 ) -> BusinessUpgradeReviewRead | None:
     return read_review(tenant_id, context.subject)
+
+@router.patch("/{tenant_id}/team/{member_id}/access", response_model=TenantTeamRead)
+async def update_team_member_access(
+    tenant_id: UUID,
+    member_id: UUID,
+    payload: TenantMemberAccessUpdate,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantTeamRead:
+    return tenant_service.update_member_access(tenant_id, member_id, payload.action, context.subject)

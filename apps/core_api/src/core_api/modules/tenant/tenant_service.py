@@ -1,14 +1,17 @@
 from datetime import datetime
 from secrets import token_urlsafe
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from uuid import UUID, uuid4
 
 from core_api.infrastructure.database.connection import SessionLocal
 from core_api.infrastructure.auth_context import active_auth_context
 from core_api.modules.billing.billing_entity import BillingAccountEntity
-from core_api.modules.signature_request.signature_request_entity import AuditEventEntity
+from core_api.modules.document.document_entity import DocumentEntity
+from core_api.modules.signature_request.signature_request_entity import (
+    AuditEventEntity, SignatureRequestEntity, SignerEntity,
+)
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant.tenant_entity import (
     TenantEntity,
@@ -171,7 +174,10 @@ class TenantService:
             return TenantAccessState(
                 active_tenant_count=active_count,
                 suspended_tenants=suspended,
-                can_create_personal_tenant=active_count == 0,
+                can_create_personal_tenant=not any(
+                    tenant.kind == "personal" and member.status == "active"
+                    for tenant, member in memberships
+                ),
             )
 
     def create_personal_after_suspension(
@@ -201,8 +207,6 @@ class TenantService:
             for workspace, member in memberships:
                 if workspace.kind == "personal" and member.status == "active":
                     return self._read(workspace, member.role)
-            if any(member.status == "active" for _, member in memberships):
-                raise WorkflowError("An active workspace already exists", 409)
             if not payload.country_code:
                 raise WorkflowError("Choose the country for your personal workspace", 422)
             tenant = TenantEntity(
@@ -396,6 +400,7 @@ class TenantService:
                     TenantSeatRosterEntity.deleted_at.is_(None),
                 )
             )
+        eligible_ids = {str(item.id) for item in members if item.status not in {"offboarded", "pending"}}
         return TenantTeamRead(
             members=[TenantMemberRead.model_validate(m, from_attributes=True) for m in members],
             member_limit=limit,
@@ -404,7 +409,7 @@ class TenantService:
             can_manage=member.role == "admin", current_member_id=member.id,
             current_seat_member_ids=[m.id for m in members if m.status == "active"],
             next_cycle_member_ids=(
-                [UUID(value) for value in next_cycle.member_ids]
+                [UUID(value) for value in next_cycle.member_ids if value in eligible_ids]
                 if next_cycle
                 else [m.id for m in members if m.status == "active"]
             ),
@@ -450,7 +455,7 @@ class TenantService:
             members = db.scalars(
                 select(TenantMemberEntity).where(
                     TenantMemberEntity.tenant_id == tenant_id,
-                    TenantMemberEntity.deleted_at.is_(None),
+                    TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status.notin_(("offboarded", "pending")),
                 )
             ).all()
             selected = set(payload.member_ids)
@@ -527,7 +532,7 @@ class TenantService:
                 select(TenantMemberEntity)
                 .where(
                     TenantMemberEntity.tenant_id == tenant_id,
-                    TenantMemberEntity.deleted_at.is_(None),
+                    TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status.notin_(("offboarded", "pending")),
                 )
                 .with_for_update()
             ).all()
@@ -581,7 +586,7 @@ class TenantService:
             self._lock_team(db, tenant_id)
             actor = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
             members = db.scalars(select(TenantMemberEntity).where(
-                TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.deleted_at.is_(None)
+                TenantMemberEntity.tenant_id == tenant_id, TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status.notin_(("offboarded", "pending"))
             )).all()
             selected = set(payload.active_member_ids)
             if not selected.issubset({m.id for m in members}):
@@ -640,8 +645,69 @@ class TenantService:
             db.flush()
             return self._team_read(db, tenant_id, actor)
 
+    def update_member_access(
+        self, tenant_id: UUID, member_id: UUID, action: str, subject: str
+    ) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            actor = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            member = db.scalar(select(TenantMemberEntity).where(
+                TenantMemberEntity.id == member_id,
+                TenantMemberEntity.tenant_id == tenant_id,
+                TenantMemberEntity.deleted_at.is_(None),
+            ).with_for_update())
+            if member is None:
+                raise WorkflowError("Member does not belong to this tenant", 404)
+            if member.role == "admin":
+                raise WorkflowError("An administrator cannot be offboarded through this action", 409)
+
+            now = DateTimeService.utc_now()
+            if action == "offboard":
+                if member.status == "offboarded":
+                    return self._team_read(db, tenant_id, actor)
+                member.status = "offboarded"
+                workspace_requests = select(SignatureRequestEntity.id).join(
+                    DocumentEntity, DocumentEntity.id == SignatureRequestEntity.document_id
+                ).where(DocumentEntity.tenant_id == tenant_id)
+                db.execute(update(SignerEntity).where(
+                    SignerEntity.signature_request_id.in_(workspace_requests),
+                    or_(
+                        func.lower(SignerEntity.auth_user_id) == member.auth_user_id.lower(),
+                        func.lower(SignerEntity.email) == member.auth_user_id.lower(),
+                    ),
+                    SignerEntity.link_revoked_at.is_(None),
+                ).values(link_revoked_at=now))
+                rosters = db.scalars(select(TenantSeatRosterEntity).where(
+                    TenantSeatRosterEntity.tenant_id == tenant_id,
+                    TenantSeatRosterEntity.status == "scheduled",
+                    TenantSeatRosterEntity.deleted_at.is_(None),
+                ).with_for_update())
+                for roster in rosters:
+                    roster.member_ids = [value for value in roster.member_ids if value != str(member.id)]
+            else:
+                if member.status != "offboarded":
+                    raise WorkflowError("Only an offboarded member can be readmitted", 409)
+                limit = self.member_limit(db, tenant_id)
+                active = db.scalar(select(func.count(TenantMemberEntity.id)).where(
+                    TenantMemberEntity.tenant_id == tenant_id,
+                    TenantMemberEntity.status == "active",
+                    TenantMemberEntity.deleted_at.is_(None),
+                )) or 0
+                member.status = "without_seat" if limit is not None and active >= limit else "active"
+                if action == "fresh":
+                    member.role = "member"
+                    member.joined_at = now
+                    member.own_files_since = now
+                    member.document_scope = "own"
+                    member.sign_company_only = False
+            self._audit(db, tenant_id, subject, "tenant.member_access_changed", {
+                "member_id": str(member.id), "action": action, "status": member.status,
+            })
+            db.flush()
+            return self._team_read(db, tenant_id, actor)
+
     def update_document_scope(
-        self, tenant_id: UUID, member_id: UUID, scope: str, subject: str
+        self, tenant_id: UUID, member_id: UUID, scope: str | None, subject: str, *, sign_company_only: bool | None = None
     ) -> TenantTeamRead:
         with SessionLocal.begin() as db:
             self._lock_team(db, tenant_id)
@@ -658,10 +724,18 @@ class TenantService:
             if member.role == "admin":
                 raise WorkflowError("Administrators already have full workspace access", 409)
             previous = member.document_scope
-            member.document_scope = scope
-            if previous != scope:
-                self._audit(db, tenant_id, subject, "tenant.document_scope_updated", {
-                    "member_id": str(member.id), "previous_scope": previous, "scope": scope,
+            previous_signing = member.sign_company_only
+            if scope is not None:
+                member.document_scope = scope
+            if sign_company_only is not None:
+                tenant = db.get(TenantEntity, tenant_id)
+                if tenant is None or tenant.kind != "business":
+                    raise WorkflowError("Company signing restrictions require a business workspace", 409)
+                member.sign_company_only = sign_company_only
+            if previous != member.document_scope or previous_signing != member.sign_company_only:
+                self._audit(db, tenant_id, subject, "tenant.member_permissions_updated", {
+                    "member_id": str(member.id), "previous_scope": previous, "scope": member.document_scope,
+                    "previous_sign_company_only": previous_signing, "sign_company_only": member.sign_company_only,
                 })
             db.flush()
             return self._team_read(db, tenant_id, actor)

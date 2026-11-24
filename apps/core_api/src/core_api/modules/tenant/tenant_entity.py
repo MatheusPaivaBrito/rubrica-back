@@ -2,7 +2,7 @@ from uuid import UUID
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, text
+from sqlalchemy import Boolean, JSON, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core_api.infrastructure.database.connection import BaseEntity
@@ -58,6 +58,8 @@ class TenantMemberEntity(BaseEntity):
     role: Mapped[str] = mapped_column(String(24), nullable=False, default="member", index=True)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active", index=True)
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sign_company_only: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    own_files_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     document_scope: Mapped[str] = mapped_column(String(16), nullable=False, default="own", server_default="own")
 
 
