@@ -417,3 +417,28 @@ def test_document_scope_updates_listing_and_direct_access(team_db, monkeypatch):
                     service.get_document(str(document_id), member)
     with pytest.raises(WorkflowError, match="Tenant access denied"):
         module.tenant_service.update_document_scope(tenant_id, ids[1], "all", member)
+
+
+def test_business_review_does_not_convert_or_activate_personal_workspace(team_db, monkeypatch):
+    from core_api.modules.tenant import business_upgrade_review as review
+    from core_api.modules.tenant.tenant_schema import TenantBusinessConversion
+
+    factory, tenant_id, _ = team_db
+    review.BusinessUpgradeReviewEntity.__table__.create(factory.kw["bind"])
+    monkeypatch.setattr(review, "SessionLocal", factory)
+    monkeypatch.setattr(review, "protect_cnpj", lambda _value: ("encrypted", "lookup", "**.***.***/****-81"))
+    with factory.begin() as db:
+        db.get(TenantEntity, tenant_id).kind = "personal"
+    payload = TenantBusinessConversion(legal_name="Example company", cnpj="11.222.333/0001-81")
+    subject = "member0@example.local"
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        review.request_review(tenant_id, payload, "member1@example.local")
+    requested = review.request_review(tenant_id, payload, subject)
+    assert requested.status == "pending"
+    assert review.request_review(tenant_id, payload, subject) == requested
+    assert "encrypted" not in requested.model_dump()
+    review.record_decision(requested.id, "approved", "operator")
+    assert review.request_review(tenant_id, payload, subject).status == "approved"
+    with factory() as db:
+        assert db.get(TenantEntity, tenant_id).kind == "personal"
+        assert db.get(review.BusinessUpgradeReviewEntity, requested.id).reviewed_by == "operator"

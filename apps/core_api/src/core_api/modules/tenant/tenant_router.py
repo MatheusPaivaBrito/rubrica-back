@@ -19,6 +19,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantTeamUpdate,
     TenantSeatRosterUpdate,
 )
+from core_api.modules.tenant.business_upgrade_review import BusinessUpgradeReviewRead, request_review
 from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.security.service_tokens import verify_service_token
 
@@ -159,3 +160,11 @@ async def update_member_document_scope(
     return tenant_service.update_document_scope(
         tenant_id, member_id, payload.document_scope, context.subject
     )
+
+@router.post("/{tenant_id}/business-upgrade-review", response_model=BusinessUpgradeReviewRead)
+async def submit_business_upgrade_review(
+    tenant_id: UUID,
+    payload: TenantBusinessConversion,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> BusinessUpgradeReviewRead:
+    return request_review(tenant_id, payload, context.subject)
