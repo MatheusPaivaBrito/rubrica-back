@@ -22,6 +22,9 @@ class UserEntity(BaseEntity):
     email_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    preferred_identifier_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("user_identifiers.id", ondelete="SET NULL", name="fk_users_preferred_identifier", use_alter=True),
+    )
     mfa_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )

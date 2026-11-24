@@ -120,3 +120,20 @@ def test_revoked_link_cannot_be_used(service: SignatureWorkflowService) -> None:
 
     with pytest.raises(WorkflowError, match="revoked"):
         service.sign(token, "signer@example.com", True, STAMP)
+
+
+def test_selected_identity_missing_from_account_stops_before_preparing_signature(monkeypatch) -> None:
+    from uuid import uuid4
+
+    from core_api.modules.signature_request import database_workflow_service as workflow
+
+    identifier_id = uuid4()
+    subject = "signer@example.com"
+
+    def lookup(email, selected_id):
+        assert (email, selected_id) == (subject, identifier_id)
+        return workflow.IdentitySummary(account_status="active")
+
+    monkeypatch.setattr(workflow, "identity_summary", lookup)
+    with pytest.raises(WorkflowError, match="eligible identity document"):
+        workflow.database_workflow_service.sign("link", subject, True, STAMP, identifier_id=identifier_id)

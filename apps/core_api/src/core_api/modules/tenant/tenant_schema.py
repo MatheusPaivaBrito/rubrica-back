@@ -189,15 +189,23 @@ class TenantSeatRosterUpdate(BaseModel):
 
 
 class TenantMemberRoleUpdate(BaseModel):
-    role: Literal["member", "auditor"]
+    role: Literal["admin", "member", "auditor"]
+
+
+class WorkspaceClosureUpdate(BaseModel):
+    requested: bool
 
 
 class TenantTeamRead(BaseModel):
+    closure_requested_at: datetime | None = None
+    export_until: datetime | None = None
     members: list[TenantMemberRead]
     member_limit: int | None
     active_count: int
     requires_selection: bool
     can_manage: bool
+    can_request_branch: bool = False
+    organization_root: bool = False
     current_member_id: UUID
     current_seat_member_ids: list[UUID] = Field(default_factory=list)
     next_cycle_member_ids: list[UUID] = Field(default_factory=list)

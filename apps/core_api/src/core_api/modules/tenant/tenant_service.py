@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from secrets import token_urlsafe
 
 from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import aliased
 from uuid import UUID, uuid4
 
 from core_api.infrastructure.database.connection import SessionLocal
@@ -36,6 +37,8 @@ from core_api.modules.tenant.tenant_schema import (
     SuspendedTenantAccess,
     TenantAccessState,
 )
+
+WORKSPACE_EXPORT_WINDOW = timedelta(days=30)
 
 EURO_COUNTRY_CODES = frozenset(
     {
@@ -72,6 +75,7 @@ class TenantService:
                 .where(
                     self.membership_identity_filter(owner, payload.owner_user_id),
                     TenantMemberEntity.role == "admin",
+                    TenantEntity.kind == "personal",
                     TenantEntity.deleted_at.is_(None),
                 )
                 .order_by(TenantEntity.created_at)
@@ -117,7 +121,10 @@ class TenantService:
         with SessionLocal() as db:
             rows = db.execute(
                 select(TenantEntity, TenantMemberEntity.role, BillingAccountEntity)
-                .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
+                .join_from(TenantEntity, TenantMemberEntity, or_(
+                    TenantMemberEntity.tenant_id == TenantEntity.id,
+                    and_(TenantMemberEntity.role == "admin", self.organization_parent(TenantEntity.id) == TenantMemberEntity.tenant_id),
+                ))
                 .outerjoin(
                     BillingAccountEntity,
                     and_(
@@ -131,18 +138,25 @@ class TenantService:
                     TenantMemberEntity.deleted_at.is_(None),
                     TenantMemberEntity.status == "active",
                 )
-                .order_by(TenantEntity.name)
+                .order_by(TenantEntity.name, (TenantMemberEntity.role == "admin").desc())
             ).all()
+            unique_workspaces = {}
+            for tenant, role, account in rows:
+                unique_workspaces.setdefault(tenant.id, (tenant, role, account))
             return [
                 self._read(
                     tenant,
                     role,
                     workspace_selectable=tenant.status == "active" and (
-                        tenant.kind == "personal"
+                        tenant.workspace_closed_at is not None
+                        or tenant.kind == "personal"
                         or bool(account and (account.status == "active" or account.complimentary_lifetime))
                     ),
                 )
-                for tenant, role, account in rows
+                for tenant, role, account in unique_workspaces.values()
+                if tenant.workspace_closed_at is None or (
+                    role == "admin" and self.export_open(tenant)
+                )
             ]
 
     def access_state(self, subject: str) -> TenantAccessState:
@@ -351,7 +365,7 @@ class TenantService:
             ]
 
     @staticmethod
-    def _lock_team(db, tenant_id: UUID) -> None:
+    def _lock_team(db, tenant_id: UUID) -> BillingAccountEntity:
         # Same row lock as billing webhooks: plan changes and member changes serialize.
         account = db.scalar(select(BillingAccountEntity).where(
             BillingAccountEntity.tenant_id == tenant_id,
@@ -359,6 +373,7 @@ class TenantService:
         ).with_for_update())
         if account is None:
             raise WorkflowError("Tenant not found", 404)
+        return account
 
     @staticmethod
     def member_limit(db, tenant_id: UUID) -> int | None:
@@ -401,12 +416,29 @@ class TenantService:
                 )
             )
         eligible_ids = {str(item.id) for item in members if item.status not in {"offboarded", "pending"}}
+        tenant = db.get(TenantEntity, tenant_id)
         return TenantTeamRead(
+            export_until=(
+                DateTimeService.to_utc(tenant.workspace_closed_at) + WORKSPACE_EXPORT_WINDOW
+                if tenant and tenant.workspace_closed_at else None
+            ),
+            closure_requested_at=(
+                DateTimeService.to_utc(tenant.closure_requested_at)
+                if tenant and tenant.closure_requested_at else None
+            ),
             members=[TenantMemberRead.model_validate(m, from_attributes=True) for m in members],
             member_limit=limit,
             active_count=active_count,
             requires_selection=limit is not None and active_count > limit,
             can_manage=member.role == "admin", current_member_id=member.id,
+            organization_root=bool(tenant and tenant.kind == "business" and tenant.parent_workspace_id is None),
+            can_request_branch=bool(
+                tenant and tenant.workspace_closed_at is None and
+                member.role == "admin" and tenant and tenant.kind == "business"
+                and tenant.parent_workspace_id is None and tenant.status == "active"
+                and account and account.status == "active"
+                and account.current_product_code == "rubrica_team"
+            ),
             current_seat_member_ids=[m.id for m in members if m.status == "active"],
             next_cycle_member_ids=(
                 [UUID(value) for value in next_cycle.member_ids if value in eligible_ids]
@@ -421,12 +453,62 @@ class TenantService:
 
     def team(self, tenant_id: UUID, subject: str) -> TenantTeamRead:
         with SessionLocal.begin() as db:
-            self.apply_due_seat_roster(db, tenant_id)
             member = self.require_role(
-                db, tenant_id, subject, {"admin"}, allow_over_limit=True
+                db, tenant_id, subject, {"admin"}, allow_over_limit=True, allow_export=True
             )
-            self.reconcile_single_member_plan(db, tenant_id)
+            tenant = db.get(TenantEntity, tenant_id)
+            if tenant.workspace_closed_at is None:
+                self.apply_due_seat_roster(db, tenant_id)
+                member = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+                self.reconcile_single_member_plan(db, tenant_id)
             return self._team_read(db, tenant_id, member)
+
+    def update_closure_request(self, tenant_id: UUID, subject: str, *, requested: bool) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            self._lock_team(db, tenant_id)
+            actor = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            tenant = db.get(TenantEntity, tenant_id, with_for_update=True)
+            if tenant is None or tenant.deleted_at is not None or tenant.kind != "business" or tenant.status != "active":
+                raise WorkflowError("Only an active business workspace can request closure", 409)
+            if (tenant.closure_requested_at is not None) != requested:
+                tenant.closure_requested_at = DateTimeService.utc_now() if requested else None
+                self._audit(db, tenant_id, subject, "tenant.closure_requested" if requested else "tenant.closure_withdrawn", {})
+                db.flush()
+            return self._team_read(db, tenant_id, actor)
+
+    def close_workspace(self, tenant_id: UUID, subject: str) -> TenantTeamRead:
+        with SessionLocal.begin() as db:
+            account = self._lock_team(db, tenant_id)
+            actor = self.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True, allow_export=True)
+            tenant = db.get(TenantEntity, tenant_id, with_for_update=True)
+            if tenant.workspace_closed_at is not None:
+                return self._team_read(db, tenant_id, actor)
+            if tenant.kind != "business" or tenant.status != "active" or tenant.closure_requested_at is None:
+                raise WorkflowError("Request closure before confirming", 409)
+            if account.provider_subscription_id and account.status in {"active", "pending", "past_due", "unpaid", "paused"}:
+                raise WorkflowError("Cancel the Stripe subscription before confirming closure", 409)
+            if db.scalar(select(TenantEntity.id).where(
+                TenantEntity.parent_workspace_id == tenant_id,
+                TenantEntity.deleted_at.is_(None),
+                TenantEntity.workspace_closed_at.is_(None),
+            ).limit(1)) is not None:
+                raise WorkflowError("Close the organization's branches before closing its main workspace", 409)
+            tenant.workspace_closed_at = DateTimeService.utc_now()
+            document_ids = select(DocumentEntity.id).where(DocumentEntity.tenant_id == tenant_id)
+            request_ids = select(SignatureRequestEntity.id).where(SignatureRequestEntity.document_id.in_(document_ids))
+            db.execute(update(SignerEntity).where(
+                SignerEntity.signature_request_id.in_(request_ids),
+                SignerEntity.link_revoked_at.is_(None),
+            ).values(link_revoked_at=tenant.workspace_closed_at))
+            cancelled = db.execute(update(SignatureRequestEntity).where(
+                SignatureRequestEntity.document_id.in_(document_ids),
+                SignatureRequestEntity.status.in_(("draft", "open")),
+            ).values(status="cancelled"))
+            self._audit(db, tenant_id, subject, "tenant.closed", {
+                "cancelled_request_count": cancelled.rowcount,
+            })
+            db.flush()
+            return self._team_read(db, tenant_id, actor)
 
     def schedule_seat_roster(
         self,
@@ -467,7 +549,7 @@ class TenantService:
                 raise WorkflowError(
                     f"The current plan allows up to {limit} seat occupants", 409
                 )
-            if actor.id not in selected:
+            if actor.tenant_id == tenant_id and actor.id not in selected:
                 raise WorkflowError("Keep your administrator account in a seat", 409)
             if not any(by_id[member_id].role == "admin" for member_id in selected):
                 raise WorkflowError("Keep at least one administrator in a seat", 409)
@@ -591,8 +673,10 @@ class TenantService:
             selected = set(payload.active_member_ids)
             if not selected.issubset({m.id for m in members}):
                 raise WorkflowError("Member does not belong to this tenant", 422)
-            if actor.id not in selected:
+            if actor.tenant_id == tenant_id and actor.id not in selected:
                 raise WorkflowError("Keep your administrator account active", 409)
+            if not any(member.id in selected and member.role == "admin" for member in members):
+                raise WorkflowError("Keep at least one workspace administrator active", 409)
             limit = self.member_limit(db, tenant_id)
             if limit is not None and len(selected) > limit:
                 raise WorkflowError(f"The current plan allows up to {limit} tenant members", 409)
@@ -612,6 +696,7 @@ class TenantService:
     ) -> TenantTeamRead:
         with SessionLocal.begin() as db:
             self._lock_team(db, tenant_id)
+            self.apply_due_seat_roster(db, tenant_id)
             actor = self.require_role(
                 db, tenant_id, subject, {"admin"}, allow_over_limit=True
             )
@@ -626,9 +711,30 @@ class TenantService:
             )
             if member is None:
                 raise WorkflowError("Member does not belong to this tenant", 404)
-            if member.id == actor.id or member.role == "admin":
-                raise WorkflowError("The tenant administrator role cannot be changed", 409)
+            if member.id == actor.id:
+                raise WorkflowError("Another administrator must change your role", 409)
             previous_role = member.role
+            if role == "admin" and previous_role != "admin":
+                tenant = db.get(TenantEntity, tenant_id)
+                if tenant.kind != "business" or member.status != "active":
+                    raise WorkflowError("Only an active business workspace member can become administrator", 409)
+            if previous_role == "admin" and role != "admin":
+                rosters = db.scalars(select(TenantSeatRosterEntity).where(
+                    TenantSeatRosterEntity.tenant_id == tenant_id,
+                    TenantSeatRosterEntity.status == "scheduled",
+                    TenantSeatRosterEntity.deleted_at.is_(None),
+                ))
+                for roster in rosters:
+                    other_administrator = db.scalar(select(TenantMemberEntity.id).where(
+                        TenantMemberEntity.tenant_id == tenant_id,
+                        TenantMemberEntity.id != member.id,
+                        TenantMemberEntity.id.in_([UUID(value) for value in roster.member_ids]),
+                        TenantMemberEntity.role == "admin",
+                        TenantMemberEntity.status.notin_(("offboarded", "pending")),
+                        TenantMemberEntity.deleted_at.is_(None),
+                    ).limit(1))
+                    if other_administrator is None:
+                        raise WorkflowError("Schedule a successor in the next cycle before changing this role", 409)
             member.role = role
             if previous_role != role:
                 self._audit(
@@ -893,10 +999,58 @@ class TenantService:
             return self._read(tenant, member.role)
 
     @staticmethod
-    def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None, *, allow_over_limit: bool = False) -> TenantMemberEntity:
-        member = db.scalar(select(TenantMemberEntity).where(TenantMemberEntity.tenant_id == tenant_id, TenantService.membership_identity_filter(subject), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active"))
+    def organization_parent(tenant_id):
+        branch = aliased(TenantEntity)
+        parent = aliased(TenantEntity)
+        return select(parent.id).join_from(parent, branch, branch.parent_workspace_id == parent.id).where(
+            branch.id == tenant_id,
+            branch.kind == "business",
+            branch.status == "active",
+            branch.deleted_at.is_(None),
+            parent.kind == "business",
+            parent.status == "active",
+            parent.deleted_at.is_(None),
+            parent.parent_workspace_id.is_(None),
+        ).correlate(TenantEntity, DocumentEntity).scalar_subquery()
+
+    @staticmethod
+    def organization_admin_access(tenant_id, subject: str):
+        return select(TenantMemberEntity.id).where(
+            TenantMemberEntity.tenant_id == TenantService.organization_parent(tenant_id),
+            TenantMemberEntity.role == "admin",
+            TenantMemberEntity.status == "active",
+            TenantMemberEntity.deleted_at.is_(None),
+            TenantService.membership_identity_filter(subject),
+        ).correlate_except(TenantMemberEntity).exists()
+
+    @staticmethod
+    def export_open(tenant: TenantEntity) -> bool:
+        closed_at = tenant.workspace_closed_at
+        return closed_at is not None and DateTimeService.utc_now() < (
+            DateTimeService.to_utc(closed_at) + WORKSPACE_EXPORT_WINDOW
+        )
+
+    @staticmethod
+    def require_role(db, tenant_id: UUID, subject: str, roles: set[str] | None = None, *, allow_over_limit: bool = False, allow_export: bool = False) -> TenantMemberEntity:
+        member = db.scalar(select(TenantMemberEntity).where(
+            or_(
+                TenantMemberEntity.tenant_id == tenant_id,
+                and_(
+                    TenantMemberEntity.tenant_id == TenantService.organization_parent(tenant_id),
+                    TenantMemberEntity.role == "admin",
+                ),
+            ),
+            TenantService.membership_identity_filter(subject),
+            TenantMemberEntity.deleted_at.is_(None),
+            TenantMemberEntity.status == "active",
+        ).order_by((TenantMemberEntity.role == "admin").desc(), (TenantMemberEntity.tenant_id == tenant_id).desc()).limit(1))
         if member is None or (roles is not None and member.role not in roles):
             raise WorkflowError("Tenant access denied", 403)
+        tenant = db.get(TenantEntity, tenant_id)
+        if tenant is not None and tenant.workspace_closed_at is not None:
+            if allow_export and member.role == "admin" and TenantService.export_open(tenant):
+                return member
+            raise WorkflowError("Workspace is closed", 410)
         if not allow_over_limit and TenantService.team_over_limit(db, tenant_id):
             raise WorkflowError("Select the active team members for the current plan", 409)
         return member

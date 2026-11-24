@@ -19,8 +19,9 @@ from core_api.modules.tenant.tenant_schema import (
     TenantTeamRead,
     TenantTeamUpdate,
     TenantSeatRosterUpdate,
+    WorkspaceClosureUpdate,
 )
-from core_api.modules.tenant.business_upgrade_review import BusinessUpgradeReviewRead, read_review, request_review
+from core_api.modules.tenant.business_upgrade_review import BusinessUpgradeReviewRead, list_branch_reviews, read_review, request_review
 from core_api.modules.tenant.tenant_service import tenant_service
 from shared_kernel.security.service_tokens import verify_service_token
 
@@ -186,3 +187,37 @@ async def update_team_member_access(
     context: AuthContext = Depends(require_permission("users:write")),
 ) -> TenantTeamRead:
     return tenant_service.update_member_access(tenant_id, member_id, payload.action, context.subject)
+
+
+@router.get("/{tenant_id}/branches", response_model=list[BusinessUpgradeReviewRead])
+async def list_branches(
+    tenant_id: UUID,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> list[BusinessUpgradeReviewRead]:
+    return list_branch_reviews(tenant_id, context.subject)
+
+
+@router.post("/{tenant_id}/branches", response_model=BusinessUpgradeReviewRead)
+async def request_branch(
+    tenant_id: UUID,
+    payload: TenantBusinessConversion,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> BusinessUpgradeReviewRead:
+    return request_review(tenant_id, payload, context.subject, branch=True)
+
+
+@router.put("/{tenant_id}/closure-request", response_model=TenantTeamRead)
+async def update_closure_request(
+    tenant_id: UUID,
+    payload: WorkspaceClosureUpdate,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantTeamRead:
+    return tenant_service.update_closure_request(tenant_id, context.subject, requested=payload.requested)
+
+
+@router.post("/{tenant_id}/close", response_model=TenantTeamRead)
+async def close_workspace(
+    tenant_id: UUID,
+    context: AuthContext = Depends(require_permission("users:write")),
+) -> TenantTeamRead:
+    return tenant_service.close_workspace(tenant_id, context.subject)

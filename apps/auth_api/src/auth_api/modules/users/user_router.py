@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -12,7 +12,7 @@ from auth_api.modules.sessions.session_schema import SessionRead
 from auth_api.modules.users.passwords import hash_password
 from auth_api.modules.users.user_entity import UserEntity
 from auth_api.modules.users.user_identifier_entity import UserIdentifierEntity
-from auth_api.modules.users.user_identifier_service import add_identifier, validate_identifier
+from auth_api.modules.users.user_identifier_service import InvalidIdentifierError, add_identifier, validate_identifier
 from hmac import compare_digest, new as hmac_new
 from pydantic import BaseModel
 from uuid import UUID
@@ -23,7 +23,7 @@ from auth_api.modules.users.user_schema import (
     UserPreferencesUpdate,
     UserRead,
 )
-from auth_api.modules.accounts.account_schema import InternalMemberInvitation, InternalMemberInvitationResult, InternalSignerInvitation
+from auth_api.modules.accounts.account_schema import IdentityDocumentType, InternalMemberInvitation, InternalMemberInvitationResult, InternalSignerInvitation
 from auth_api.modules.accounts.account_service import AccountConflictError, account_service
 from auth_api.modules.accounts.notification_client import AccountEmailDeliveryError
 
@@ -149,6 +149,7 @@ async def internal_identity_match(
 @router.get("/internal/identity-summary", response_model=UserIdentitySummary, include_in_schema=False)
 async def identity_summary(
     email: str,
+    identifier_id: UUID | None = None,
     x_rubrica_service: str | None = Header(default=None),
     x_rubrica_service_key: str | None = Header(default=None),
 ) -> UserIdentitySummary:
@@ -178,14 +179,17 @@ async def identity_summary(
         account_status = "active" if user.is_active and user.email_verified else "pending"
         if account_status != "active":
             return UserIdentitySummary(account_status=account_status)
-        identifier = database.scalar(
-            select(UserIdentifierEntity)
-            .where(
-                UserIdentifierEntity.user_id == user.id,
-                UserIdentifierEntity.deleted_at.is_(None),
-            )
-            .order_by(UserIdentifierEntity.created_at)
+        identifiers = select(UserIdentifierEntity).where(
+            UserIdentifierEntity.user_id == user.id,
+            UserIdentifierEntity.deleted_at.is_(None),
+            UserIdentifierEntity.verification_status != "legacy",
         )
+        if identifier_id is not None:
+            identifiers = identifiers.where(UserIdentifierEntity.id == identifier_id)
+        order = [UserIdentifierEntity.created_at, UserIdentifierEntity.id]
+        if user.preferred_identifier_id is not None:
+            order.insert(0, (UserIdentifierEntity.id == user.preferred_identifier_id).desc())
+        identifier = database.scalar(identifiers.order_by(*order).limit(1))
         if identifier is None:
             return UserIdentitySummary(account_status=account_status)
         return UserIdentitySummary(
@@ -302,9 +306,69 @@ async def list_my_identifiers(
             .order_by(UserIdentifierEntity.created_at)
         ).all()
         return [
-            UserIdentifierRead.model_validate(item, from_attributes=True)
+            UserIdentifierRead.model_validate(item, from_attributes=True).model_copy(
+                update={"is_preferred": item.id == user.preferred_identifier_id}
+            )
             for item in identifiers
         ]
+
+
+@router.put("/me/identifiers/{identifier_id}/preferred", status_code=204, response_class=Response)
+async def prefer_my_identifier(
+    identifier_id: UUID, session: SessionRead = Depends(require_mfa_session),
+) -> Response:
+    with SessionLocal.begin() as database:
+        user = database.scalar(select(UserEntity).join(
+            UserIdentifierEntity, UserIdentifierEntity.user_id == UserEntity.id,
+        ).where(
+            UserEntity.email == session.subject,
+            UserEntity.is_active.is_(True),
+            UserEntity.email_verified.is_(True),
+            UserEntity.deleted_at.is_(None),
+            UserIdentifierEntity.id == identifier_id,
+            UserIdentifierEntity.deleted_at.is_(None),
+            UserIdentifierEntity.verification_status != "legacy",
+        ).with_for_update(of=UserEntity))
+        if user is None:
+            raise HTTPException(status_code=404, detail="Identity document not found")
+        user.preferred_identifier_id = identifier_id
+    return Response(status_code=204)
+
+
+class AddMyIdentifier(BaseModel):
+    issuing_country: str
+    identifier_type: IdentityDocumentType
+    value: str
+
+
+@router.post("/me/identifiers", response_model=UserIdentifierRead, status_code=201)
+async def add_my_identifier(
+    payload: AddMyIdentifier, session: SessionRead = Depends(require_mfa_session),
+) -> UserIdentifierRead:
+    country = payload.issuing_country.strip().upper()
+    expected_country = {"BR_CPF": "BR", "BR_CNPJ": "BR", "PT_NIF": "PT", "JP_MY_NUMBER": "JP"}
+    if payload.identifier_type in expected_country and country != expected_country[payload.identifier_type]:
+        raise HTTPException(status_code=422, detail="Document type and issuing country do not match")
+    try:
+        with SessionLocal.begin() as database:
+            user = database.scalar(select(UserEntity).where(
+                UserEntity.email == session.subject,
+                UserEntity.deleted_at.is_(None),
+                UserEntity.is_active.is_(True),
+                UserEntity.email_verified.is_(True),
+            ))
+            if user is None:
+                raise HTTPException(status_code=403, detail="An active verified account is required")
+            identifier = add_identifier(
+                database, user_id=user.id, issuing_country=country,
+                identifier_type=payload.identifier_type, value=payload.value,
+            )
+            database.flush()
+            return UserIdentifierRead.model_validate(identifier, from_attributes=True)
+    except InvalidIdentifierError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Identity document is already registered") from exc
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)

@@ -4,7 +4,7 @@ from secrets import token_urlsafe
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import DateTime, ForeignKey, String, Uuid, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -21,7 +21,8 @@ from shared_kernel.time.datetime_service import DateTimeService
 class BusinessUpgradeReviewEntity(BaseEntity):
     __tablename__ = "business_upgrade_reviews"
 
-    tenant_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("tenants.id"), unique=True)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("tenants.id"))
+    is_branch: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     business_tenant_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("tenants.id"), unique=True)
     requested_by: Mapped[str] = mapped_column(String(255))
     legal_name: Mapped[str] = mapped_column(String(240))
@@ -38,17 +39,21 @@ class BusinessUpgradeReviewRead(BaseModel):
     legal_name: str
     cnpj_masked: str
     status: Literal["pending", "approved", "rejected"]
+    business_tenant_id: UUID | None = None
+    workspace_active: bool = False
 
 
 def request_review(
-    tenant_id: UUID, payload: TenantBusinessConversion, subject: str
+    tenant_id: UUID, payload: TenantBusinessConversion, subject: str, *, branch: bool = False
 ) -> BusinessUpgradeReviewRead:
     with SessionLocal.begin() as db:
         tenant_service.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
         tenant = db.scalar(select(TenantEntity).where(
             TenantEntity.id == tenant_id, TenantEntity.deleted_at.is_(None)
         ).with_for_update())
-        if tenant is None or tenant.kind != "personal":
+        if branch:
+            require_branch_plan(db, tenant)
+        elif tenant is None or tenant.kind != "personal":
             raise WorkflowError("Request a new business workspace from your personal workspace", 409)
         try:
             encrypted, lookup, masked = protect_cnpj(payload.cnpj)
@@ -58,16 +63,20 @@ def request_review(
             TenantEntity.registration_lookup_hmac == lookup, TenantEntity.deleted_at.is_(None)
         ).limit(1)) is not None:
             raise WorkflowError("Request access from the administrator of the existing business workspace", 409)
-        review = db.scalar(select(BusinessUpgradeReviewEntity).where(
-            BusinessUpgradeReviewEntity.tenant_id == tenant_id
-        ).with_for_update())
+        query = select(BusinessUpgradeReviewEntity).where(
+            BusinessUpgradeReviewEntity.tenant_id == tenant_id,
+            BusinessUpgradeReviewEntity.is_branch.is_(branch),
+        )
+        if branch:
+            query = query.where(BusinessUpgradeReviewEntity.cnpj_lookup == lookup)
+        review = db.scalar(query.with_for_update())
         name = payload.legal_name.strip()
         if review is not None and review.status != "rejected":
             if review.cnpj_lookup != lookup or review.legal_name != name:
                 raise WorkflowError("A different business review is already open", 409)
             return BusinessUpgradeReviewRead.model_validate(review, from_attributes=True)
         if review is None:
-            review = BusinessUpgradeReviewEntity(tenant_id=tenant_id)
+            review = BusinessUpgradeReviewEntity(tenant_id=tenant_id, is_branch=branch)
             db.add(review)
         review.requested_by = subject.strip().lower()
         review.legal_name = name
@@ -90,6 +99,7 @@ def read_review(tenant_id: UUID, subject: str) -> BusinessUpgradeReviewRead | No
         review = db.scalar(select(BusinessUpgradeReviewEntity).where(
             BusinessUpgradeReviewEntity.tenant_id == tenant_id,
             BusinessUpgradeReviewEntity.requested_by == subject.strip().lower(),
+            BusinessUpgradeReviewEntity.is_branch.is_(False),
         ))
         return BusinessUpgradeReviewRead.model_validate(review, from_attributes=True) if review else None
 
@@ -117,18 +127,52 @@ def record_decision(review_id: UUID, decision: Literal["approved", "rejected"], 
         raise WorkflowError("The CNPJ already has an approved business review", 409) from exc
 
 
-def prepare_business_checkout(source_id: UUID, subject: str) -> UUID:
+def require_branch_plan(db, tenant: TenantEntity | None) -> None:
+    if tenant is None or tenant.kind != "business" or tenant.parent_workspace_id is not None or tenant.status != "active" or tenant.workspace_closed_at is not None:
+        raise WorkflowError("Branches require an active root business workspace", 409)
+    account = db.scalar(select(BillingAccountEntity).where(
+        BillingAccountEntity.tenant_id == tenant.id,
+        BillingAccountEntity.deleted_at.is_(None),
+    ).with_for_update())
+    if account is None or account.status != "active" or account.current_product_code != "rubrica_team":
+        raise WorkflowError("Branches require an active Team subscription", 409)
+
+
+def list_branch_reviews(tenant_id: UUID, subject: str) -> list[BusinessUpgradeReviewRead]:
+    with SessionLocal() as db:
+        tenant_service.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
+        reviews = db.execute(select(BusinessUpgradeReviewEntity, TenantEntity.status).outerjoin(
+            TenantEntity, TenantEntity.id == BusinessUpgradeReviewEntity.business_tenant_id,
+        ).where(
+            BusinessUpgradeReviewEntity.tenant_id == tenant_id,
+            BusinessUpgradeReviewEntity.is_branch.is_(True),
+        ).order_by(BusinessUpgradeReviewEntity.created_at))
+        return [
+            BusinessUpgradeReviewRead.model_validate(review, from_attributes=True).model_copy(
+                update={"workspace_active": workspace_status == "active"}
+            )
+            for review, workspace_status in reviews
+        ]
+
+
+def prepare_business_checkout(source_id: UUID, subject: str, *, branch_review_id: UUID | None = None) -> UUID:
     with SessionLocal.begin() as db:
         actor = tenant_service.require_role(db, source_id, subject, {"admin"}, allow_over_limit=True)
         source = db.get(TenantEntity, source_id, with_for_update=True)
         if source is None or source.deleted_at is not None:
             raise WorkflowError("Workspace not found", 404)
-        if source.kind == "business":
+        if branch_review_id is not None:
+            require_branch_plan(db, source)
+        elif source.kind == "business":
             return source.id
-        review = db.scalar(select(BusinessUpgradeReviewEntity).where(
-            BusinessUpgradeReviewEntity.tenant_id == source_id
-        ).with_for_update())
-        if review is None or review.status != "approved" or review.requested_by != subject.strip().lower():
+        query = select(BusinessUpgradeReviewEntity).where(
+            BusinessUpgradeReviewEntity.tenant_id == source_id,
+            BusinessUpgradeReviewEntity.is_branch.is_(branch_review_id is not None),
+        )
+        if branch_review_id is not None:
+            query = query.where(BusinessUpgradeReviewEntity.id == branch_review_id)
+        review = db.scalar(query.with_for_update())
+        if review is None or review.status != "approved" or (branch_review_id is None and review.requested_by != subject.strip().lower()):
             raise WorkflowError(
                 "The business registration must be approved before checkout",
                 409,
@@ -154,6 +198,7 @@ def prepare_business_checkout(source_id: UUID, subject: str) -> UUID:
             slug=token_urlsafe(18),
             status="pending_billing",
             kind="business",
+            parent_workspace_id=source.id if branch_review_id is not None else None,
             country_code=source.country_code,
             default_locale=source.default_locale,
             timezone=source.timezone,

@@ -56,6 +56,17 @@ async def create_checkout(
     return billing_service.create_checkout(tenant_id, context.subject, payload.product_code, payload.billing_interval)
 
 
+@router.post("/tenants/{tenant_id}/branches/{review_id}/checkout", response_model=BillingCheckoutRead)
+async def create_branch_checkout(
+    tenant_id: UUID,
+    review_id: UUID,
+    context: AuthContext = Depends(require_permission("documents:write")),
+) -> BillingCheckoutRead:
+    return billing_service.create_checkout(
+        tenant_id, context.subject, "rubrica_team", "month", branch_review_id=review_id,
+    )
+
+
 @router.post("/tenants/{tenant_id}/portal", response_model=BillingPortalRead)
 async def create_portal(
     tenant_id: UUID,

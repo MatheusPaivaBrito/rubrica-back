@@ -333,6 +333,9 @@ class BillingService:
             .where(BillingAccountEntity.tenant_id == tenant_id)
             .with_for_update()
         )
+        closed_at = database.scalar(select(TenantEntity.workspace_closed_at).where(TenantEntity.id == tenant_id))
+        if closed_at is not None:
+            raise WorkflowError("Workspace is closed", 410)
         if account is None:
             account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")
             database.add(account)
@@ -354,6 +357,9 @@ class BillingService:
             .where(BillingAccountEntity.tenant_id == tenant_id)
             .with_for_update()
         )
+        closed_at = database.scalar(select(TenantEntity.workspace_closed_at).where(TenantEntity.id == tenant_id))
+        if closed_at is not None:
+            raise WorkflowError("Workspace is closed", 410)
         if account is None:
             account = BillingAccountEntity(tenant_id=tenant_id, status="not_configured")
             database.add(account)
@@ -373,9 +379,12 @@ class BillingService:
         account.files_uploaded_in_period += 1
 
     def create_checkout(
-        self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str = "month"
+        self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str = "month",
+        *, branch_review_id: UUID | None = None,
     ) -> BillingCheckoutRead:
         try:
+            if branch_review_id is not None:
+                return self._create_checkout(tenant_id, subject, product_code, billing_interval, branch_review_id=branch_review_id)
             return self._create_checkout(tenant_id, subject, product_code, billing_interval)
         except WorkflowError as exc:
             if exc.status_code >= 500:
@@ -386,13 +395,19 @@ class BillingService:
             raise
 
     def _create_checkout(
-        self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str
+        self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str,
+        *, branch_review_id: UUID | None = None,
     ) -> BillingCheckoutRead:
         product_code = self._normalize_product_code(product_code)
-        destination_id = (
-            prepare_business_checkout(tenant_id, subject)
-            if product_code in self.BUSINESS_PRODUCT_CODES else tenant_id
-        )
+        if branch_review_id is not None:
+            if product_code != "rubrica_team" or billing_interval != "month":
+                raise WorkflowError("Branches require the monthly Team branch price", 422)
+            destination_id = prepare_business_checkout(tenant_id, subject, branch_review_id=branch_review_id)
+        else:
+            destination_id = (
+                prepare_business_checkout(tenant_id, subject)
+                if product_code in self.BUSINESS_PRODUCT_CODES else tenant_id
+            )
         provider = self._get_provider()
         with SessionLocal.begin() as database:
             if destination_id == tenant_id:
@@ -422,7 +437,12 @@ class BillingService:
                     409,
                 )
             currency = billing_currency_for_country(tenant.country_code.strip())
-            price_id = self._price_for_currency(currency, product_code, billing_interval)
+            if branch_review_id is not None:
+                price_id = getattr(settings, f"STRIPE_PRICE_TEAM_BRANCH_MONTHLY_{currency}", None)
+                if not price_id:
+                    raise WorkflowError(f"Stripe Team branch price is not configured in {currency}", 503)
+            else:
+                price_id = self._price_for_currency(currency, product_code, billing_interval)
             if tenant.status == "pending_billing":
                 account.current_product_code = product_code
             try:
@@ -1122,6 +1142,7 @@ class BillingService:
                     settings.STRIPE_PRICE_PROFESSIONAL_ANNUAL_JPY,
                 ),
                 "rubrica_team": (
+                    *BillingService._configured_prices("TEAM_BRANCH", "MONTHLY").values(),
                     settings.STRIPE_PRICE_TEAM_MONTHLY_BRL,
                     settings.STRIPE_PRICE_TEAM_MONTHLY_USD,
                     settings.STRIPE_PRICE_TEAM_MONTHLY_EUR,

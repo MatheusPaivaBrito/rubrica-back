@@ -27,6 +27,9 @@ class TenantEntity(BaseEntity):
     kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default="personal", server_default="personal", index=True
     )
+    workspace_closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closure_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parent_workspace_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("tenants.id"), index=True)
     legal_name: Mapped[str | None] = mapped_column(String(240))
     registration_country: Mapped[str | None] = mapped_column(String(2))
     registration_type: Mapped[str | None] = mapped_column(String(32))

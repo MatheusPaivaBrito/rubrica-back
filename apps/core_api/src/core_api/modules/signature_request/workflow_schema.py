@@ -233,6 +233,7 @@ class SigningRead(BaseModel):
 
 
 class SignCommand(BaseModel):
+    identifier_id: UUID | None = None
     consent: bool
     consent_version: str = Field(pattern=r"^rubrica-evidence-v(?:1|2)$")
     stamp: StampPosition | None = None

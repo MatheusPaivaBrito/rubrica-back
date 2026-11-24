@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from pydantic import ValidationError
 
@@ -151,3 +153,16 @@ def test_public_registration_does_not_accept_a_password() -> None:
                 "preferred_locale": "pt-BR",
             }
         )
+
+
+def test_add_identifier_rejects_mismatched_country_before_persistence() -> None:
+    from fastapi import HTTPException
+
+    from auth_api.modules.users.user_router import AddMyIdentifier, add_my_identifier
+
+    with pytest.raises(HTTPException) as failure:
+        asyncio.run(add_my_identifier(
+            AddMyIdentifier(issuing_country="JP", identifier_type="BR_CPF", value="52998224725"),
+        ))
+
+    assert failure.value.status_code == 422

@@ -1,3 +1,4 @@
+from uuid import UUID
 from dataclasses import dataclass
 
 import httpx
@@ -13,11 +14,14 @@ class IdentitySummary:
     masked_display: str | None = None
 
 
-def identity_summary(email: str) -> IdentitySummary:
+def identity_summary(email: str, identifier_id: UUID | None = None) -> IdentitySummary:
+    params = {"email": email.strip().lower()}
+    if identifier_id is not None:
+        params["identifier_id"] = str(identifier_id)
     try:
         response = httpx.get(
             f"{settings.AUTH_API_URL.rstrip('/')}/users/internal/identity-summary",
-            params={"email": email.strip().lower()},
+            params=params,
             headers={
                 "X-Rubrica-Service": "core_api",
                 "X-Rubrica-Service-Key": settings.CORE_INTERNAL_SERVICE_KEY,

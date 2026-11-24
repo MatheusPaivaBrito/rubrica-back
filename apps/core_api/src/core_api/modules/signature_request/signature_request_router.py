@@ -233,6 +233,7 @@ async def sign_document(token: str, payload: SignCommand, request: Request, cont
         ip_address=_client_ip(request),
         user_agent=request.headers.get("user-agent", "unknown"),
         drawn_signature_png_data_url=payload.drawn_signature_png_data_url,
+        **({"identifier_id": payload.identifier_id} if payload.identifier_id else {}),
     )
 
 

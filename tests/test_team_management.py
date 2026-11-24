@@ -448,11 +448,13 @@ def test_business_review_does_not_convert_or_activate_personal_workspace(team_db
         assert db.get(review.BusinessUpgradeReviewEntity, requested.id).reviewed_by == "operator"
 
 
-def test_approved_business_checkout_activates_separate_workspace_only_after_paid_invoice(team_db, monkeypatch):
+@pytest.mark.parametrize("branch", [False, True])
+def test_approved_business_checkout_activates_separate_workspace_only_after_paid_invoice(team_db, monkeypatch, branch):
     from core_api.modules.billing import billing_service as billing
     from core_api.modules.billing.billing_service import BillingService
     from core_api.modules.billing.providers.fake_provider import FakeBillingProvider
     from core_api.modules.tenant import business_upgrade_review as review
+    from core_api.infrastructure.settings import settings
     from core_api.modules.tenant.tenant_schema import TenantBusinessConversion
 
     factory, tenant_id, _ = team_db
@@ -462,22 +464,30 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
     monkeypatch.setattr(review, "protect_cnpj", lambda _value: ("encrypted", "lookup", "**.***.***/****-81"))
     monkeypatch.setattr(BillingService, "_price_for_currency", staticmethod(lambda *_args: "price_test"))
     monkeypatch.setattr(BillingService, "_record_payment", staticmethod(lambda *_args: None))
+    monkeypatch.setattr(settings, "STRIPE_PRICE_TEAM_BRANCH_MONTHLY_BRL", "price_test_branch")
     with factory.begin() as db:
         source = db.get(TenantEntity, tenant_id)
-        source.kind = "personal"
+        source.kind = "business" if branch else "personal"
         source.country_code = "BR"
         db.scalar(select(BillingAccountEntity)).current_product_code = "rubrica_base"
 
     subject = "member0@example.local"
     service = BillingService(FakeBillingProvider())
+    payload = TenantBusinessConversion(legal_name="Separate company", cnpj="11.222.333/0001-81")
+    if branch:
+        with pytest.raises(WorkflowError, match="active Team subscription"):
+            review.request_review(tenant_id, payload, subject, branch=True)
+        with factory.begin() as db:
+            db.scalar(select(BillingAccountEntity)).current_product_code = "rubrica_team"
     requested = review.request_review(
-        tenant_id, TenantBusinessConversion(legal_name="Separate company", cnpj="11.222.333/0001-81"), subject,
+        tenant_id, payload, subject, branch=branch,
     )
+    checkout_options = {"branch_review_id": requested.id} if branch else {}
     with pytest.raises(WorkflowError, match="approved before checkout"):
-        service.create_checkout(tenant_id, subject, "rubrica_team")
+        service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
     review.record_decision(requested.id, "approved", "operator")
-    service.create_checkout(tenant_id, subject, "rubrica_team")
-    service.create_checkout(tenant_id, subject, "rubrica_team")
+    service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
+    service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
 
     with factory.begin() as db:
         destination_id = db.get(review.BusinessUpgradeReviewEntity, requested.id).business_tenant_id
@@ -488,6 +498,7 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
             "metadata": {"product_code": "rubrica_team"},
         }, destination_id)
         assert destination.status == "pending_billing"
+        assert destination.parent_workspace_id == (tenant_id if branch else None)
 
     assert [item.id for item in module.tenant_service.list_for(subject)] == [tenant_id]
     with factory.begin() as db:
@@ -499,12 +510,16 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
             db, "invoice.payment_succeeded", invoice | {"billing_reason": "subscription_create"}, destination_id
         )
 
+    if branch:
+        assert review.list_branch_reviews(tenant_id, subject)[0].workspace_active
+        assert module.tenant_service.team(destination_id, subject).member_limit == 10
+        assert destination_id not in {item.id for item in module.tenant_service.list_for("member1@example.local")}
     workspaces = module.tenant_service.list_for(subject)
     assert {item.id for item in workspaces} == {tenant_id, destination_id}
     assert {item.id for item in workspaces if item.workspace_selectable} == {tenant_id, destination_id}
     with factory() as db:
-        assert db.get(TenantEntity, tenant_id).kind == "personal"
-        assert db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)).current_product_code == "rubrica_base"
+        assert db.get(TenantEntity, tenant_id).kind == ("business" if branch else "personal")
+        assert db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)).current_product_code == ("rubrica_team" if branch else "rubrica_base")
 
 
 def test_offboarding_revokes_seat_links_and_readmission_can_reset_history(team_db, monkeypatch):
@@ -593,3 +608,151 @@ def test_company_only_signing_scopes_immediate_policy_to_issuing_workspace(team_
         signer.participant_role = "external_signer"
         signer.represented_tenant_id = None
         check(db, request, signer, member)
+
+
+def test_workspace_admin_can_transfer_management_to_an_active_member(team_db):
+    _, tenant_id, members = team_db
+    owner = "member0@example.local"
+    successor = "member1@example.local"
+    service = module.tenant_service
+
+    service.update_member_role(tenant_id, members[1], "admin", owner)
+    assert service.team(tenant_id, successor).can_manage
+    service.update_member_role(tenant_id, members[0], "member", successor)
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        service.team(tenant_id, owner)
+
+
+def test_workspace_admin_transfer_preserves_the_scheduled_successor(team_db):
+    factory, tenant_id, members = team_db
+    owner = "member0@example.local"
+    successor = "member1@example.local"
+    service = module.tenant_service
+    with factory.begin() as db:
+        db.scalar(select(BillingAccountEntity)).current_period_ends_at = (
+            DateTimeService.utc_now() + timedelta(days=1)
+        )
+
+    service.update_member_role(tenant_id, members[1], "admin", owner)
+    service.schedule_seat_roster(tenant_id, TenantSeatRosterUpdate(member_ids=[members[0]]), owner)
+    with pytest.raises(WorkflowError, match="Schedule a successor"):
+        service.update_member_role(tenant_id, members[0], "member", successor)
+
+
+def test_organization_admin_branch_access_is_scoped_and_revocable(team_db, monkeypatch):
+    from core_api.modules.signature_request import database_workflow_service as workflow
+
+    factory, root_id, ids = team_db
+    monkeypatch.setattr(workflow, "SessionLocal", factory)
+    with factory.begin() as db:
+        branch = TenantEntity(name="Branch", slug="branch", kind="business", parent_workspace_id=root_id)
+        private = TenantEntity(name="Personal", slug="personal-scope", kind="personal")
+        db.add_all([branch, private])
+        db.flush()
+        branch_id = branch.id
+        db.add(BillingAccountEntity(tenant_id=branch_id, status="active", current_product_code="rubrica_team"))
+        db.add(TenantMemberEntity(tenant_id=branch_id, auth_user_id="branch-manager@example.local", role="admin"))
+        for tenant in [branch, private]:
+            db.add(DocumentEntity(
+                tenant_id=tenant.id, organization_id=tenant.slug, title=tenant.name,
+                original_filename="test.pdf", content_type="application/pdf",
+                storage_key=tenant.slug, sha256="f" * 64, version=1,
+                status="ready", created_by="somebody@example.local",
+            ))
+        db.flush()
+        doc = db.scalar(select(DocumentEntity).where(DocumentEntity.tenant_id == branch_id))
+        document_id = doc.id
+        request = SignatureRequestEntity(
+            document_id=document_id, document_version=1, document_sha256="f" * 64,
+            status="draft", expires_at=DateTimeService.utc_now() + timedelta(days=1),
+            created_by="branch-manager@example.local",
+        )
+        db.add(request)
+    service = module.tenant_service
+    docs = DatabaseSignatureWorkflowService(None)
+    owner = "member0@example.local"
+    successor = "member1@example.local"
+    manager = "branch-manager@example.local"
+
+    assert {tenant.id for tenant in service.list_for(owner)} == {root_id, branch_id}
+    assert {tenant.id for tenant in service.list_for(manager)} == {branch_id}
+    assert [doc.title for doc in docs.list_documents(owner)] == ["Branch"]
+    assert len(docs.list_requests(owner)) == 1
+    assert docs.get_document(str(document_id), owner).title == "Branch"
+    assert service.team(branch_id, owner).can_manage
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        service.team(root_id, manager)
+
+    service.update_member_role(root_id, ids[1], "admin", owner)
+    service.update_member_role(root_id, ids[0], "member", successor)
+    assert docs.list_documents(owner) == []
+    assert docs.list_requests(owner) == []
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        docs.get_document(str(document_id), owner)
+    assert docs.get_document(str(document_id), successor).title == "Branch"
+
+
+def test_closure_request_is_audited_reversible_and_leaves_workspace_active(team_db):
+    factory, tenant_id, _ = team_db
+    service = module.tenant_service
+    admin = "member0@example.local"
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        service.update_closure_request(tenant_id, "member1@example.local", requested=True)
+
+    first = service.update_closure_request(tenant_id, admin, requested=True)
+    assert first.closure_requested_at is not None
+    assert service.update_closure_request(tenant_id, admin, requested=True).closure_requested_at == first.closure_requested_at
+    assert service.update_closure_request(tenant_id, admin, requested=False).closure_requested_at is None
+    with factory() as db:
+        assert db.get(TenantEntity, tenant_id).status == "active"
+        assert set(db.scalars(select(AuditEventEntity.action))) == {
+            "tenant.closure_requested", "tenant.closure_withdrawn",
+        }
+
+
+def test_closed_workspace_revokes_links_and_allows_only_temporary_admin_export(team_db, monkeypatch):
+    from core_api.modules.signature_request import database_workflow_service as workflow
+
+    factory, tenant_id, _ = team_db
+    monkeypatch.setattr(workflow, "SessionLocal", factory)
+    with factory.begin() as db:
+        doc = DocumentEntity(
+            tenant_id=tenant_id, organization_id="team-test", title="Archive",
+            original_filename="archive.pdf", content_type="application/pdf",
+            storage_key="archive", sha256="a" * 64, version=1, status="ready",
+            created_by="member1@example.local",
+        )
+        db.add(doc)
+        db.flush()
+        doc_id = doc.id
+        request = SignatureRequestEntity(
+            document_id=doc.id, document_version=1, document_sha256="a" * 64,
+            status="open", expires_at=DateTimeService.utc_now() + timedelta(days=1),
+            created_by="member1@example.local",
+        )
+        db.add(request)
+        db.flush()
+        req_id = request.id
+
+    admin, member = "member0@example.local", "member1@example.local"
+    service = module.tenant_service
+    docs = DatabaseSignatureWorkflowService(None)
+    service.update_closure_request(tenant_id, admin, requested=True)
+    closure = service.close_workspace(tenant_id, admin)
+    assert closure.export_until is not None
+    assert service.close_workspace(tenant_id, admin).export_until == closure.export_until
+    assert docs.get_document(str(doc_id), admin).title == "Archive"
+    assert docs.list_documents(member) == []
+    with pytest.raises(WorkflowError, match="Workspace is closed"):
+        docs.get_document(str(doc_id), member)
+    with pytest.raises(WorkflowError, match="Workspace is closed"):
+        docs.delete_document(str(doc_id), admin)
+
+    with factory.begin() as db:
+        assert db.get(SignatureRequestEntity, req_id).status == "cancelled"
+        db.get(TenantEntity, tenant_id).workspace_closed_at = DateTimeService.utc_now() - timedelta(days=31)
+    with pytest.raises(WorkflowError, match="Workspace is closed"):
+        docs.get_document(str(doc_id), admin)
+    assert service.list_for(admin) == []
+    with factory() as db:
+        assert db.get(DocumentEntity, doc_id).deleted_at is None

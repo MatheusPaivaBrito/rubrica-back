@@ -96,6 +96,7 @@ class UserIdentifierRead(BaseModel):
     identifier_type: str
     masked_display: str
     verification_status: str
+    is_preferred: bool = False
 
 
 class UserIdentitySummary(BaseModel):
