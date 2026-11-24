@@ -1,3 +1,4 @@
+from datetime import datetime
 from secrets import token_urlsafe
 
 from sqlalchemy import and_, func, or_, select
@@ -477,14 +478,14 @@ class TenantService:
             return self._team_read(db, tenant_id, actor)
 
     @staticmethod
-    def apply_due_seat_roster(db, tenant_id: UUID) -> None:
+    def apply_due_seat_roster(db, tenant_id: UUID, *, through: datetime | None = None) -> None:
         now = DateTimeService.utc_now()
         rosters = db.scalars(
             select(TenantSeatRosterEntity)
             .where(
                 TenantSeatRosterEntity.tenant_id == tenant_id,
                 TenantSeatRosterEntity.status == "scheduled",
-                TenantSeatRosterEntity.cycle_starts_at <= now,
+                TenantSeatRosterEntity.cycle_starts_at <= (through or now),
                 TenantSeatRosterEntity.deleted_at.is_(None),
             )
             .order_by(TenantSeatRosterEntity.cycle_starts_at)

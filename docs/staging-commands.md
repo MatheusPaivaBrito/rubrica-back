@@ -28,6 +28,11 @@ Execute na raiz do backend. Use `make staging-help` para consultar esta referên
 
 Os resets apagam as contas e dados existentes no PostgreSQL de staging. Redis, R2 e os demais volumes são preservados.
 
+## Testes de assentos e planos
+
+- `make staging-apply-next-cycle` — selecione um workspace com lista pendente e aplique os assentos já. A data de cobrança permanece igual.
+- `make staging-set-test-plan` — selecione o workspace e o plano para testar permissões. Workspaces vinculados ao Stripe ou vitalícios são recusados. Use um workspace separado para testar checkout e webhook.
+
 ## Ensaio de migração de documentos
 
 - `make staging-clone-core-from-production confirm=CLONE_PRODUCTION_CORE_TO_STAGING` — substitui o Core de staging por uma cópia de produção e deixa a aplicação parada.

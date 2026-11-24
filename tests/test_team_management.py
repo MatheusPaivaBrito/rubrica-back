@@ -22,6 +22,7 @@ from core_api.modules.tenant.tenant_schema import (
     TenantTeamUpdate,
 )
 from shared_kernel.time.datetime_service import DateTimeService
+from toolbox.operations import staging_billing
 
 
 @pytest.fixture
@@ -283,3 +284,56 @@ def test_admin_cannot_change_own_role(team_db):
         module.tenant_service.update_member_role(
             tenant_id, ids[0], 'member', 'member0@example.local'
         )
+
+def test_staging_shortcut_applies_future_seats_without_moving_billing_cycle(team_db):
+    factory, tenant_id, ids = team_db
+    cycle_start = DateTimeService.utc_now() + timedelta(days=5)
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        account.current_period_ends_at = cycle_start
+
+    module.tenant_service.schedule_seat_roster(
+        tenant_id, TenantSeatRosterUpdate(member_ids=ids[:5]), "member0@example.local"
+    )
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        staging_billing.apply_cycle(db, account)
+
+    with factory() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        roster = db.scalar(select(TenantSeatRosterEntity))
+        assert account.current_period_ends_at == cycle_start.replace(tzinfo=None)
+        assert roster.status == "applied"
+        assert roster.applied_at < roster.cycle_starts_at
+        assert db.get(TenantMemberEntity, ids[-1]).status == "without_seat"
+
+
+def test_staging_shortcut_sets_plan_without_stripe_and_rejects_linked_account(team_db):
+    factory, tenant_id, ids = team_db
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        staging_billing.set_test_plan(db, account, staging_billing.ESSENTIAL)
+        assert account.provider == "fake"
+        assert account.current_product_code == staging_billing.ESSENTIAL
+        assert account.contracted_seats == 1
+        assert db.get(TenantMemberEntity, ids[-1]).status == "suspended"
+        account.provider_customer_id = "cus_test"
+
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        with pytest.raises(SystemExit, match="vínculo Stripe"):
+            staging_billing.set_test_plan(db, account, staging_billing.TEAM)
+        assert account.current_product_code == staging_billing.ESSENTIAL
+
+
+def test_staging_billing_refuses_production_before_opening_database(monkeypatch):
+    import sys
+
+    def unexpected_database():
+        pytest.fail("Must refuse production before opening a database session")
+
+    monkeypatch.setattr(sys, "argv", ["staging_billing", "staging-set-test-plan"])
+    monkeypatch.setattr(staging_billing.settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(staging_billing, "SessionLocal", unexpected_database)
+    with pytest.raises(SystemExit, match="exclusiva de staging"):
+        staging_billing.main()
