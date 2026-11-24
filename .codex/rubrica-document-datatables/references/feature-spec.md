@@ -2419,3 +2419,47 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
   retornar ao checkout, trocar USD por BRL, proteger compras já concluídas
   e confirmar ativação por webhook. Verificar o caso em que o Stripe criou
   a sessão mas a resposta se perdeu.
+
+## Parte 16 — Seletor de workspace e separação de acervo e cobrança
+
+Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda precisam ser implementados e validados de ponta a ponta.
+
+### Identidade, acervo e franquia
+
+- A pessoa usa a mesma conta para o espaço pessoal e para todos os espaços empresariais aos quais tem acesso. O CPF é da pessoa. Um CNPJ identifica um workspace compartilhado, e as pessoas que o administram com seus próprios cadastros conservam seus espaços pessoais.
+- Cada workspace tem acervo, plano, cobrança e franquia próprios. Uma pessoa pode contratar um plano pessoal mesmo quando tem assento em uma empresa. Esgotar a franquia pessoal nunca transfere automaticamente consumo para a empresa.
+- O documento, suas versões, solicitações e evidências permanecem vinculados ao workspace em que foram criados. A autoria e as assinaturas continuam atribuídas às pessoas responsáveis. O escopo do workspace vale para o upload, preview, download e autorização no backend.
+- Um administrador ativo pode consultar o acervo do workspace que administra, inclusive documentos de membros atuais ou desligados. O convite para uma empresa não concede acesso a arquivos pessoais nem a arquivos de outra empresa.
+- Para membros comuns, partir da regra atual de acesso aos próprios envios e às solicitações em que são signatários, quando também têm vínculo ativo com o workspace para consultar pelo acervo. Compartilhamento explícito entre membros e acesso específico do signatário são decisões próprias.
+
+### Seletor e contexto antes de enviar
+
+- Exibir no seletor o espaço pessoal e os espaços empresariais acessíveis à conta, com nomes claros e indicação do contexto atual.
+- Antes de confirmar um upload, informar onde o documento será salvo e de qual plano sairá o consumo. Exemplos de texto são “Salvar em Empresa X · usa o plano da empresa” e “Salvar no meu espaço pessoal · usa meu plano”.
+- Uma troca de contexto ou a perda do workspace selecionado deve atualizar o acervo visível. Informar qualquer redirecionamento ao espaço pessoal e exigir nova confirmação de destino para uploads já iniciados na interface. Validar no backend vínculos, permissões e a franquia do destino antes de gravar.
+- Contas existentes sem workspace pessoal precisam de um fluxo idempotente de provisionamento ou recuperação. Distinguir conta sem workspace, vínculo suspenso e vínculo sem assento. Se houver espaço pessoal ativo, ele deve continuar acessível em todos esses cenários.
+
+### Matriz de cenários
+
+| Cenário | Resultado esperado ou decisão pendente |
+|---|---|
+| Conta pessoal entra numa empresa ou aceita um segundo convite | Ganha só o novo vínculo. Seus documentos e assinatura pessoal permanecem onde estavam. |
+| Pessoa envia PDFs nos espaços pessoal, empresa A e empresa B | Cada PDF, consumo e plano pertencem ao destino escolhido. A administração da empresa A não inclui o acervo pessoal nem o da empresa B. |
+| Membro perde assento na virada, é suspenso ou é desligado imediatamente | Perde o acesso empresarial quando a mudança entra em vigor. Os arquivos corporativos ficam no acervo da empresa. A identidade e o espaço pessoal continuam acessíveis. |
+| Empresa excluída era o último espaço empresarial da pessoa | O espaço pessoal continua acessível. Para contas antigas sem esse espaço, aplicar a política de recuperação a definir. |
+| Pessoa é readmitida na mesma empresa | Decidir se o vínculo reativado recupera acesso aos documentos históricos em que a pessoa foi autora ou signatária, ou se exige nova concessão. |
+| Membro é promovido a administrador ou deixa a administração | A promoção habilita o acervo do workspace. Ao perder o papel, a conta volta às permissões de membro. Testar também o acesso a documentos anteriores à alteração de papel. |
+| Membro desligado tem solicitação em aberto | Definir quem reassume a solicitação criada por ele, se um convite próprio de assinatura continua válido e quem pode revogá-lo. O acesso de signatário é específico à solicitação. |
+| Ex-membro assinou um PDF empresarial | Preservar assinatura e atribuição. Definir se ele recebe uma cópia do PDF ou da evidência por um acesso específico, com prazo e revogação próprios. |
+| PDF pessoal foi enviado por engano ao espaço empresarial | O destino inicial é o escolhido no upload. Definir se rascunhos podem ser corrigidos e como tratar PDFs já enviados para assinatura ou assinados. |
+| Pessoa quer levar um PDF de um workspace a outro | Definir cópia ou transferência explícita, autorização de origem e destino e tratamento da cobrança. Preservar origem, versões e evidências quando houver assinatura. |
+| Último administrador sai | Definir sucessão e como manter acesso administrativo ao acervo. |
+| Empresa encerra o workspace | Definir exportação, prazos de acesso e retenção e destino das solicitações pendentes. |
+| Pessoa exclui a própria conta | Definir destino do acervo pessoal e acesso de recuperação. Preservar a atribuição histórica das ações e assinaturas nos espaços empresariais. |
+
+### Validação em staging
+
+1. Criar uma conta, confirmar o workspace pessoal e enviar um PDF pessoal. Convidar a conta para duas empresas de teste e confirmar que seus administradores não listam nem abrem o documento pessoal por URL direta.
+2. Em cada workspace, enviar um PDF e confirmar acervo, autoria e consumo separadamente. Testar que esgotar a franquia pessoal não consome a empresarial e que contratar o plano pessoal não altera os planos dos demais espaços.
+3. Suspender, remover e retirar o assento em cenários separados. Conferir a virada normal e o atalho de staging. Testar seletor, URL antiga, preview e download após a mudança, com sessão já aberta e após novo login. Validar que o administrador ainda vê o acervo empresarial e que o usuário ainda abre o acervo pessoal.
+4. Cobrir readmissão, mudança de papel, assinatura em andamento, documento assinado, troca de destino e encerramento conforme as regras decididas para cada caso da matriz.
