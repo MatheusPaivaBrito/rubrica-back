@@ -149,7 +149,8 @@ async def update_team_member_role(
     context: AuthContext = Depends(require_permission("users:write")),
 ) -> TenantTeamRead:
     return tenant_service.update_member_role(
-        tenant_id, member_id, payload.role, context.subject
+        tenant_id, member_id, payload.role, context.subject,
+        scope=payload.document_scope, sign_company_only=payload.sign_company_only,
     )
 
 @router.patch("/{tenant_id}/team/{member_id}/document-scope", response_model=TenantTeamRead)

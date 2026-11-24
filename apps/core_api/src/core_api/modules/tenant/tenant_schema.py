@@ -190,6 +190,8 @@ class TenantSeatRosterUpdate(BaseModel):
 
 class TenantMemberRoleUpdate(BaseModel):
     role: Literal["admin", "member", "auditor"]
+    document_scope: Literal["own", "all", "since_joined"] | None = None
+    sign_company_only: bool | None = None
 
 
 class WorkspaceClosureUpdate(BaseModel):

@@ -692,7 +692,8 @@ class TenantService:
             return self._team_read(db, tenant_id, actor)
 
     def update_member_role(
-        self, tenant_id: UUID, member_id: UUID, role: str, subject: str
+        self, tenant_id: UUID, member_id: UUID, role: str, subject: str,
+        *, scope: str | None = None, sign_company_only: bool | None = None,
     ) -> TenantTeamRead:
         with SessionLocal.begin() as db:
             self._lock_team(db, tenant_id)
@@ -748,6 +749,8 @@ class TenantService:
                         "role": role,
                     },
                 )
+            if scope is not None or sign_company_only is not None:
+                self._apply_member_document_scope(db, member, subject, scope, sign_company_only)
             db.flush()
             return self._team_read(db, tenant_id, actor)
 
@@ -827,24 +830,31 @@ class TenantService:
             )
             if member is None:
                 raise WorkflowError("Member does not belong to this tenant", 404)
-            if member.role == "admin":
-                raise WorkflowError("Administrators already have full workspace access", 409)
-            previous = member.document_scope
-            previous_signing = member.sign_company_only
-            if scope is not None:
-                member.document_scope = scope
-            if sign_company_only is not None:
-                tenant = db.get(TenantEntity, tenant_id)
-                if tenant is None or tenant.kind != "business":
-                    raise WorkflowError("Company signing restrictions require a business workspace", 409)
-                member.sign_company_only = sign_company_only
-            if previous != member.document_scope or previous_signing != member.sign_company_only:
-                self._audit(db, tenant_id, subject, "tenant.member_permissions_updated", {
-                    "member_id": str(member.id), "previous_scope": previous, "scope": member.document_scope,
-                    "previous_sign_company_only": previous_signing, "sign_company_only": member.sign_company_only,
-                })
+            self._apply_member_document_scope(db, member, subject, scope, sign_company_only)
             db.flush()
             return self._team_read(db, tenant_id, actor)
+
+    def _apply_member_document_scope(
+        self, db, member: TenantMemberEntity, subject: str,
+        scope: str | None, sign_company_only: bool | None,
+    ) -> None:
+        tenant_id = member.tenant_id
+        if member.role == "admin":
+            raise WorkflowError("Administrators already have full workspace access", 409)
+        previous = member.document_scope
+        previous_signing = member.sign_company_only
+        if scope is not None:
+            member.document_scope = scope
+        if sign_company_only is not None:
+            tenant = db.get(TenantEntity, tenant_id)
+            if tenant is None or tenant.kind != "business":
+                raise WorkflowError("Company signing restrictions require a business workspace", 409)
+            member.sign_company_only = sign_company_only
+        if previous != member.document_scope or previous_signing != member.sign_company_only:
+            self._audit(db, tenant_id, subject, "tenant.member_permissions_updated", {
+                "member_id": str(member.id), "previous_scope": previous, "scope": member.document_scope,
+                "previous_sign_company_only": previous_signing, "sign_company_only": member.sign_company_only,
+            })
 
     def convert_to_business(
         self,

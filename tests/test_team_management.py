@@ -764,3 +764,20 @@ def test_closed_workspace_revokes_links_and_allows_only_temporary_admin_export(t
     assert service.list_for(admin) == []
     with factory() as db:
         assert db.get(DocumentEntity, doc_id).deleted_at is None
+
+
+def test_member_permissions_are_saved_together_and_rolled_back_on_invalid_combination(team_db):
+    factory, tenant_id, members = team_db
+    service = module.tenant_service
+    admin = "member0@example.local"
+    result = service.update_member_role(
+        tenant_id, members[1], "auditor", admin, scope="since_joined", sign_company_only=True,
+    )
+    updated = next(member for member in result.members if member.id == members[1])
+    assert (updated.role, updated.document_scope, updated.sign_company_only) == ("auditor", "since_joined", True)
+
+    with pytest.raises(WorkflowError, match="Administrators already have full workspace access"):
+        service.update_member_role(tenant_id, members[1], "admin", admin, scope="all")
+    with factory() as db:
+        member = db.get(TenantMemberEntity, members[1])
+        assert (member.role, member.document_scope, member.sign_company_only) == ("auditor", "since_joined", True)
