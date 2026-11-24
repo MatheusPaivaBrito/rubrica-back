@@ -2437,9 +2437,17 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 
 - Exigir CNPJ antes de iniciar o upgrade para Profissional ou Equipe. Validar o vínculo com a empresa antes de conceder administração. Um CNPJ já associado a outro workspace segue o fluxo de solicitação de acesso. Após confirmação do upgrade, cadastrar ou habilitar o workspace empresarial e atribuir o papel de administrador ao mesmo login, preservando os vínculos anteriores e o espaço pessoal.
 - A assinatura empresarial e a pessoal são independentes. Se a pessoa tem apenas acesso ao plano empresarial, as assinaturas que fizer ali seguem a modalidade definida pelo administrador do tenant, inclusive a possibilidade de restringir a representação ao CNPJ da empresa. Se contratar plano pessoal, assina no próprio workspace conforme as modalidades desse plano e sua própria franquia.
-- O administrador escolhe a visibilidade do acervo empresarial por membro entre três níveis: **todos os arquivos** do workspace, inclusive anteriores ao vínculo; **somente arquivos próprios**, entendidos como os que o membro enviou naquele workspace; ou **arquivos adicionados desde sua entrada**, comparando a criação do documento com o início efetivo do vínculo. Uma versão nova de um documento antigo não muda sua data de entrada no acervo. A recuperação de um assento preserva a data do vínculo existente. A readmissão após desligamento estabelece uma nova data e exige concessão explícita do administrador para recuperar acesso histórico mais amplo.
+- O administrador escolhe a visibilidade do acervo empresarial por membro entre três níveis: **todos os arquivos** do workspace, inclusive anteriores ao vínculo; **somente arquivos próprios**, entendidos como os que o membro enviou naquele workspace; ou **arquivos adicionados desde sua entrada**, comparando a criação do documento com o início efetivo do vínculo. Uma versão nova de um documento antigo não muda sua data de entrada no acervo. A recuperação de um assento preserva a data do vínculo existente. Na readmissão após desligamento, o administrador escolhe entre restaurar o vínculo anterior ou iniciar uma nova admissão.
 - A alteração de modalidade de assinatura ou de acesso ao acervo entra em vigor assim que é salva, inclusive em produção e em sessões já abertas. Essas permissões independem da seleção de assentos e da virada do ciclo. O backend aplica o escopo em listagem, busca, detalhes, preview e download, sem afetar o espaço pessoal ou outros tenants. O acesso específico como signatário continua sujeito à regra própria daquela solicitação.
 - Auditar mudanças de permissões com administrador, membro, workspace, valor anterior e novo valor. Validar aumento e redução imediatos dos três níveis com documentos próprios e de terceiros, anteriores e posteriores ao vínculo, inclusive com URL direta e sessão aberta. Testar também que o mesmo usuário pode ter modalidades diferentes no pessoal e no empresarial.
+
+### Organização, filiais e papéis
+
+- Uma organização pode ter vários workspaces para separar times, escritórios ou filiais. Cada workspace tem acervo e acessos próprios e pode ter seu próprio CNPJ. A administração da organização abrange somente seus workspaces empresariais.
+- **Administrador da organização** pode criar e abrir qualquer workspace empresarial da organização, enviar convites, nomear gestores e promover outro membro a administrador da organização. A promoção é explícita e auditada e informa que concede acesso a todos os workspaces daquela organização.
+- **Gestor do workspace** atua no workspace que administra e pode definir quais participantes da filial são **membros** ou **auditores**. Cada workspace empresarial deve ter pelo menos um gestor. Para retirar ou rebaixar o último gestor, atribuir um sucessor antes.
+- **Membro** e **auditor** são papéis atribuídos por workspace. A mesma pessoa pode ter papéis diferentes em filiais distintas. Detalhar quais operações o auditor pode realizar e como as permissões de acervo se aplicam a esse papel.
+- Fechar o modelo de contratação de vários workspaces, incluindo franquia, cobrança, CNPJ já cadastrado e possibilidade de mais de um time sob o mesmo CNPJ. Validar a promoção de administrador, convites, sucessão e a tentativa de um gestor administrar outra filial.
 
 ### Seletor e contexto antes de enviar
 
@@ -2451,7 +2459,7 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 ### Desligamento e readmissão
 
 - No desligamento, a conta perde todo o acesso ao workspace empresarial e aos seus documentos na plataforma, inclusive por URLs antigas, sessões já abertas e arquivos que a pessoa enviou ou assinou. O acervo, as solicitações e o histórico permanecem com a empresa. Para obter um documento, o ex-membro deve entrar em contato com ela.
-- A recuperação de um assento no mesmo vínculo preserva a data da admissão. Uma nova admissão após desligamento registra uma nova data, aplica as permissões de entrada e exige concessão explícita para acesso histórico mais amplo.
+- A recuperação de um assento no mesmo vínculo preserva a data da admissão. Após desligamento, a empresa escolhe entre restaurar o vínculo no mesmo workspace, com acesso histórico conforme o papel e as permissões que confirmar, ou iniciar um vínculo novo, com nova data, permissão inicial e sem acesso aos próprios envios da admissão anterior por padrão. A nova admissão preserva o acervo e a trilha de auditoria da empresa.
 
 ### Matriz de cenários
 
@@ -2461,7 +2469,7 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 | Pessoa envia PDFs nos espaços pessoal, empresa A e empresa B | Cada PDF, consumo e plano pertencem ao destino escolhido. A administração da empresa A não inclui o acervo pessoal nem o da empresa B. |
 | Membro perde assento na virada, é suspenso ou é desligado imediatamente | Perde o acesso empresarial quando a mudança entra em vigor. Os arquivos corporativos ficam no acervo da empresa. A identidade e o espaço pessoal continuam acessíveis. |
 | Empresa excluída era o último espaço empresarial da pessoa | O espaço pessoal continua acessível. Para contas antigas sem esse espaço, aplicar a política de recuperação a definir. |
-| Pessoa é readmitida na mesma empresa | Aplicar o padrão de um novo membro. O filtro **desde sua entrada** usa a nova data. Acesso histórico mais amplo exige nova concessão explícita. |
+| Pessoa é readmitida na mesma empresa | O administrador escolhe restaurar o acesso ao mesmo workspace, inclusive aos próprios arquivos anteriores, ou começar com um vínculo novo e sem recuperar os acessos anteriores. O filtro **desde sua entrada** usa o marco do vínculo escolhido. |
 | Membro é promovido a administrador ou deixa a administração | A promoção habilita o acervo do workspace. Ao perder o papel, a conta volta às permissões de membro. Testar também o acesso a documentos anteriores à alteração de papel. |
 | Membro desligado tem solicitação em aberto | Revogar o acesso dele pelo vínculo e por convites empresariais anteriores associados ao desligamento. A empresa assume as solicitações abertas e pode emitir um novo convite específico se precisar de sua assinatura. |
 | Ex-membro assinou um PDF empresarial | Preservar o PDF, a assinatura e a atribuição no acervo empresarial. O ex-membro perde o acesso ao documento pela plataforma e deve solicitar qualquer cópia à empresa. |
@@ -2477,7 +2485,7 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 |---|---|
 | Conta sem workspace elegível | Definir o fluxo de recuperação para contas antigas sem espaço pessoal e sem acesso a um espaço empresarial. |
 | Permissões de membros existentes | Definir a transição dos vínculos existentes e se leitura inclui baixar o PDF. O padrão para novos membros é **somente próprios**. |
-| Autoria de uma admissão anterior | Confirmar se arquivos enviados pela mesma pessoa antes do desligamento entram em **somente próprios** após readmissão. |
+
 | Acompanhamento de solicitações após desligamento | Definir como o administrador reassume solicitações abertas e emite um novo convite específico quando necessário. |
 | Upgrade e vínculo com o CNPJ | Definir a prova de representação aceita, quando o workspace é criado e o que acontece se o pagamento confirmar após uma disputa pelo mesmo CNPJ. Impedir criação duplicada e concessão incorreta de administração. |
 | Arquivos no workspace errado | Definir quem pode corrigir rascunhos e como funciona cópia ou transferência entre espaços. Preservar origem e evidências de documentos já assinados. |
@@ -2488,4 +2496,4 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 1. Criar uma conta, confirmar o workspace pessoal e enviar um PDF pessoal. Convidar a conta para duas empresas de teste e confirmar que seus administradores não listam nem abrem o documento pessoal por URL direta.
 2. Validar que o seletor fica oculto com um único plano ativo e aparece quando houver dois ou mais, inclusive com workspace pessoal gratuito e workspace empresarial ativo. O esgotamento da franquia gratuita preserva o espaço no seletor. Em cada workspace, enviar um PDF e confirmar acervo, autoria e consumo separadamente. Testar que esgotar a franquia pessoal não consome a empresarial e que contratar o plano pessoal não altera os planos dos demais espaços.
 3. Suspender, remover e retirar o assento em cenários separados. Conferir a virada normal e o atalho de staging. Testar seletor, URL antiga, preview e download após a mudança, com sessão já aberta e após novo login. Validar que o administrador ainda vê o acervo empresarial e que o usuário ainda abre o acervo pessoal.
-4. Cobrir readmissão, mudança de papel, assinatura em andamento, documento assinado, troca de destino e encerramento conforme as regras decididas para cada caso da matriz.
+4. Cobrir os dois modos de readmissão e testar se o administrador recupera ou isola os próprios arquivos antigos conforme a escolha. Testar promoção a administrador, criação de workspaces com CNPJs distintos e gestão de membros e auditores limitada à filial. Cobrir também assinatura em andamento, documento assinado, troca de destino e encerramento.
