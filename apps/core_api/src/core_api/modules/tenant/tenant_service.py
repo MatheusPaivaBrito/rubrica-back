@@ -113,12 +113,34 @@ class TenantService:
     def list_for(self, subject: str) -> list[TenantRead]:
         with SessionLocal() as db:
             rows = db.execute(
-                select(TenantEntity, TenantMemberEntity.role)
+                select(TenantEntity, TenantMemberEntity.role, BillingAccountEntity)
                 .join(TenantMemberEntity, TenantMemberEntity.tenant_id == TenantEntity.id)
-                .where(self.membership_identity_filter(subject), TenantEntity.deleted_at.is_(None), TenantMemberEntity.deleted_at.is_(None), TenantMemberEntity.status == "active")
+                .outerjoin(
+                    BillingAccountEntity,
+                    and_(
+                        BillingAccountEntity.tenant_id == TenantEntity.id,
+                        BillingAccountEntity.deleted_at.is_(None),
+                    ),
+                )
+                .where(
+                    self.membership_identity_filter(subject),
+                    TenantEntity.deleted_at.is_(None),
+                    TenantMemberEntity.deleted_at.is_(None),
+                    TenantMemberEntity.status == "active",
+                )
                 .order_by(TenantEntity.name)
             ).all()
-            return [self._read(tenant, role) for tenant, role in rows]
+            return [
+                self._read(
+                    tenant,
+                    role,
+                    workspace_selectable=tenant.status == "active" and (
+                        tenant.kind == "personal"
+                        or bool(account and (account.status == "active" or account.complimentary_lifetime))
+                    ),
+                )
+                for tenant, role, account in rows
+            ]
 
     def access_state(self, subject: str) -> TenantAccessState:
         with SessionLocal() as db:
@@ -785,7 +807,7 @@ class TenantService:
         return or_(TenantMemberEntity.auth_user_uuid == resolved_user_id, legacy) if resolved_user_id else legacy
 
     @staticmethod
-    def _read(tenant: TenantEntity, role: str) -> TenantRead:
+    def _read(tenant: TenantEntity, role: str, *, workspace_selectable: bool = False) -> TenantRead:
         return TenantRead(
             id=tenant.id,
             name=tenant.name,
@@ -798,6 +820,7 @@ class TenantService:
             timezone=tenant.timezone,
             currency=tenant.currency,
             kind=tenant.kind,
+            workspace_selectable=workspace_selectable,
             legal_name=tenant.legal_name,
             registration_country=tenant.registration_country,
             registration_type=tenant.registration_type,

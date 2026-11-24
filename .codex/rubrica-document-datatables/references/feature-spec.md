@@ -2422,7 +2422,7 @@ expirar as três sessões de teste, o checkout em BRL passou e a compra foi conc
 
 ## Parte 16 — Seletor de workspace e separação de acervo e cobrança
 
-Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda precisam ser implementados e validados de ponta a ponta.
+Status: **implementação iniciada**. O seletor já usa a elegibilidade retornada pelo Core e inclui o espaço pessoal gratuito. O provisionamento dos espaços pessoais ausentes, as permissões empresariais e os demais fluxos ainda precisam ser implementados e validados de ponta a ponta.
 
 ### Identidade, acervo e franquia
 
@@ -2496,7 +2496,6 @@ Proposta para revisão. O cadastro deve permitir que a mesma pessoa mantenha doc
 |---|---|
 | Conta sem workspace elegível | Definir o fluxo de recuperação para contas antigas sem espaço pessoal e sem acesso a um espaço empresarial. |
 | Permissões de membros existentes | Definir a transição dos vínculos existentes e se leitura inclui baixar o PDF. O padrão para novos membros é **somente próprios**. |
-
 | Acompanhamento de solicitações após desligamento | Definir como o administrador reassume solicitações abertas e emite um novo convite específico quando necessário. |
 | Upgrade e vínculo com o CNPJ | Definir a prova de representação aceita, quando o workspace é criado e o que acontece se o pagamento confirmar após uma disputa pelo mesmo CNPJ. Impedir criação duplicada e concessão incorreta de administração. |
 | Arquivos no workspace errado | Definir quem pode corrigir rascunhos e como funciona cópia ou transferência entre espaços. Preservar origem e evidências de documentos já assinados. |

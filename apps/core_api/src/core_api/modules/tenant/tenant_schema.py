@@ -54,6 +54,7 @@ class TenantRead(BaseModel):
     timezone: str
     currency: str
     kind: Literal["personal", "business"] = "personal"
+    workspace_selectable: bool = False
     legal_name: str | None = None
     registration_country: str | None = None
     registration_type: str | None = None

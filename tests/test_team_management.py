@@ -337,3 +337,25 @@ def test_staging_billing_refuses_production_before_opening_database(monkeypatch)
     monkeypatch.setattr(staging_billing, "SessionLocal", unexpected_database)
     with pytest.raises(SystemExit, match="exclusiva de staging"):
         staging_billing.main()
+
+
+def test_only_active_plan_workspaces_are_selectable(team_db):
+    factory, tenant_id, _ = team_db
+    with factory.begin() as db:
+        personal = TenantEntity(name="Personal", slug="me-test", kind="personal", status="active")
+        db.add(personal)
+        db.flush()
+        db.add(TenantMemberEntity(
+            tenant_id=personal.id, auth_user_id="member0@example.local",
+            role="admin", status="active",
+        ))
+        db.get(TenantEntity, tenant_id).status = "active"
+
+    workspaces = module.tenant_service.list_for("member0@example.local")
+    assert {space.kind for space in workspaces if space.workspace_selectable} == {"personal", "business"}
+
+    with factory.begin() as db:
+        db.scalar(select(BillingAccountEntity)).status = "cancelled"
+
+    workspaces = module.tenant_service.list_for("member0@example.local")
+    assert [space.kind for space in workspaces if space.workspace_selectable] == ["personal"]
