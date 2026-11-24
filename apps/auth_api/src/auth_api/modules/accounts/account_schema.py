@@ -52,20 +52,19 @@ class PublicRegistration(BaseModel):
     preferred_locale: SupportedLocale = "en"
     turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
     return_url: str | None = Field(default=None, max_length=512, pattern=r"^/signing/[A-Za-z0-9_-]+$")
-    identity_document_type: IdentityDocumentType | None = None
-    identity_document_country: str | None = None
-    identity_document_value: str | None = Field(
-        default=None, min_length=4, max_length=80
-    )
+    country_code: str
+    identity_document_type: IdentityDocumentType
+    identity_document_country: str
+    identity_document_value: str = Field(min_length=4, max_length=80)
 
     @field_validator("preferred_locale", mode="before")
     @classmethod
     def normalize_preferred_locale(cls, value: object) -> SupportedLocale:
         return normalize_locale(value)
 
-    @field_validator("identity_document_country", mode="before")
+    @field_validator("country_code", "identity_document_country", mode="before")
     @classmethod
-    def normalize_identity_country(cls, value: object) -> str | None:
+    def normalize_registration_country(cls, value: object) -> str | None:
         return normalize_country_code(value)
 
     @field_validator("identity_document_type", mode="before")
@@ -75,19 +74,7 @@ class PublicRegistration(BaseModel):
 
     @model_validator(mode="after")
     def validate_identity_fields(self) -> "PublicRegistration":
-        provided = (
-            self.identity_document_type,
-            self.identity_document_country,
-            self.identity_document_value,
-        )
-        if any(provided) and not all(provided):
-            raise ValueError(
-                "identity document type, country, and value must be provided together"
-            )
-        if self.identity_document_type and self.identity_document_value:
-            validate_identifier(
-                self.identity_document_type, self.identity_document_value
-            )
+        validate_identifier(self.identity_document_type, self.identity_document_value)
         return self
 
 

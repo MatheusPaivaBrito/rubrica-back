@@ -93,7 +93,7 @@ def test_low_level_international_validators() -> None:
 
 def test_account_return_url_accepts_only_internal_signing_links() -> None:
     signing_path = "/signing/a64f12c17580f6a4931bff328302359d816547f4a230f7608aaf7dfa4e1e10d5a"
-    assert PublicRegistration(name="Signer", email="signer@example.com", return_url=signing_path).return_url == signing_path
+    assert PublicRegistration(name="Signer", email="signer@example.com", country_code="BR", identity_document_type="PASSPORT", identity_document_country="BR", identity_document_value="TR1234567", return_url=signing_path).return_url == signing_path
     assert PasswordRecoveryRequest(email="signer@example.com", return_url=signing_path).return_url == signing_path
 
     with pytest.raises(ValidationError):
@@ -105,6 +105,7 @@ def test_public_registration_normalizes_identity_issuer_country() -> None:
         name="Aiko",
         email="aiko@example.jp",
         preferred_locale="ja-JP",
+        country_code="JP",
         identity_document_type="PASSPORT",
         identity_document_country="jp",
         identity_document_value="TR1234567",

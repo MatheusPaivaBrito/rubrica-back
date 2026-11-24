@@ -82,6 +82,7 @@ def main() -> None:
             email=args.email,
             preferred_locale=args.locale,
             identity_document_type=args.document_type,
+            country_code=args.document_country,
             identity_document_country=args.document_country,
             identity_document_value=document_value,
         )

@@ -122,6 +122,7 @@ def test_partial_identity_document_is_rejected() -> None:
             name="Incomplete Identity",
             email="identity@example.com",
             preferred_locale="ja-JP",
+            country_code="BR",
             identity_document_type="PASSPORT",
         )
 
@@ -131,6 +132,7 @@ def test_public_registration_accepts_brazilian_cnpj() -> None:
         name="Brazilian Company",
         email="company@example.com",
         preferred_locale="pt-BR",
+        country_code="BR",
         identity_document_type="BR_CNPJ",
         identity_document_country="BR",
         identity_document_value="11.222.333/0001-81",

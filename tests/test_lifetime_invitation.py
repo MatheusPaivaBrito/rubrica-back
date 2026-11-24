@@ -26,6 +26,7 @@ def registration() -> PublicRegistration:
         name="Selected Person",
         email="selected@example.com",
         preferred_locale="en",
+        country_code="US",
         identity_document_type="PASSPORT",
         identity_document_country="US",
         identity_document_value="A1234567",

@@ -16,7 +16,7 @@ def provision_account_tenant(payload: PublicRegistration, user_id: UUID | None =
             "owner_email": payload.email.strip().lower(),
             "name": payload.name.strip(),
             "default_locale": payload.preferred_locale,
-            "country_code": payload.identity_document_country,
+            "country_code": payload.country_code,
         }
         if user_id is not None:
             body["owner_user_id"] = str(user_id)

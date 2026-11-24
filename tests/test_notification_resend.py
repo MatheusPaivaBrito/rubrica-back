@@ -198,6 +198,7 @@ def test_auth_client_provisions_tenant_with_internal_contract(monkeypatch) -> No
             name="Owner",
             email="OWNER@example.com",
             preferred_locale="pt-BR",
+            country_code="BR",
             identity_document_type="PASSPORT",
             identity_document_country="jp",
             identity_document_value="TR1234567",
@@ -213,7 +214,7 @@ def test_auth_client_provisions_tenant_with_internal_contract(monkeypatch) -> No
         "owner_email": "owner@example.com",
         "name": "Owner",
         "default_locale": "pt-BR",
-        "country_code": "JP",
+        "country_code": "BR",
     }
 
 
