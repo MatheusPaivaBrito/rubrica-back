@@ -2362,6 +2362,13 @@ Acrescente aqui a Parte 15 e as seguintes conforme o usuário as definir. Separe
 4. Com um usuário de teste cujo workspace a excluir seja o último vínculo ativo, repetir a exclusão. Confirmar que o login continua funcionando e que a interface distingue conta sem workspace de vínculo suspenso. Se a API devolver zero vínculos ativos e suspensos, a tela deve indicar uma saída utilizável. A política de criação ou recuperação para esse estado fica pendente de validação.
 5. Comparar com um vínculo suspenso de verdade. Para uma conta sem workspace ativo e com um vínculo suspenso, esperar o formulário de criação do espaço pessoal. Criar o espaço, conferir o redirecionamento ao painel e validar que o acesso ao workspace suspenso continua bloqueado.
 
+### Evolução planejada — mudança de país do workspace
+
+- Permitir ao administrador alterar o país da conta nas configurações do workspace. O país emissor do documento de identidade tem valor próprio e não muda com o país do workspace.
+- Antes da confirmação, mostrar o novo país e o impacto na moeda e no próximo checkout. Para workspaces sem assinatura ativa, derivar a moeda do país escolhido e reconciliar as sessões abertas e não pagas pelo fluxo de checkout existente.
+- Para assinaturas ativas, manter o contrato e a moeda vigentes até existir um fluxo separado de migração de cobrança, com confirmação explícita e tratamento de faturas e pagamentos em andamento. Registrar alteração de país em auditoria.
+- Testar mudança de país sem assinatura, com checkout antigo aberto e com assinatura ativa. Testar também que o documento cadastrado permanece intacto e que membros sem permissão de administração não conseguem alterar o país.
+
 ### Checklist para o merge em main
 
 - Agendar a janela de manutenção no domínio de produção. Ativar a regra de manutenção existente no Cloudflare com exceção para o IP público atual do operador. Verificar o acesso normal pelo PC autorizado e a resposta 503 de manutenção de outra origem.
