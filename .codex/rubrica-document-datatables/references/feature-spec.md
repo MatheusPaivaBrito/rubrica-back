@@ -2447,7 +2447,9 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 - **Administrador da organização** pode criar e abrir qualquer workspace empresarial da organização, enviar convites, nomear gestores e promover outro membro a administrador da organização. A promoção é explícita e auditada e informa que concede acesso a todos os workspaces daquela organização.
 - **Gestor do workspace** atua no workspace que administra e pode definir quais participantes da filial são **membros** ou **auditores**. Cada workspace empresarial deve ter pelo menos um gestor. Para retirar ou rebaixar o último gestor, atribuir um sucessor antes.
 - **Membro** e **auditor** são papéis atribuídos por workspace. A mesma pessoa pode ter papéis diferentes em filiais distintas. Detalhar quais operações o auditor pode realizar e como as permissões de acervo se aplicam a esse papel.
-- Fechar o modelo de contratação de vários workspaces, incluindo franquia, cobrança, CNPJ já cadastrado e possibilidade de mais de um time sob o mesmo CNPJ. Validar a promoção de administrador, convites, sucessão e a tentativa de um gestor administrar outra filial.
+- **Profissional** opera com um único workspace empresarial. **Equipe** permite criar workspaces adicionais para filiais ou times.
+- Cada filial adicional do plano Equipe tem capacidade base de **10 pessoas e 220 arquivos por mês**, com franquia própria e acréscimo na cobrança por filial. O preço do acréscimo fica pendente, assim como a aplicação dos pacotes de expansão da Parte 13 por filial.
+- Definir a contratação e a retirada de filiais, o tratamento de CNPJ já cadastrado e a possibilidade de mais de um time sob o mesmo CNPJ. Validar promoção de administrador, convites, sucessão, recusa de criação de filial no Profissional, franquia isolada no Equipe e tentativa de um gestor administrar outra filial.
 
 ### Seletor e contexto antes de enviar
 
