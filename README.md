@@ -121,6 +121,7 @@ Para começar com um banco limpo em staging:
 - `make staging-reset-db` para a aplicação e apaga o volume PostgreSQL de staging.
 - `make staging-reset-db-seed` valida staging, apaga o banco e executa o bootstrap com migrações, seed e smoke.
 - Os dois comandos preservam Redis, R2 e os demais volumes. São exclusivos de staging.
+- `make staging-check-users` lista as contas do Auth de staging, incluindo inativas, e exibe o total em uma consulta somente leitura.
 
 Remote staging uses a dedicated remotely managed Cloudflare Tunnel published at
 `https://staging.rubricasignature.com`. Configure the tunnel's public hostname
