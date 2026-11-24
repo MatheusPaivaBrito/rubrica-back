@@ -42,6 +42,8 @@ def portal(tmp_path, monkeypatch):
 
 def test_portal_generates_account_subpage(portal):
     assert "(test-accounts.md)" in (portal/"index.md").read_text()
+    assert "(staging-commands.md)" in (portal/"index.md").read_text()
+    assert "make staging-check-users" in (portal/"staging-commands.md").read_text()
     assert "fictional-test-password" in (portal/"test-accounts.md").read_text()
     assert not (portal/"accounts.md").exists()
 
@@ -76,6 +78,8 @@ def test_mkdocs_serves_nested_pages_and_assets_under_docs_prefix(portal, tmp_pat
             with urlopen(f"http://127.0.0.1:{port}/docs/test-accounts/", timeout=3) as response:
                 accounts = response.read().decode()
             assert "fictional-test-password" in accounts
+            with urlopen(f"http://127.0.0.1:{port}/docs/staging-commands/", timeout=3) as response:
+                assert "make staging-check-users" in response.read().decode()
             assert '../assets/local_accounts.css' in accounts
             with urlopen(f"http://127.0.0.1:{port}/docs/assets/local_accounts.css", timeout=3) as response:
                 assert "text/css" in response.headers["Content-Type"]

@@ -8,6 +8,7 @@ from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONA
 
 
 DOCUMENT_ROUTES = {
+    "staging-commands.md": "staging-commands.md",
     "ARCHITECTURE.md": "architecture.md",
     "PRODUCTION_MVP_SETUP.md": "production.md",
     "SERPRO_TIMESTAMP_SETUP.md": "serpro-timestamp.md",
@@ -107,6 +108,7 @@ def main() -> None:
         "# Portal de desenvolvimento Rubrica\n\n"
         "Documentação técnica e referências locais em um único lugar.\n\n"
         "- [Contas de desenvolvimento](test-accounts.md)\n"
+        "- [Comandos de staging](staging-commands.md)\n"
         "- [Arquitetura](architecture.md)\n"
         "- [Preparação de produção](production.md)\n"
         "- [Carimbo do tempo SERPRO](serpro-timestamp.md)\n"

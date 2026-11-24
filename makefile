@@ -53,18 +53,10 @@ ECNPJ_ICP_TRUST_ROOTS_FILE ?= /etc/rubrica/secrets/icp-brasil-trust-roots.pem
 ECNPJ_SIGNATURE_POLICY_FILE ?= /etc/rubrica/policies/PA_PAdES_AD_RB_v1_3.der
 ECNPJ_SIGNATURE_POLICY_URL ?= http://politicas.icpbrasil.gov.br/PA_PAdES_AD_RB_v1_3.der
 
-.PHONY: help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-reset-db staging-reset-db-seed staging-check-users staging-status staging-logs staging-public-url staging-docs-url staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
+.PHONY: help staging-help help-production dev dev-bootstrap dev-docker dev-docker-down dev-docker-status dev-docker-logs dev-migrate dev-seed staging-secrets-init staging-ensure staging-bootstrap staging-up staging-down staging-reset-db staging-reset-db-seed staging-check-users staging-status staging-logs staging-public-url staging-docs-url staging-migrate staging-seed staging-smoke production-ensure production-bootstrap production-status production-provider-check production-provider-check-paid doctor test test-unit test-integration lint docs docs-up docs-logs docs-build telemetry-up telemetry-down telemetry-status telemetry-smoke quick-tunnel-up quick-tunnel-down quick-tunnel-logs ensure-observability-network ensure-local-databases ensure-integration-services ensure-production-databases local-config local-start local-up local-up-stripe local-down local-reset local-logs local-rebuild compose-up compose-down bootstrap stripe-up stripe-down stripe-logs migrate migrate-core revision-core migrate-auth revision-auth migrate-eventing migrate-notification migrate-observability migrate-all seed-auth seed-local-users invite-lifetime create-lifetime-tenant grant-lifetime revoke-lifetime reset-mfa production-config production-up production-down production-logs production-migrate production-seed production-invite-lifetime production-create-lifetime-tenant production-grant-lifetime production-revoke-lifetime production-reset-mfa production-organize-r2-documents production-sign-ecnpj backup backup-all backup-database backup-files backup-production backup-production-offsite backup-r2 backup-r2-init backup-r2-check verify-backup smoke smoke-all smoke-core-generator
 .PHONY: staging-clone-core-from-production staging-clone-r2-documents staging-encrypt-r2-documents document-crypto-benchmark
 
 help:
-	@echo "  make observability-staging-up           Only local PostgreSQL + observability_api (8104), preserve volumes"
-	@echo "  make observability-staging-install-secret name=platform_token source=/protected/local/file"
-	@echo "  make observability-staging-connect      Enable publisher with the single protected integration key"
-	@echo "  make observability-staging-disconnect   Stop publisher only; keep API and PostgreSQL"
-	@echo "  make observability-staging-ensure       Read-only ingest status + scoped metric-name query"
-	@echo "  make observability-staging-test         Live read-only proof plus rejected credential/scope probes"
-	@echo "  make observability-staging-evidence     Save sanitized read-only proof in .runtime"
-	@echo "  make observability-staging-status / observability-staging-logs"
 	@echo "Rúbrica — comandos por ambiente"
 	@echo "============================================================"
 	@echo "Desenvolvimento — aplicações bare metal com hot reload"
@@ -82,24 +74,8 @@ help:
 	@echo "  make quick-tunnel-up           Inicia Cloudflare Quick Tunnel"
 	@echo "  make telemetry-up              Inicia Loki local"
 	@echo ""
-	@echo "Staging — aplicação completa em Docker"
-	@echo "  make staging-secrets-init      Cria somente os secrets isolados de staging"
-	@echo "  make staging-bootstrap         Executa migrations, seed, stack completa e smoke"
-	@echo "  make staging-up                Sobe stack e túnel Cloudflare nomeado sem migration/seed"
-	@echo "  make staging-migrate           Aplica migrations nos cinco bancos de staging"
-	@echo "  make staging-seed              Cria/atualiza as mesmas contas de teste no staging"
-	@echo "  make staging-status            Exibe todos os contêineres"
-	@echo "  make staging-smoke             Valida stack e gateway"
-	@echo "  make staging-logs              Acompanha os logs"
-	@echo "  make staging-public-url        Mostra a URL pública estável do staging"
-	@echo "  make staging-docs-url          Mostra a URL pública do portal MkDocs"
-	@echo "  make staging-down              Encerra preservando volumes"
-	@echo "  make staging-reset-db          Apaga o PostgreSQL de staging e deixa a aplicação parada"
-	@echo "  make staging-reset-db-seed     Apaga o PostgreSQL de staging e recria a aplicação com seed"
-	@echo "  make staging-check-users       Lista as contas do Auth de staging em modo somente leitura"
-	@echo "  make staging-clone-core-from-production confirm=CLONE_PRODUCTION_CORE_TO_STAGING"
-	@echo "  make staging-clone-r2-documents [apply=1]  Clona objetos referenciados"
-	@echo "  make staging-encrypt-r2-documents [apply=1] Audita/migra criptografia"
+	@echo "Staging"
+	@echo "  make staging-help              Lista os comandos e ferramentas de staging"
 	@echo ""
 	@echo "Qualidade"
 	@echo "  make doctor                    Verifica ferramentas e configuração de dev"
@@ -114,6 +90,9 @@ help:
 	@echo "  make production-up            Constrói e sobe a stack"
 	@echo "  make production-status        Exibe o estado dos serviços"
 	@echo "  make production-provider-check Verifica providers seguros"
+
+staging-help:
+	@sed -e 's/^#\{1,3\} //' -e 's/`//g' docs/staging-commands.md
 
 help-production:
 	@echo "Rúbrica — operações avançadas de produção"

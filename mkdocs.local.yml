@@ -16,6 +16,7 @@ theme:
 nav:
   - Início: index.md
   - Contas de desenvolvimento: test-accounts.md
+  - Comandos de staging: staging-commands.md
   - Arquitetura: architecture.md
   - Operação:
       - Produção: production.md
