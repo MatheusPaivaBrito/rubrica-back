@@ -31,7 +31,7 @@ from shared_kernel.time.datetime_service import DateTimeService
 
 
 from toolbox.seeds.lifetime_account import change_lifetime_access
-from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, TEAM
+from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, STAGING_ACCOUNTS, TEAM
 
 
 def require_test_environment() -> str:
@@ -82,10 +82,10 @@ def _ensure_test_cpf(database, user: UserEntity, index: int) -> None:
     )
 
 
-def _auth_users(password: str) -> dict[str, UUID]:
+def _auth_users(password: str, accounts=ACCOUNTS) -> dict[str, UUID]:
     result: dict[str, UUID] = {}
     with AuthSessionLocal.begin() as database:
-        for index, (email, name) in enumerate(ACCOUNTS, start=1):
+        for index, (email, name) in enumerate(accounts, start=1):
             user = database.scalar(select(UserEntity).where(UserEntity.email == email))
             if user is None:
                 user = UserEntity(email=email, name=name, password_hash=hash_password(password))
@@ -364,7 +364,8 @@ def main() -> None:
     password = os.getenv("LOCAL_TEST_ACCOUNT_PASSWORD", "RubricaLocal123!")
     if len(password) < 12:
         raise ValueError("LOCAL_TEST_ACCOUNT_PASSWORD must contain at least 12 characters")
-    users = _auth_users(password)
+    accounts = (*ACCOUNTS, *STAGING_ACCOUNTS) if environment == "staging" else ACCOUNTS
+    users = _auth_users(password, accounts)
     _personal_tenants(users)
     _essential_plan(users)
     _business_tenant(users, PROFESSIONAL, "11.444.777/0001-61", "Empresa Local de Testes Ltda.", "rubrica_intermediate")
@@ -372,11 +373,15 @@ def main() -> None:
     _lifetime_tenant(users)
     _archive_empty_legacy_personal_tenants(users)
     _expired_signature_request_fixture()
+    if environment == "staging":
+        from toolbox.seeds.staging_workspace_scenarios import seed_scenarios
+
+        seed_scenarios(users)
     print(
-        f"[ok] {len(ACCOUNTS)} {environment} test accounts are ready "
+        f"[ok] {len(accounts)} {environment} test accounts are ready "
         "(free, essential, professional 3, team 6, lifetime 3)"
     )
-    for email, _ in ACCOUNTS:
+    for email, _ in accounts:
         print(f"  {email}")
 
 

@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 from shutil import copyfile
 
-from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, TEAM
+from toolbox.seeds.local_accounts_catalog import ACCOUNTS, LIFETIME, PROFESSIONAL, STAGING_ACCOUNTS, TEAM
+from toolbox.seeds.scenario_pdf import scenario_pdf
 
 
 DOCUMENT_ROUTES = {
@@ -44,12 +45,13 @@ def main() -> None:
     account_title = "Contas de staging" if environment == "staging" else "Contas de desenvolvimento"
     raw_password = os.getenv("LOCAL_TEST_ACCOUNT_PASSWORD", "RubricaLocal123!")
     password = html.escape(raw_password)
+    count = len(ACCOUNTS) + (len(STAGING_ACCOUNTS) if environment == "staging" else 0)
     lines = [
         '<section class="accounts-hero">',
         f'<span class="eyebrow">{environment_label}</span>',
         f"# {account_title}",
         "<p>Copie uma conta completa e cole no primeiro campo do login do Rubrica.</p>",
-        f'<div class="summary"><strong>5 tenants</strong><span>14 contas</span><code>{password}</code></div>',
+        f'<div class="summary"><strong>{count} contas</strong><code>{password}</code></div>',
         "</section>",
         '<p class="local-note">Contas confirmadas pelo seed, sem Microsoft Authenticator. '
         "No login, cole no campo de e-mail: o Rubrica separa e-mail e senha automaticamente.</p>",
@@ -87,10 +89,32 @@ def main() -> None:
                 "</div></article>"
             )
         lines += ["</div></section>"]
+    if environment == "staging":
+        lines += ["", '<section class="plan-card"><h2>Cenários de staging</h2>', '<div class="account-list">']
+        for email, scenario in STAGING_ACCOUNTS:
+            lines.append(
+                '<article class="account-row">'
+                f'<div class="account-identity"><strong>{html.escape(scenario)}</strong><span>{html.escape(email)}</span></div>'
+                '<div class="account-actions">'
+                f'<button type="button" class="copy-credentials" data-email="{html.escape(email, quote=True)}" '
+                f'data-password="{html.escape(raw_password, quote=True)}">Copiar conta</button>'
+                "</div></article>"
+            )
+        lines += [
+            "</div></section>", "", "## PDFs para upload",
+            "- [Documento pessoal fictício](assets/teste-pessoal.pdf)",
+            "- [Documento empresarial fictício, com duas páginas](assets/teste-empresa.pdf)",
+            "",
+            "As contas do seed têm e-mail confirmado. Para testar o recebimento real de mensagens, "
+            "cadastre ou convide um endereço de teste com caixa postal acessível.",
+        ]
     target = Path(".artifacts/local-docs")
     target.mkdir(parents=True, exist_ok=True, mode=0o700)
     assets = target / "assets"
     assets.mkdir(exist_ok=True, mode=0o700)
+    if environment == "staging":
+        (assets / "teste-pessoal.pdf").write_bytes(scenario_pdf("PDF pessoal de teste"))
+        (assets / "teste-empresa.pdf").write_bytes(scenario_pdf("PDF empresarial de teste", copies=2))
     source_assets = Path("toolbox/docs/assets")
     copyfile(source_assets / "local_accounts.css", assets / "local_accounts.css")
     copyfile(source_assets / "local_accounts.js", assets / "local_accounts.js")
