@@ -2431,13 +2431,13 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 - Cada workspace tem acervo, plano, cobrança e franquia próprios. Uma pessoa pode contratar um plano pessoal mesmo quando tem assento em uma empresa. Esgotar a franquia pessoal nunca transfere automaticamente consumo para a empresa.
 - O documento, suas versões, solicitações e evidências permanecem vinculados ao workspace em que foram criados. A autoria e as assinaturas continuam atribuídas às pessoas responsáveis. O escopo do workspace vale para o upload, preview, download e autorização no backend.
 - Um administrador ativo pode consultar o acervo do workspace que administra, inclusive documentos de membros atuais ou desligados. O convite para uma empresa não concede acesso a arquivos pessoais nem a arquivos de outra empresa.
-- Para membros comuns, partir da regra atual de acesso aos próprios envios e às solicitações em que são signatários, quando também têm vínculo ativo com o workspace para consultar pelo acervo. Compartilhamento explícito entre membros e acesso específico do signatário são decisões próprias.
+- Um novo membro começa com acesso **somente aos próprios arquivos** no acervo empresarial. O administrador pode ampliar esse escopo. Um convite de assinatura dá acesso somente à solicitação designada e não amplia o acesso ao acervo.
 
 ### Upgrade empresarial e permissões por membro
 
 - Exigir CNPJ antes de iniciar o upgrade para Profissional ou Equipe. Validar o vínculo com a empresa antes de conceder administração. Um CNPJ já associado a outro workspace segue o fluxo de solicitação de acesso. Após confirmação do upgrade, cadastrar ou habilitar o workspace empresarial e atribuir o papel de administrador ao mesmo login, preservando os vínculos anteriores e o espaço pessoal.
 - A assinatura empresarial e a pessoal são independentes. Se a pessoa tem apenas acesso ao plano empresarial, as assinaturas que fizer ali seguem a modalidade definida pelo administrador do tenant, inclusive a possibilidade de restringir a representação ao CNPJ da empresa. Se contratar plano pessoal, assina no próprio workspace conforme as modalidades desse plano e sua própria franquia.
-- O administrador escolhe a visibilidade do acervo empresarial por membro entre três níveis: **todos os arquivos** do workspace, inclusive anteriores ao vínculo; **somente arquivos próprios**, entendidos como os que o membro enviou naquele workspace; ou **arquivos adicionados desde sua entrada**, comparando a criação do documento com o início efetivo do vínculo. Uma versão nova de um documento antigo não muda sua data de entrada no acervo. No caso de readmissão, a definição do marco depende da política de reativação.
+- O administrador escolhe a visibilidade do acervo empresarial por membro entre três níveis: **todos os arquivos** do workspace, inclusive anteriores ao vínculo; **somente arquivos próprios**, entendidos como os que o membro enviou naquele workspace; ou **arquivos adicionados desde sua entrada**, comparando a criação do documento com o início efetivo do vínculo. Uma versão nova de um documento antigo não muda sua data de entrada no acervo. A recuperação de um assento preserva a data do vínculo existente. A readmissão após desligamento estabelece uma nova data e exige concessão explícita do administrador para recuperar acesso histórico mais amplo.
 - A alteração de modalidade de assinatura ou de acesso ao acervo entra em vigor assim que é salva, inclusive em produção e em sessões já abertas. Essas permissões independem da seleção de assentos e da virada do ciclo. O backend aplica o escopo em listagem, busca, detalhes, preview e download, sem afetar o espaço pessoal ou outros tenants. O acesso específico como signatário continua sujeito à regra própria daquela solicitação.
 - Auditar mudanças de permissões com administrador, membro, workspace, valor anterior e novo valor. Validar aumento e redução imediatos dos três níveis com documentos próprios e de terceiros, anteriores e posteriores ao vínculo, inclusive com URL direta e sessão aberta. Testar também que o mesmo usuário pode ter modalidades diferentes no pessoal e no empresarial.
 
@@ -2448,6 +2448,11 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 - Uma troca de contexto ou a perda do workspace selecionado deve atualizar o acervo visível. Informar qualquer redirecionamento ao espaço pessoal e exigir nova confirmação de destino para uploads já iniciados na interface. Validar no backend vínculos, permissões e a franquia do destino antes de gravar.
 - Contas existentes sem workspace pessoal precisam de um fluxo idempotente de provisionamento ou recuperação. Distinguir conta sem workspace, vínculo suspenso e vínculo sem assento. Se houver espaço pessoal ativo, ele deve continuar acessível em todos esses cenários.
 
+### Desligamento e readmissão
+
+- No desligamento, a conta perde todo o acesso ao workspace empresarial e aos seus documentos na plataforma, inclusive por URLs antigas, sessões já abertas e arquivos que a pessoa enviou ou assinou. O acervo, as solicitações e o histórico permanecem com a empresa. Para obter um documento, o ex-membro deve entrar em contato com ela.
+- A recuperação de um assento no mesmo vínculo preserva a data da admissão. Uma nova admissão após desligamento registra uma nova data, aplica as permissões de entrada e exige concessão explícita para acesso histórico mais amplo.
+
 ### Matriz de cenários
 
 | Cenário | Resultado esperado ou decisão pendente |
@@ -2456,10 +2461,10 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 | Pessoa envia PDFs nos espaços pessoal, empresa A e empresa B | Cada PDF, consumo e plano pertencem ao destino escolhido. A administração da empresa A não inclui o acervo pessoal nem o da empresa B. |
 | Membro perde assento na virada, é suspenso ou é desligado imediatamente | Perde o acesso empresarial quando a mudança entra em vigor. Os arquivos corporativos ficam no acervo da empresa. A identidade e o espaço pessoal continuam acessíveis. |
 | Empresa excluída era o último espaço empresarial da pessoa | O espaço pessoal continua acessível. Para contas antigas sem esse espaço, aplicar a política de recuperação a definir. |
-| Pessoa é readmitida na mesma empresa | Decidir se o vínculo reativado recupera acesso aos documentos históricos em que a pessoa foi autora ou signatária, ou se exige nova concessão. |
+| Pessoa é readmitida na mesma empresa | Aplicar o padrão de um novo membro. O filtro **desde sua entrada** usa a nova data. Acesso histórico mais amplo exige nova concessão explícita. |
 | Membro é promovido a administrador ou deixa a administração | A promoção habilita o acervo do workspace. Ao perder o papel, a conta volta às permissões de membro. Testar também o acesso a documentos anteriores à alteração de papel. |
-| Membro desligado tem solicitação em aberto | Definir quem reassume a solicitação criada por ele, se um convite próprio de assinatura continua válido e quem pode revogá-lo. O acesso de signatário é específico à solicitação. |
-| Ex-membro assinou um PDF empresarial | Preservar assinatura e atribuição. Definir se ele recebe uma cópia do PDF ou da evidência por um acesso específico, com prazo e revogação próprios. |
+| Membro desligado tem solicitação em aberto | Revogar o acesso dele pelo vínculo e por convites empresariais anteriores associados ao desligamento. A empresa assume as solicitações abertas e pode emitir um novo convite específico se precisar de sua assinatura. |
+| Ex-membro assinou um PDF empresarial | Preservar o PDF, a assinatura e a atribuição no acervo empresarial. O ex-membro perde o acesso ao documento pela plataforma e deve solicitar qualquer cópia à empresa. |
 | PDF pessoal foi enviado por engano ao espaço empresarial | O destino inicial é o escolhido no upload. Definir se rascunhos podem ser corrigidos e como tratar PDFs já enviados para assinatura ou assinados. |
 | Pessoa quer levar um PDF de um workspace a outro | Definir cópia ou transferência explícita, autorização de origem e destino e tratamento da cobrança. Preservar origem, versões e evidências quando houver assinatura. |
 | Último administrador sai | Definir sucessão e como manter acesso administrativo ao acervo. |
@@ -2471,9 +2476,9 @@ Status: **desenho registrado**. O seletor e a garantia de espaço pessoal ainda 
 | Ponto | Proposta para revisão |
 |---|---|
 | Conta sem workspace elegível | Definir o fluxo de recuperação para contas antigas sem espaço pessoal e sem acesso a um espaço empresarial. |
-| Permissão inicial de um membro | Começar em **somente próprios**. O administrador amplia manualmente. Definir a política de transição para vínculos existentes e confirmar se leitura permite baixar o PDF. |
-| Readmissão e retorno de assento | Distinguir o retorno após uma suspensão de uma nova admissão após o desligamento. Usar a data da nova admissão para o filtro temporal e exigir nova concessão explícita para recuperar acesso histórico mais amplo. Confirmar se arquivos de autoria antiga continuam visíveis no nível **somente próprios**. |
-| Convite de assinatura e acesso ao acervo | Permitir acesso específico à solicitação quando houver convite válido. Definir revogação, responsável por solicitações abertas e direito a cópia após a assinatura, independentemente do acesso ao acervo. |
+| Permissões de membros existentes | Definir a transição dos vínculos existentes e se leitura inclui baixar o PDF. O padrão para novos membros é **somente próprios**. |
+| Autoria de uma admissão anterior | Confirmar se arquivos enviados pela mesma pessoa antes do desligamento entram em **somente próprios** após readmissão. |
+| Acompanhamento de solicitações após desligamento | Definir como o administrador reassume solicitações abertas e emite um novo convite específico quando necessário. |
 | Upgrade e vínculo com o CNPJ | Definir a prova de representação aceita, quando o workspace é criado e o que acontece se o pagamento confirmar após uma disputa pelo mesmo CNPJ. Impedir criação duplicada e concessão incorreta de administração. |
 | Arquivos no workspace errado | Definir quem pode corrigir rascunhos e como funciona cópia ou transferência entre espaços. Preservar origem e evidências de documentos já assinados. |
 | Exclusão e sucessão | Definir sucessor para o último administrador, exportação e retenção em encerramento, descarte do acervo pessoal e preservação das atribuições de autoria. |
