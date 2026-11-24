@@ -781,3 +781,27 @@ def test_member_permissions_are_saved_together_and_rolled_back_on_invalid_combin
     with factory() as db:
         member = db.get(TenantMemberEntity, members[1])
         assert (member.role, member.document_scope, member.sign_company_only) == ("auditor", "since_joined", True)
+
+
+def test_subscription_management_opens_only_the_customer_portal(team_db, monkeypatch):
+    from types import SimpleNamespace
+
+    from core_api.modules.billing import billing_service as billing
+
+    factory, tenant_id, _ = team_db
+    monkeypatch.setattr(billing, "SessionLocal", factory)
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        account.provider_customer_id = "cus_test"
+        account.provider_subscription_id = "sub_test"
+
+    def open_portal(*, customer_id, return_url):
+        assert customer_id == "cus_test"
+        assert f"/plan?tenant={tenant_id}" in return_url
+        return SimpleNamespace(url="https://billing.example.test/portal")
+
+    service = billing.BillingService(SimpleNamespace(create_portal_session=open_portal))
+    with pytest.raises(WorkflowError, match="Tenant access denied"):
+        service.open_subscription_management(tenant_id, "member1@example.local")
+    result = service.open_subscription_management(tenant_id, "member0@example.local")
+    assert result.portal_url == "https://billing.example.test/portal"

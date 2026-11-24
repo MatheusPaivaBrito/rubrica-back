@@ -468,6 +468,22 @@ class BillingService:
                 raise WorkflowError(str(exc), 502) from exc
             return BillingCheckoutRead(checkout_url=checkout.url)
 
+    def open_subscription_management(self, tenant_id: UUID, subject: str) -> BillingPortalRead:
+        provider = self._get_provider()
+        with SessionLocal() as database:
+            tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            account = self._account_entity(database, tenant_id)
+            if account.complimentary_lifetime or not account.provider_customer_id or not account.provider_subscription_id:
+                raise WorkflowError("This workspace has no Stripe subscription to manage", 409)
+            try:
+                portal = provider.create_portal_session(
+                    customer_id=account.provider_customer_id,
+                    return_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?tenant={tenant_id}&billing=updated",
+                )
+            except BillingProviderError as exc:
+                raise WorkflowError(str(exc), 502) from exc
+            return BillingPortalRead(portal_url=portal.url)
+
     def create_portal(self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str) -> BillingPortalRead:
         provider = self._get_provider()
         with SessionLocal.begin() as database:

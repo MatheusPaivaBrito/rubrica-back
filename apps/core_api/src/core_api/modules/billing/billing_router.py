@@ -67,6 +67,14 @@ async def create_branch_checkout(
     )
 
 
+@router.post("/tenants/{tenant_id}/subscription-management", response_model=BillingPortalRead)
+async def open_subscription_management(
+    tenant_id: UUID,
+    context: AuthContext = Depends(require_permission("documents:write")),
+) -> BillingPortalRead:
+    return billing_service.open_subscription_management(tenant_id, context.subject)
+
+
 @router.post("/tenants/{tenant_id}/portal", response_model=BillingPortalRead)
 async def create_portal(
     tenant_id: UUID,
