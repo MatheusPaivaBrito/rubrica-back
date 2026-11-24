@@ -442,3 +442,62 @@ def test_business_review_does_not_convert_or_activate_personal_workspace(team_db
     with factory() as db:
         assert db.get(TenantEntity, tenant_id).kind == "personal"
         assert db.get(review.BusinessUpgradeReviewEntity, requested.id).reviewed_by == "operator"
+
+
+def test_approved_business_checkout_activates_separate_workspace_only_after_paid_invoice(team_db, monkeypatch):
+    from core_api.modules.billing import billing_service as billing
+    from core_api.modules.billing.billing_service import BillingService
+    from core_api.modules.billing.providers.fake_provider import FakeBillingProvider
+    from core_api.modules.tenant import business_upgrade_review as review
+    from core_api.modules.tenant.tenant_schema import TenantBusinessConversion
+
+    factory, tenant_id, _ = team_db
+    review.BusinessUpgradeReviewEntity.__table__.create(factory.kw["bind"])
+    monkeypatch.setattr(review, "SessionLocal", factory)
+    monkeypatch.setattr(billing, "SessionLocal", factory)
+    monkeypatch.setattr(review, "protect_cnpj", lambda _value: ("encrypted", "lookup", "**.***.***/****-81"))
+    monkeypatch.setattr(BillingService, "_price_for_currency", staticmethod(lambda *_args: "price_test"))
+    monkeypatch.setattr(BillingService, "_record_payment", staticmethod(lambda *_args: None))
+    with factory.begin() as db:
+        source = db.get(TenantEntity, tenant_id)
+        source.kind = "personal"
+        source.country_code = "BR"
+        db.scalar(select(BillingAccountEntity)).current_product_code = "rubrica_base"
+
+    subject = "member0@example.local"
+    service = BillingService(FakeBillingProvider())
+    requested = review.request_review(
+        tenant_id, TenantBusinessConversion(legal_name="Separate company", cnpj="11.222.333/0001-81"), subject,
+    )
+    with pytest.raises(WorkflowError, match="approved before checkout"):
+        service.create_checkout(tenant_id, subject, "rubrica_team")
+    review.record_decision(requested.id, "approved", "operator")
+    service.create_checkout(tenant_id, subject, "rubrica_team")
+    service.create_checkout(tenant_id, subject, "rubrica_team")
+
+    with factory.begin() as db:
+        destination_id = db.get(review.BusinessUpgradeReviewEntity, requested.id).business_tenant_id
+        destination = db.get(TenantEntity, destination_id)
+        account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == destination_id))
+        BillingService._apply_event(db, "checkout.session.completed", {
+            "id": "cs_test", "customer": account.provider_customer_id, "subscription": "sub_test",
+            "metadata": {"product_code": "rubrica_team"},
+        }, destination_id)
+        assert destination.status == "pending_billing"
+
+    assert [item.id for item in module.tenant_service.list_for(subject)] == [tenant_id]
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == destination_id))
+        invoice = {"id": "in_test", "customer": account.provider_customer_id, "status": "paid"}
+        BillingService._apply_event(db, "invoice.payment_succeeded", invoice, destination_id)
+        assert db.get(TenantEntity, destination_id).status == "pending_billing"
+        BillingService._apply_event(
+            db, "invoice.payment_succeeded", invoice | {"billing_reason": "subscription_create"}, destination_id
+        )
+
+    workspaces = module.tenant_service.list_for(subject)
+    assert {item.id for item in workspaces} == {tenant_id, destination_id}
+    assert {item.id for item in workspaces if item.workspace_selectable} == {tenant_id, destination_id}
+    with factory() as db:
+        assert db.get(TenantEntity, tenant_id).kind == "personal"
+        assert db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == tenant_id)).current_product_code == "rubrica_base"

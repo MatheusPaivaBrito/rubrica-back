@@ -50,6 +50,10 @@ from core_api.modules.billing.providers.protocol import (
     ProviderBusinessIdentity,
 )
 from core_api.modules.signature_request.workflow_service import WorkflowError
+from core_api.modules.tenant.business_upgrade_review import (
+    activate_paid_business_workspace,
+    prepare_business_checkout,
+)
 from core_api.modules.tenant.tenant_entity import TenantEntity, TenantMemberEntity
 from core_api.modules.tenant.tenant_service import billing_currency_for_country, tenant_service
 from core_api.observability_metrics import PAYMENT_TECHNICAL_FAILURES
@@ -384,9 +388,16 @@ class BillingService:
     def _create_checkout(
         self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str
     ) -> BillingCheckoutRead:
+        product_code = self._normalize_product_code(product_code)
+        destination_id = (
+            prepare_business_checkout(tenant_id, subject)
+            if product_code in self.BUSINESS_PRODUCT_CODES else tenant_id
+        )
         provider = self._get_provider()
         with SessionLocal.begin() as database:
-            tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            if destination_id == tenant_id:
+                tenant_service.require_role(database, tenant_id, subject, {"admin"}, allow_over_limit=True)
+            tenant_id = destination_id
             tenant = database.get(TenantEntity, tenant_id, with_for_update=True)
             if tenant is None or tenant.deleted_at is not None:
                 raise WorkflowError("Tenant not found", 404)
@@ -412,6 +423,8 @@ class BillingService:
                 )
             currency = billing_currency_for_country(tenant.country_code.strip())
             price_id = self._price_for_currency(currency, product_code, billing_interval)
+            if tenant.status == "pending_billing":
+                account.current_product_code = product_code
             try:
                 if not account.provider_customer_id:
                     customer = provider.create_customer(
@@ -453,6 +466,8 @@ class BillingService:
                 tenant = database.get(TenantEntity, tenant_id)
                 if tenant is None or tenant.deleted_at is not None:
                     raise WorkflowError("Tenant not found", 404)
+                if tenant.kind == "personal" and self._normalize_product_code(product_code) in self.BUSINESS_PRODUCT_CODES:
+                    raise WorkflowError("Request a business workspace before upgrading", 409)
                 price_id = self._price_for_currency(tenant.currency, product_code, billing_interval)
                 return_url = f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan"
                 portal = provider.create_portal_session(
@@ -795,6 +810,7 @@ class BillingService:
             return True
         account = BillingService._account_entity(database, tenant_id, lock=True)
         account.provider = "stripe"
+        billing_customer = account.provider_customer_id
         customer = resource.get("customer")
         if customer:
             account.provider_customer_id = str(customer)
@@ -822,6 +838,13 @@ class BillingService:
             if event_type == "invoice.payment_succeeded":
                 account.status = "active"
                 account.grace_period_ends_at = None
+                if (
+                    billing_customer
+                    and billing_customer == customer
+                    and resource.get("billing_reason") == "subscription_create"
+                    and resource.get("status") == "paid"
+                ):
+                    activate_paid_business_workspace(database, tenant_id)
                 if (
                     getattr(account, "pending_provider_invoice_id", None)
                     and getattr(account, "pending_provider_invoice_id", None)

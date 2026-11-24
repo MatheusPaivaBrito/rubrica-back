@@ -732,6 +732,8 @@ class TenantService:
         )
         if tenant is None:
             raise WorkflowError("Tenant not found", 404)
+        if tenant.registration_source == "manual_review":
+            return tenant.registration_verification_status or "format_valid"
         tenant.registration_source = "stripe"
         tenant.registration_provider_reference = provider_reference
         if not cnpj:
