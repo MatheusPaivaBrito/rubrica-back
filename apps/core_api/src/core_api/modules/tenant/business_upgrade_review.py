@@ -4,7 +4,7 @@ from secrets import token_urlsafe
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, select
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Uuid, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -41,6 +41,8 @@ class BusinessUpgradeReviewRead(BaseModel):
     status: Literal["pending", "approved", "rejected"]
     business_tenant_id: UUID | None = None
     workspace_active: bool = False
+    workspace_closed: bool = False
+    member_count: int = 0
 
 
 def request_review(
@@ -141,7 +143,12 @@ def require_branch_plan(db, tenant: TenantEntity | None) -> None:
 def list_branch_reviews(tenant_id: UUID, subject: str) -> list[BusinessUpgradeReviewRead]:
     with SessionLocal() as db:
         tenant_service.require_role(db, tenant_id, subject, {"admin"}, allow_over_limit=True)
-        reviews = db.execute(select(BusinessUpgradeReviewEntity, TenantEntity.status).outerjoin(
+        member_count = select(func.count(TenantMemberEntity.id)).where(
+            TenantMemberEntity.tenant_id == TenantEntity.id,
+            TenantMemberEntity.status.notin_(("offboarded", "pending")),
+            TenantMemberEntity.deleted_at.is_(None),
+        ).correlate(TenantEntity).scalar_subquery()
+        reviews = db.execute(select(BusinessUpgradeReviewEntity, TenantEntity.status, TenantEntity.workspace_closed_at, member_count).outerjoin(
             TenantEntity, TenantEntity.id == BusinessUpgradeReviewEntity.business_tenant_id,
         ).where(
             BusinessUpgradeReviewEntity.tenant_id == tenant_id,
@@ -149,9 +156,13 @@ def list_branch_reviews(tenant_id: UUID, subject: str) -> list[BusinessUpgradeRe
         ).order_by(BusinessUpgradeReviewEntity.created_at))
         return [
             BusinessUpgradeReviewRead.model_validate(review, from_attributes=True).model_copy(
-                update={"workspace_active": workspace_status == "active"}
+                update={
+                    "workspace_active": workspace_status == "active" and closed_at is None,
+                    "workspace_closed": closed_at is not None,
+                    "member_count": count,
+                }
             )
-            for review, workspace_status in reviews
+            for review, workspace_status, closed_at, count in reviews
         ]
 
 
@@ -213,13 +224,14 @@ def prepare_business_checkout(source_id: UUID, subject: str, *, branch_review_id
         )
         db.add(business)
         db.flush()
-        db.add(TenantMemberEntity(
-            tenant_id=business.id,
-            auth_user_id=subject.strip().lower(),
-            auth_user_uuid=actor.auth_user_uuid,
-            role="admin",
-            status="pending",
-        ))
+        if branch_review_id is None:
+            db.add(TenantMemberEntity(
+                tenant_id=business.id,
+                auth_user_id=subject.strip().lower(),
+                auth_user_uuid=actor.auth_user_uuid,
+                role="admin",
+                status="pending",
+            ))
         db.add(BillingAccountEntity(tenant_id=business.id, status="not_configured"))
         review.business_tenant_id = business.id
         tenant_service._audit(db, business.id, subject, "tenant.business_checkout_prepared", {
@@ -238,9 +250,10 @@ def activate_paid_business_workspace(db, tenant_id: UUID) -> None:
         TenantMemberEntity.status == "pending",
         TenantMemberEntity.deleted_at.is_(None),
     ).with_for_update())
-    if member is None:
+    if member is None and business.parent_workspace_id is None:
         raise WorkflowError("Pending business administrator was not found", 500)
     business.status = "active"
-    member.status = "active"
-    member.joined_at = DateTimeService.utc_now()
+    if member is not None:
+        member.status = "active"
+        member.joined_at = DateTimeService.utc_now()
     tenant_service._audit(db, tenant_id, "stripe", "tenant.business_workspace_activated", {})

@@ -511,7 +511,15 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
         )
 
     if branch:
-        assert review.list_branch_reviews(tenant_id, subject)[0].workspace_active
+        listed = review.list_branch_reviews(tenant_id, subject)[0]
+        assert listed.workspace_active and listed.member_count == 0
+        assert module.tenant_service.list_members(destination_id, subject) == []
+        monkeypatch.setattr(module, "invite_auth_user", lambda **_kwargs: uuid4())
+        invite = TenantMemberInvitation(name="Branch Member", email="branch@example.local", document="12345678909")
+        module.tenant_service.invite_member(destination_id, invite, subject)
+        assert review.list_branch_reviews(tenant_id, subject)[0].member_count == 1
+        assert [member.auth_user_id for member in module.tenant_service.list_members(destination_id, subject)] == [invite.email]
+        assert invite.email not in {member.auth_user_id for member in module.tenant_service.list_members(tenant_id, subject)}
         assert module.tenant_service.team(destination_id, subject).member_limit == 10
         assert destination_id not in {item.id for item in module.tenant_service.list_for("member1@example.local")}
     workspaces = module.tenant_service.list_for(subject)
