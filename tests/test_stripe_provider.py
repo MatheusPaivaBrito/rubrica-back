@@ -374,3 +374,58 @@ def test_checkout_retry_after_timeout_uses_same_idempotency_key(monkeypatch):
         provider.create_checkout_session(**parameters)
     assert provider.create_checkout_session(**parameters).url == "https://stripe.test/existing"
     assert keys[0] == keys[1]
+
+
+@pytest.mark.parametrize("has_payment", [False, True])
+def test_currency_recovery_expires_only_abandoned_sessions_for_the_same_workspace(monkeypatch, has_payment):
+    from core_api.modules.billing.providers.protocol import CheckoutConflictError
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    def open_session(session_id, workspace):
+        return stripe.StripeObject.construct_from({
+            "id": session_id, "client_reference_id": workspace, "mode": "subscription",
+            "status": "open", "payment_status": "unpaid", "url": "https://stripe.test/session",
+        }, None)
+
+    sessions = [open_session(f"cs_usd{index}", "tenant-a") for index in range(3)]
+    sessions.append(open_session("cs_unrelated", "tenant-b"))
+    if has_payment:
+        sessions.insert(0, stripe.StripeObject.construct_from({
+            "id": "cs_paid", "client_reference_id": "tenant-a", "mode": "subscription",
+            "status": "complete", "payment_status": "paid", "invoice": "in_test",
+        }, None))
+    expired = []
+    created = []
+
+    def list_customer_sessions(*, customer):
+        assert customer == "cus_test"
+        return SimpleNamespace(auto_paging_iter=lambda: iter(sessions))
+
+    def create_brl(**kwargs):
+        assert kwargs["line_items"] == [{"price": "price_brl", "quantity": 1}]
+        assert expired == ["cs_usd0", "cs_usd1", "cs_usd2"]
+        created.append(kwargs)
+        return SimpleNamespace(url="https://stripe.test/brl")
+
+    monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setattr(stripe.checkout.Session, "list", list_customer_sessions)
+    monkeypatch.setattr(stripe.checkout.Session, "list_line_items", lambda *_args, **_kwargs: {
+        "data": [{"quantity": 1, "price": {"id": "price_usd", "currency": "usd"}}],
+    })
+    monkeypatch.setattr(stripe.checkout.Session, "expire", expired.append)
+    monkeypatch.setattr(stripe.checkout.Session, "create", create_brl)
+
+    def checkout():
+        return StripeBillingProvider().create_checkout_session(
+            customer_id="cus_test", tenant_id="tenant-a", price_id="price_brl",
+            product_code="rubrica_base", success_url="https://rubrica.test/success",
+            cancel_url="https://rubrica.test/cancel",
+        )
+
+    if has_payment:
+        with pytest.raises(CheckoutConflictError, match="payment is already in progress"):
+            checkout()
+        assert not expired and not created
+    else:
+        assert checkout().url == "https://stripe.test/brl"
+        assert len(created) == 1

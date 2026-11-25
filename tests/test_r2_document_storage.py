@@ -271,3 +271,74 @@ def test_legacy_object_migration_is_verified_and_idempotent() -> None:
     assert target.migrate_legacy_object(
         "legacy123", expected_sha256=digest, apply=True
     ) == "encrypted"
+
+
+def test_staging_clone_dry_run_and_apply_recover_legacy_then_encrypt(monkeypatch, tmp_path, capsys):
+
+    from toolbox.operations import clone_r2_documents_to_staging as clone
+    from toolbox.operations import encrypt_r2_documents as encrypt
+
+    class CloneS3(FakeS3Client):
+        def head_object(self, *, Bucket, Key):
+            if (Bucket, Key) not in self.objects:
+                raise ClientError({"Error": {"Code": "404"}}, "HeadObject")
+            return {"ContentLength": len(self.objects[Bucket, Key])}
+
+        def put_object(self, *, Bucket, Key, Body, ContentType, ContentLength=None, **kwargs):
+            if ContentType == "application/pdf":
+                assert (Bucket, Key) not in self.objects
+                content = Body.read()
+                assert len(content) == ContentLength
+                self.objects[Bucket, Key] = content
+            else:
+                super().put_object(Bucket=Bucket, Key=Key, Body=Body, ContentType=ContentType, **kwargs)
+
+    source = CloneS3()
+    destination = CloneS3()
+    remote, legacy = b"%PDF-remote fixture", b"%PDF-legacy fixture"
+    source.objects["prod", "original123"] = remote
+    (tmp_path / "legacy123").write_bytes(legacy)
+    references = {
+        "original123": (sha256(remote).hexdigest(), frozenset({"document_version"})),
+        "legacy123": (sha256(legacy).hexdigest(), frozenset({"signed_artifact"})),
+    }
+    arguments = ["clone", "--legacy-root", str(tmp_path)]
+    for side, bucket in (("source", "prod"), ("destination", "rubrica-staging")):
+        for option, value in (
+            ("endpoint", f"https://{side}.test"), ("bucket", bucket),
+            ("access-key-id", "fixture"), ("secret-access-key", "fixture"),
+        ):
+            secret = tmp_path / f"{side}-{option}"
+            secret.write_text(value)
+            arguments.extend([f"--{side}-{option}-file", str(secret)])
+
+    monkeypatch.setattr(clone, "_client", lambda endpoint, *_: source if "source" in endpoint else destination)
+    monkeypatch.setattr(clone, "_references", lambda: references)
+    monkeypatch.setattr(clone, "_document_version_context", lambda: {})
+    monkeypatch.setattr("sys.argv", arguments)
+    clone.main()
+    assert not destination.objects
+    assert "recoverable_legacy=1" in capsys.readouterr().out
+
+    monkeypatch.setattr("sys.argv", [*arguments, "--apply"])
+    clone.main()
+    assert "copied=2" in capsys.readouterr().out
+    clone.main()
+    assert "already_present=2" in capsys.readouterr().out
+    assert source.objects == {("prod", "original123"): remote}
+
+    target = storage(client=destination)
+    target.bucket = "rubrica-staging"
+    monkeypatch.setattr(encrypt, "configured_document_storage", lambda _: target)
+    monkeypatch.setattr(encrypt, "_referenced_objects", lambda: {key: result[0] for key, result in references.items()})
+    monkeypatch.setattr("sys.argv", ["encrypt"])
+    encrypt.main()
+    assert "2 legacy plaintext; 0 migrated" in capsys.readouterr().out
+    monkeypatch.setattr("sys.argv", ["encrypt", "--apply"])
+    encrypt.main()
+    assert "2 migrated; 0 missing; 0 invalid" in capsys.readouterr().out
+    assert target.get("original123").read() == remote
+    assert target.get("legacy123").read() == legacy
+    assert all(not value.startswith(b"%PDF") for value in destination.objects.values())
+    encrypt.main()
+    assert "2 already encrypted; 0 legacy plaintext; 0 migrated" in capsys.readouterr().out

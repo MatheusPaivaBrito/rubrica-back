@@ -174,3 +174,46 @@ def test_supported_market_flags_are_graphical(country: str) -> None:
 )
 def test_supported_market_country_codes_use_iso_alpha3(country: str, alpha3: str) -> None:
     assert _alpha3_country_code(country) == alpha3
+
+
+def test_final_pdf_embeds_drawn_signature_and_company_logo_on_configured_pages():
+    from base64 import b64encode
+
+    from PIL import Image, ImageDraw
+
+    def image_data(color, draw_signature=False):
+        image = Image.new("RGB", (80, 24), "white")
+        draw = ImageDraw.Draw(image)
+        if draw_signature:
+            draw.line([(4, 18), (22, 3), (35, 18), (72, 10)], fill=color, width=3)
+        else:
+            draw.rectangle((8, 4, 72, 20), fill=color)
+        output = BytesIO()
+        image.save(output, format="PNG")
+        return "data:image/png;base64," + b64encode(output.getvalue()).decode()
+
+    original = BytesIO()
+    writer = PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=595, height=842)
+    writer.write(original)
+    signed = generate_signed_pdf(original.getvalue(), stamps=[{
+        "signer_name": "Signatário de teste",
+        "signed_at": "2026-10-23T21:00:00-03:00",
+        "evidence_sha256": "d" * 64,
+        "stamp_positions": [
+            {"page": 1, "x": 0.25, "y": 0.25, "display_variant": "drawn"},
+            {"page": 2, "x": 0.75, "y": 0.75, "display_variant": "full"},
+        ],
+        "issuer_snapshot": {"legal_name": "Empresa de Teste Ltda."},
+        "drawn_signature_png_data_url": image_data("#192877", draw_signature=True),
+        "stamp_customization": {"show_logo": True, "logo_png_data_url": image_data("#b1203a")},
+    }], metadata={})
+
+    pages = PdfReader(BytesIO(signed)).pages
+    assert len(pages) == 3
+    assert len(pages[0].images) == 1
+    assert len(pages[1].images) == 1
+    assert len(pages[2].images) == 0
+    assert "Signatário de teste" not in pages[0].extract_text()
+    assert "Empresa de Teste Ltda." in pages[1].extract_text()

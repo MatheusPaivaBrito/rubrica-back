@@ -61,6 +61,18 @@ jobs:
           RUBRICA_TEST_REDIS_URL: redis://127.0.0.1:7379/15
         run: make test-integration
 
+      - name: Back up and restore the migrated PostgreSQL databases
+        shell: bash
+        run: |
+          backup_root="$(mktemp -d)"
+          trap 'rm -rf -- "$backup_root"' EXIT
+          make backup-database BACKUP_ROOT="$backup_root"
+          backups=("$backup_root"/*/SHA256SUMS)
+          test "${#backups[@]}" -eq 1
+          test -f "${backups[0]}"
+          make verify-backup path="$(dirname "${backups[0]}")" | tee "$backup_root/restore.log"
+          grep -F '5 databases restored in an isolated PostgreSQL container' "$backup_root/restore.log"
+
       - name: Stop CI containers
         if: always()
         run: docker compose --env-file .env -f compose/local.yml --profile "*" down --volumes --remove-orphans

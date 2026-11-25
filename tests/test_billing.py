@@ -139,11 +139,22 @@ def test_cancelled_subscription_can_start_a_new_checkout() -> None:
 
 
 class BillingDatabaseStub:
-    def __init__(self, account) -> None:
+    def __init__(self, account, *, workspace_closed_at=None) -> None:
         self.account = account
+        self.workspace_closed_at = workspace_closed_at
 
-    def scalar(self, _statement):
+    def scalar(self, statement):
+        if statement.column_descriptions[0]["name"] == "workspace_closed_at":
+            return self.workspace_closed_at
         return self.account
+
+
+@pytest.mark.parametrize("method", ["consume_document", "consume_signature"])
+def test_closed_workspace_cannot_consume_billing_allowance(method):
+    database = BillingDatabaseStub(SimpleNamespace(), workspace_closed_at=datetime.now(UTC))
+    with pytest.raises(WorkflowError) as error:
+        getattr(BillingService(), method)(database, uuid4())
+    assert error.value.status_code == 410
 
 
 def test_completed_checkout_does_not_unlock_unlimited_signatures(monkeypatch) -> None:
