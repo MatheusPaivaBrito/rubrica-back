@@ -92,7 +92,7 @@ A bateria detalhada chegou a **50 casos automatizados de Stripe**. A suíte comp
 
 A [revisão de Auth com os 50 cenários](auth-qa-critical.md) registra a evidência local, as correções e as pendências de homologação.
 
-**Ensaio remoto autorizado.** A sondagem pública encontrou Cloudflare Access nas três rotas. Para fechar a homologação, falta a contagem do marcador fictício nos dois proxies e a evidência da regra efetiva da borda. A [coleta de staging](auth-qa-critical.md#coleta-de-contagens-no-servidor-de-staging) imprime somente status e contagens.
+**LOG-50 confirmado em staging.** Gateway e web registraram query e Referer nas duas rotas de conta. Os templates foram corrigidos. A homologação depende da atualização de staging e da repetição da coleta com `query=0 referer=0 trace=2` nos dois proxies. A evidência da regra efetiva da borda segue pendente. [Resultado do coletor](auth-qa-critical.md#resultado-do-coletor-no-servidor-de-staging)
 
 | Caso | Ação e resultado esperado | Evidência |
 | --- | --- | --- |

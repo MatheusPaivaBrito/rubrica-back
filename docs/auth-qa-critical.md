@@ -114,7 +114,7 @@ A coluna de evidência usa **I** para `tests/test_auth_qa_integration.py`, **S**
 | LOG-47 | Retornos externos absolutos, relativos ao protocolo, esquema não HTTP, barras invertidas e caminho legítimo. | Teste Angular direcionou os quatro casos externos ao dashboard e preservou o link legítimo. F `login return destination` (F:9). Sem navegador real. | APROVADO POR EVIDÊNCIA |
 | LOG-48 | Falha injetada no estabelecimento da conexão ao PostgreSQL. | HTTP 500, sem índice de access ou sessão. Login legítimo recupera ao remover a falha. I `test_postgres_connection_failure_does_not_issue_session` (I:448). | APROVADO POR EVIDÊNCIA |
 | LOG-49 | Interrupção simulada entre escritas ou antes de EXEC. | Escritas separadas deixavam sessão órfã. Uma transação Redis garante que, antes de EXEC, nenhum estado parcial fique visível. A instância recriada autentica normalmente. I `test_interrupted_session_write_leaves_no_partial_indexes` (I:464). Não foi simulado failover ou perda de persistência Redis. | CORRIGIDO E REVALIDADO |
-| LOG-50 | Erros em login, reset, MFA e refresh, além da configuração de logs no caminho dos links. | A API ecoava segredos em 422. Foi corrigida e revalidada por I `test_auth_validation_does_not_echo_secrets_or_log_request_bodies` (I:499). Há evidência estática separada de possível exposição dos tokens de reset e ativação na query dos logs combinados dos proxies. A configuração efetiva precisa de inspeção autorizada com marcador fictício. | VULNERABILIDADE ENCONTRADA |
+| LOG-50 | Erros em login, reset, MFA e refresh, além dos logs no caminho dos links. | A API ecoava segredos em 422. O ajuste local passou em I `test_auth_validation_does_not_echo_secrets_or_log_request_bodies` (I:499). Em staging, os dois proxies registraram os marcadores fictícios da query e do Referer. A confirmação abrange os logs de origem de staging. | VULNERABILIDADE ENCONTRADA |
 
 ## Casos adicionais
 
@@ -123,7 +123,7 @@ A coluna de evidência usa **I** para `tests/test_auth_qa_integration.py`, **S**
 
 ## Ameaças residuais e aprovação humana
 
-1. **Crítica, LOG-50.** `account_service.py:177` e `:220` geram links de reset e ativação com token na query. `infra/gateway/nginx.conf` e `infra/gateway/nginx.staging.conf` não definem formato sanitizado. `rubrica-front/nginx.conf:93` desativa o access log apenas no callback Serpro. O formato combined padrão do Nginx inclui a primeira linha da requisição e o Referer. A evidência é de configuração, sem leitura de logs de cliente. Verificar com marcador sintético em implantação autorizada e aprovar sanitização em todos os saltos que recebem esses links. [Formato de log do Nginx](https://nginx.org/en/docs/http/ngx_http_log_module.html)
+1. **Crítica, LOG-50.** `account_service.py:177` e `:220` geram links de reset e ativação com token na query. A coleta em staging confirmou que o gateway e o web registram a query e o Referer. O formato combined padrão do Nginx inclui ambos. O ensaio usou apenas marcadores fictícios. A exposição em produção, os destinos de coleta e os logs históricos continuam sem verificação. [Formato de log do Nginx](https://nginx.org/en/docs/http/ngx_http_log_module.html)
 2. **Alta, LOG-13/14/39.** Confirmar topologia do túnel, origens confiáveis, reescrita de cabeçalhos e resposta 429 com origem controlada. Confirmar controle de recuperação por destinatário e tratamento de falha do provedor de e-mail. A ficha local não prova regras efetivas do Cloudflare ou do Nginx implantado.
 3. **Alta, LOG-25/29/44/46/52.** Conferir separação de Redis dos projetos e cookies reais no navegador. Exercitar duas abas para renovar e trocar de workspace. A prova backend registra o destino por requisição e preserva a política de replay.
 4. **Alta, LOG-03/51.** Medida local pequena não elimina diferenças de latência entre redes e hashes legados. Revisar necessidade de política de senhas antigas e verificar que a interface comunica o teto em bytes antes da homologação.
@@ -132,7 +132,7 @@ A coluna de evidência usa **I** para `tests/test_auth_qa_integration.py`, **S**
 
 | Quando | ID | Autorização ou decisão necessária | Trabalho que o QA pode adiantar |
 |---|---|---|---|
-| Antes da homologação | LOG-50 | Ensaio autorizado em 28/11/2026. Falta a contagem do marcador nos logs do gateway e do web de staging. Se a query aparecer, aprovar a sanitização da configuração efetiva. | A sondagem pública parou no Cloudflare Access. O bloco abaixo permite ao operador coletar apenas contagens no staging. |
+| Antes da homologação | LOG-50 | Atualizar os dois proxies de staging e enviar as contagens da coleta pós-correção. O ensaio inicial confirmou o problema. | A sanitização está nos templates de origem. O deploy de produção e qualquer ação sobre logs históricos ficam para uma decisão separada. |
 | Na mesma janela de staging | LOG-13/14/39 | Conferência autorizada em 28/11/2026. Falta evidência da regra ativa da zona, com origem de contagem, rotas, janela, limite e ação. | Usar a evidência do painel e um ensaio de baixo volume com contas sintéticas depois de obter acesso autenticado. |
 | Se a validação reproduzir um problema | LOG-39/52 | Decidir um limite por destinatário ou uma mudança na política de replay somente se os controles atuais se mostrarem insuficientes e a correção exigir mudança de regra. | Testar a concorrência em navegador local assim que houver um executor disponível. |
 | Se houver proposta de migração | LOG-51 | Aprovar a política para senhas antigas caso a migração exija redefinição ou invalidação de credenciais. | Preservar a compatibilidade atual e validar o limite de novas senhas. |
@@ -145,7 +145,7 @@ Ao encontrar um item que depende do responsável, comunicar no chat e registrar 
 
 #### Coleta de contagens no servidor de staging
 
-No shell do servidor, o bloco abaixo faz dois GETs dentro do gateway do projeto `rubrica-staging` e imprime somente status e contagens do marcador fictício. `query` e `referer` são contados separadamente. Um status diferente de HTTP 200 ou falha ao consultar logs invalida a comparação. Zero indica ausência do marcador nessa janela e nesse caminho, desde que a requisição tenha alcançado o proxy avaliado.
+No shell do servidor, o bloco abaixo faz dois GETs dentro do gateway do projeto `rubrica-staging` e imprime somente status e contagens. `query` e `referer` são marcadores fictícios. `trace` é um ID de requisição fictício usado como controle positivo. Com o formato corrigido, espere dois HTTP 200 e `query=0 referer=0 trace=2` em cada proxy. Um status diferente, falha ao consultar logs ou controle positivo incompleto invalida a comparação.
 
 ```bash
 (
@@ -157,6 +157,7 @@ No shell do servidor, o bloco abaixo faz dois GETs dentro do gateway do projeto 
     docker exec rubrica-staging-gateway-1 wget -S -O /dev/null \
       --header='Host: staging.rubricasignature.com' \
       --header="Referer: https://staging.rubricasignature.com/qa?r=${qa_marker}-referer" \
+      --header="X-Request-ID: ${qa_marker}-trace" \
       "http://127.0.0.1:8080/${qa_route}?token=${qa_marker}-query" 2>&1 |
       awk '/HTTP\// { print $1, $2 }'
   done
@@ -165,13 +166,33 @@ No shell do servidor, o bloco abaixo faz dois GETs dentro do gateway do projeto 
       awk -v name="$qa_container" -v fake="$qa_marker" '
         index($0, fake "-query") { query++ }
         index($0, fake "-referer") { referer++ }
-        END { printf "%s query=%d referer=%d\n", name, query, referer }
+        index($0, "request_id=" fake "-trace") { trace++ }
+        END { printf "%s query=%d referer=%d trace=%d\n", name, query, referer, trace }
       '
   done
 )
 ```
 
 O teste interno confirma apenas os logs de origem. Para a borda, registrar a regra ativa no painel Cloudflare e confirmar em requisições autorizadas que o controle específico por IP e por rota é aplicado. Um 302 antes do login Cloudflare Access não demonstra limite por IP ou proteção contra disparos excessivos de e-mail.
+
+### Resultado do coletor no servidor de staging
+
+O operador confirmou que `make staging-smoke` passou e retornou estas contagens, sem compartilhar linhas dos logs.
+
+```text
+/reset-password HTTP/1.1 200
+/verify-email HTTP/1.1 200
+rubrica-staging-gateway-1 query=2 referer=2
+rubrica-staging-web-1 query=2 referer=2
+```
+
+Cada proxy registrou os dois marcadores de URL e os dois de Referer. **LOG-50 continua bloqueando a homologação.** O template `infra/gateway/nginx.staging.conf` é montado pelo Compose de staging. O web usa `rubrica-front/nginx.conf` pelo `Dockerfile.prod` e o mesmo template atende a configuração do web de produção no repositório.
+
+Os templates `infra/gateway/nginx.staging.conf`, `infra/gateway/nginx.conf` e `rubrica-front/nginx.conf` passam a usar um formato de access log com método, rota sanitizada, status e ID da requisição. A query e o Referer saem do formato, e o caminho de assinatura fica mascarado. A correção ainda precisa da revalidação em staging com `query=0 referer=0 trace=2` nos dois proxies. Ela cobre os access logs futuros. Logs de erro, agregadores, arquivos históricos e a regra de limite no Cloudflare exigem verificação própria.
+
+O Nginx 1.30.4 descartável passou no `nginx -t` e no teste HTTP local encadeado do gateway ao web. Com a configuração anterior, as três variantes registraram os marcadores de query, Referer e assinatura. Com a correção, cada gateway retornou quatro HTTP 200 e registrou quatro IDs de requisição, e o web registrou os oito. Nenhum marcador protegido entrou nos access logs. Foram exercitadas recuperação, ativação, uma rota de assinatura e a configuração Turnstile. Os templates foram executados em loopback, com upstream e página SPA fictícios. [Nginx 1.30.4](https://nginx.org/download/)
+
+No servidor de staging, validar os contêineres temporários com `nginx -t`, recriar o web com a imagem atualizada e recriar explicitamente o gateway para aplicar o arquivo montado do checkout novo. Depois testar `make staging-smoke` e executar o coletor. O check do gateway que já está rodando pode ler a configuração do mount anterior.
 
 ## Execução e resultados das suítes
 
