@@ -342,3 +342,27 @@ def test_staging_clone_dry_run_and_apply_recover_legacy_then_encrypt(monkeypatch
     assert all(not value.startswith(b"%PDF") for value in destination.objects.values())
     encrypt.main()
     assert "2 already encrypted; 0 legacy plaintext; 0 migrated" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("apply", [False, True])
+@pytest.mark.parametrize("already_encrypted", [False, True])
+def test_migration_rejects_checksum_mismatch_and_preserves_object(apply, already_encrypted):
+    target = storage()
+    key = "document123"
+    original = b"%PDF-unexpected-document"
+    if already_encrypted:
+        target.put_existing(key, BytesIO(original))
+    else:
+        target.client.objects[target.bucket, key] = original
+
+    before = dict(target.client.objects)
+    before_metadata = dict(target.client.metadata)
+    with pytest.raises(DocumentDecryptionError):
+        target.migrate_legacy_object(
+            key,
+            expected_sha256=sha256(b"%PDF-expected-document").hexdigest(),
+            apply=apply,
+        )
+
+    assert target.client.objects == before
+    assert target.client.metadata == before_metadata

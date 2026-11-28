@@ -429,3 +429,25 @@ def test_currency_recovery_expires_only_abandoned_sessions_for_the_same_workspac
     else:
         assert checkout().url == "https://stripe.test/brl"
         assert len(created) == 1
+
+
+@pytest.mark.parametrize("blocking_field", ["invoice", "subscription", "payment_status"])
+def test_checkout_reconciliation_leaves_every_session_intact_when_payment_is_in_flight(monkeypatch, blocking_field):
+    from core_api.modules.billing.providers.protocol import CheckoutConflictError
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    base = {"client_reference_id": "tenant", "mode": "subscription", "status": "open", "payment_status": "unpaid"}
+    blocking_value = "paid" if blocking_field == "payment_status" else "object_test"
+    sessions = [
+        stripe.StripeObject.construct_from(base | {"id": "cs_old"}, None),
+        stripe.StripeObject.construct_from(base | {"id": "cs_pending", blocking_field: blocking_value}, None),
+    ]
+    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_: SimpleNamespace(auto_paging_iter=lambda: iter(sessions)))
+    monkeypatch.setattr(stripe.checkout.Session, "list_line_items", lambda *_args, **_kwargs: {"data": []})
+
+    def unexpected_expiration(*_args):
+        pytest.fail("Checkout reconciliation modified a session while payment was in flight")
+
+    monkeypatch.setattr(stripe.checkout.Session, "expire", unexpected_expiration)
+    with pytest.raises(CheckoutConflictError, match="payment is already in progress"):
+        StripeBillingProvider._reconcile_checkout("cus_test", "tenant", "price_brl")

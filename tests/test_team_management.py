@@ -805,3 +805,47 @@ def test_subscription_management_opens_only_the_customer_portal(team_db, monkeyp
         service.open_subscription_management(tenant_id, "member1@example.local")
     result = service.open_subscription_management(tenant_id, "member0@example.local")
     assert result.portal_url == "https://billing.example.test/portal"
+
+
+@pytest.mark.parametrize("subscription_status", ["active", "pending", "past_due", "unpaid", "paused"])
+def test_workspace_closure_preserves_data_while_stripe_subscription_can_still_bill(
+    team_db, subscription_status,
+):
+    factory, tenant_id, _ = team_db
+    admin = "member0@example.local"
+    service = module.tenant_service
+    with factory.begin() as db:
+        account = db.scalar(select(BillingAccountEntity))
+        account.status = subscription_status
+        account.provider_subscription_id = "sub_test_pending_cancellation"
+        account.cancel_at_period_end = True
+
+    service.update_closure_request(tenant_id, admin, requested=True)
+    with pytest.raises(WorkflowError, match="Cancel the Stripe subscription"):
+        service.close_workspace(tenant_id, admin)
+
+    with factory() as db:
+        tenant = db.get(TenantEntity, tenant_id)
+        assert tenant.workspace_closed_at is None
+        assert tenant.closure_requested_at is not None
+        assert db.scalar(select(AuditEventEntity.id).where(AuditEventEntity.action == "tenant.closed")) is None
+
+
+@pytest.mark.parametrize("seconds_before_deadline, expected", [(1, True), (0, False), (-1, False)])
+def test_workspace_export_access_ends_at_the_exact_deadline(team_db, monkeypatch, seconds_before_deadline, expected):
+    factory, tenant_id, _ = team_db
+    service = module.tenant_service
+    admin = "member0@example.local"
+    service.update_closure_request(tenant_id, admin, requested=True)
+    deadline = service.close_workspace(tenant_id, admin).export_until
+    instant = deadline - timedelta(seconds=seconds_before_deadline)
+    monkeypatch.setattr(DateTimeService, "utc_now", staticmethod(lambda: instant))
+
+    with factory() as db:
+        if expected:
+            assert service.require_role(db, tenant_id, admin, {"admin"}, allow_export=True).role == "admin"
+        else:
+            with pytest.raises(WorkflowError) as failure:
+                service.require_role(db, tenant_id, admin, {"admin"}, allow_export=True)
+            assert failure.value.status_code == 410
+    assert bool(service.list_for(admin)) is expected
