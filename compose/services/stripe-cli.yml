@@ -9,7 +9,7 @@ services:
         /bin/stripe listen \
           --api-key "$$api_key" \
           --device-name rubrica-local-compose \
-          --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed \
+          --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.payment_succeeded,invoice.payment_failed,invoice.voided \
           --forward-to http://core-api:8000/billing/webhooks/stripe 2>&1 | \
         while IFS= read -r line; do
           webhook_secret="$$(printf '%s\n' "$$line" | sed -n 's/.*\(whsec_[[:alnum:]]*\).*/\1/p')"

@@ -4,6 +4,7 @@ import pytest
 
 from core_api.modules.billing.providers.protocol import (
     BillingProviderError,
+    CheckoutConflictError,
     InvalidWebhookSignatureError,
 )
 from core_api.modules.billing.providers.stripe_provider import StripeBillingProvider
@@ -67,6 +68,7 @@ def test_stripe_provider_builds_checkout_with_tenant_metadata(monkeypatch, produ
         }
     }
     assert captured["line_items"] == [{"price": "price_jpy", "quantity": 1}]
+    assert captured["adaptive_pricing"] == {"enabled": False}
     assert captured["tax_id_collection"] == {"enabled": True}
     assert captured["customer_update"] == {"name": "auto", "address": "auto"}
 
@@ -249,38 +251,35 @@ def test_stripe_portal_confirms_the_selected_price(monkeypatch) -> None:
     ]
 
 
-def test_stripe_plan_change_reactivates_scheduled_subscription(monkeypatch) -> None:
+@pytest.mark.parametrize("cancellation", [{"cancel_at_period_end": True}, {"cancel_at": 1_800_000_000}])
+def test_stripe_plan_change_does_not_revoke_a_scheduled_cancellation(monkeypatch, cancellation) -> None:
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
         "sk_test_example",
     )
-    updates: list[tuple[str, bool]] = []
+    calls = []
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
-        lambda _subscription_id: {"cancel_at_period_end": True},
+        lambda _subscription_id: cancellation | {"items": {"data": [{"id": "si_test"}]}},
     )
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.modify",
-        lambda subscription_id, **kwargs: updates.append(
-            (subscription_id, kwargs["cancel_at_period_end"])
-        ),
+        lambda *args, **kwargs: calls.append("subscription update"),
     )
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.stripe.billing_portal.Session.create",
-        lambda **_kwargs: SimpleNamespace(url="https://billing.stripe.test/update"),
+        lambda **_kwargs: calls.append("portal session") or SimpleNamespace(url="https://billing.stripe.test/update"),
     )
 
-    session = StripeBillingProvider().create_portal_session(
-        customer_id="cus_test",
-        return_url="https://rubrica.test/plan",
-        subscription_id="sub_test",
-    )
-
-    assert session.url == "https://billing.stripe.test/update"
-    assert updates == [("sub_test", False)]
+    with pytest.raises(CheckoutConflictError, match="Resume the subscription"):
+        StripeBillingProvider().create_portal_session(
+            customer_id="cus_test", return_url="https://rubrica.test/plan",
+            subscription_id="sub_test", price_id="price_annual",
+        )
+    assert calls == []
 
 
-def test_stripe_plan_change_restores_cancellation_if_portal_fails(monkeypatch) -> None:
+def test_stripe_plan_change_translates_a_provider_portal_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
         "sk_test_example",
@@ -288,7 +287,7 @@ def test_stripe_plan_change_restores_cancellation_if_portal_fails(monkeypatch) -
     updates: list[bool] = []
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
-        lambda _subscription_id: {"cancel_at_period_end": True},
+        lambda _subscription_id: {"cancel_at_period_end": False},
     )
     monkeypatch.setattr(
         "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.modify",
@@ -312,17 +311,44 @@ def test_stripe_plan_change_restores_cancellation_if_portal_fails(monkeypatch) -
             subscription_id="sub_test",
         )
 
-    assert updates == [False, True]
+    assert updates == []
 
 
-@pytest.mark.parametrize("matching", [True, False])
-def test_checkout_reuses_only_the_requested_price(monkeypatch, matching):
+@pytest.mark.parametrize("prices", [("price_target",), ("price_base", "price_add_on")])
+def test_stripe_portal_rejects_same_price_or_multi_item_change(monkeypatch, prices):
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY",
+        "sk_test_example",
+    )
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.Subscription.retrieve",
+        lambda _id: {"items": {"data": [
+            {"id": f"si_{i}", "price": {"id": price}} for i, price in enumerate(prices)
+        ]}},
+    )
+    sessions = []
+    monkeypatch.setattr(
+        "core_api.modules.billing.providers.stripe_provider.stripe.billing_portal.Session.create",
+        lambda **kwargs: sessions.append(kwargs),
+    )
+
+    with pytest.raises(CheckoutConflictError):
+        StripeBillingProvider().create_portal_session(
+            customer_id="cus_test", return_url="https://rubrica.test/plan",
+            subscription_id="sub_test", price_id="price_target",
+        )
+    assert not sessions
+
+
+@pytest.mark.parametrize(("matching", "adaptive"), [(True, False), (False, False), (True, True)])
+def test_checkout_reuses_only_the_requested_fixed_price(monkeypatch, matching, adaptive):
     from core_api.modules.billing.providers.stripe_provider import stripe
 
     monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
     existing = stripe.StripeObject.construct_from({
         "id": "cs_old", "client_reference_id": "tenant", "mode": "subscription",
         "status": "open", "payment_status": "unpaid", "url": "https://stripe.test/old",
+        "adaptive_pricing": {"enabled": adaptive},
     }, None)
     expired = []
     created = []
@@ -342,13 +368,134 @@ def test_checkout_reuses_only_the_requested_price(monkeypatch, matching):
         product_code="rubrica_base", success_url="https://rubrica.test/success",
         cancel_url="https://rubrica.test/cancel",
     )
-    if matching:
+    if matching and not adaptive:
         assert result.url == "https://stripe.test/old"
         assert not expired and not created
     else:
         assert result.url == "https://stripe.test/new"
         assert expired == ["cs_old"]
         assert created[0]["idempotency_key"].startswith("rubrica-checkout-")
+
+
+@pytest.mark.parametrize(("status", "allow_checkout"), [
+    ("active", False), ("trialing", False), ("incomplete", False), ("past_due", False),
+    ("unpaid", False), ("paused", False), ("incomplete_expired", True), ("canceled", True),
+])
+def test_checkout_checks_completed_session_before_creating_a_second_subscription(monkeypatch, status, allow_checkout):
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    session = stripe.StripeObject.construct_from({
+        "id": "cs_complete", "client_reference_id": "tenant", "mode": "subscription",
+        "status": "complete", "subscription": "sub_existing", "payment_status": "paid",
+    }, None)
+    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_: SimpleNamespace(auto_paging_iter=lambda: iter([session])))
+    monkeypatch.setattr(stripe.Subscription, "retrieve", lambda _id: {"status": status})
+    if allow_checkout:
+        assert StripeBillingProvider._reconcile_checkout("cus_test", "tenant", "price_brl") == (None, session.id)
+    else:
+        with pytest.raises(CheckoutConflictError, match="existing subscription"):
+            StripeBillingProvider._reconcile_checkout("cus_test", "tenant", "price_brl")
+
+
+def test_checkout_stops_if_another_tab_finishes_payment_during_expiration(monkeypatch):
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
+    session = stripe.StripeObject.construct_from({
+        "id": "cs_old", "client_reference_id": "tenant", "mode": "subscription",
+        "status": "open", "payment_status": "unpaid",
+    }, None)
+    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_: SimpleNamespace(auto_paging_iter=lambda: iter([session])))
+    monkeypatch.setattr(stripe.checkout.Session, "list_line_items", lambda *_args, **_kwargs: {"data": []})
+
+    def checkout_already_completed(_session_id):
+        raise stripe.InvalidRequestError("Session is complete", "status")
+
+    def unexpected_checkout(**_kwargs):
+        pytest.fail("A second checkout was created while the first was completing")
+
+    monkeypatch.setattr(stripe.checkout.Session, "expire", checkout_already_completed)
+    monkeypatch.setattr(stripe.checkout.Session, "create", unexpected_checkout)
+    with pytest.raises(CheckoutConflictError, match="Checkout changed"):
+        StripeBillingProvider().create_checkout_session(
+            customer_id="cus_test", tenant_id="tenant", price_id="price_brl",
+            product_code="rubrica_base", success_url="https://rubrica.test/success",
+            cancel_url="https://rubrica.test/cancel",
+        )
+
+
+@pytest.mark.parametrize("stripe_state", ["pending", "paid", "not_received"])
+def test_lost_seat_change_response_never_creates_a_second_proration(monkeypatch, stripe_state):
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
+    base_item = {"id": "si_base", "price": {"id": "price_base", "recurring": {"interval": "month"}}, "quantity": 1}
+    target = [base_item, {"id": "si_seat", "price": {"id": "price_seat"}, "quantity": 1}]
+    subscription = {"items": {"data": [base_item]}, "latest_invoice": {"id": "in_previous"}, "status": "active"}
+    calls = []
+
+    def modify(_id, **params):
+        calls.append(params)
+        if len(calls) > 1:
+            return {"latest_invoice": {"id": "in_proration"}}
+        if stripe_state != "not_received":
+            subscription["latest_invoice"] = {
+                "id": "in_proration", "billing_reason": "subscription_update",
+                "status": "paid" if stripe_state == "paid" else "open",
+            }
+        if stripe_state == "pending":
+            subscription["pending_update"] = {"subscription_items": target}
+        elif stripe_state == "paid":
+            subscription["items"]["data"] = target
+        raise TimeoutError("The response was not received")
+
+    monkeypatch.setattr(stripe.Subscription, "retrieve", lambda _id, **_params: subscription)
+    monkeypatch.setattr(stripe.Subscription, "modify", modify)
+    provider = StripeBillingProvider()
+    args = dict(subscription_id="sub_test", product_code="rubrica_intermediate", base_price_id="price_base",
+                billing_interval="month", seat_price_id="price_seat", seat_price_ids=frozenset({"price_seat"}),
+                additional_seats=1)
+    with pytest.raises(BillingProviderError):
+        provider.update_subscription_seats(**args)
+    assert provider.update_subscription_seats(**args).invoice_id == "in_proration"
+    if stripe_state == "not_received":
+        assert len(calls) == 2
+        assert calls[0]["idempotency_key"] == calls[1]["idempotency_key"]
+    else:
+        assert len(calls) == 1
+
+
+@pytest.mark.parametrize("conflict", ["cancel_scheduled", "different_pending", "unexpected_items", "different_interval", "subscription_past_due"])
+def test_seat_change_preserves_existing_stripe_state(monkeypatch, conflict):
+    from core_api.modules.billing.providers.stripe_provider import stripe
+
+    monkeypatch.setattr("core_api.modules.billing.providers.stripe_provider.settings.STRIPE_SECRET_KEY", "sk_test")
+    base_item = {"id": "si_base", "price": {"id": "price_base", "recurring": {"interval": "month"}}, "quantity": 1}
+    subscription = {"items": {"data": [base_item]}, "latest_invoice": {"id": "in_previous"}, "status": "active"}
+    if conflict == "cancel_scheduled":
+        subscription["cancel_at_period_end"] = True
+    elif conflict == "different_pending":
+        subscription["pending_update"] = {"subscription_items": [
+            base_item, {"id": "si_seat", "price": {"id": "price_seat"}, "quantity": 2},
+        ]}
+    elif conflict == "unexpected_items":
+        subscription["items"]["data"].append({"id": "si_other", "price": {"id": "price_other"}, "quantity": 1})
+    elif conflict == "different_interval":
+        base_item["price"]["recurring"]["interval"] = "year"
+    else:
+        subscription["status"] = "past_due"
+
+    def unexpected_charge(*_args, **_kwargs):
+        pytest.fail("The seat change modified the Stripe subscription")
+
+    monkeypatch.setattr(stripe.Subscription, "retrieve", lambda _id, **_params: subscription)
+    monkeypatch.setattr(stripe.Subscription, "modify", unexpected_charge)
+    with pytest.raises(CheckoutConflictError):
+        StripeBillingProvider().update_subscription_seats(
+            subscription_id="sub_test", product_code="rubrica_intermediate", base_price_id="price_base",
+            billing_interval="month", seat_price_id="price_seat", seat_price_ids=frozenset({"price_seat"}),
+            additional_seats=1,
+        )
 
 
 def test_checkout_retry_after_timeout_uses_same_idempotency_key(monkeypatch):

@@ -290,11 +290,14 @@ class BillingService:
                 change = provider.update_subscription_seats(
                     subscription_id=account.provider_subscription_id,
                     product_code=product_code,
+                    billing_interval=billing_interval,
                     base_price_id=base_price_id,
                     seat_price_id=seat_price_id,
                     seat_price_ids=self._configured_seat_price_ids(),
                     additional_seats=target_seats - base_seats,
                 )
+            except CheckoutConflictError as exc:
+                raise WorkflowError(str(exc), 409) from exc
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 502) from exc
             account.pending_product_code = product_code
@@ -302,8 +305,15 @@ class BillingService:
             account.pending_change_kind = "upgrade"
             account.pending_change_effective_at = None
             account.pending_provider_invoice_id = change.invoice_id
+            payment_id = database.scalar(select(BillingPaymentEntity.id).filter_by(
+                provider="stripe", provider_payment_id=change.invoice_id, tenant_id=tenant_id,
+                provider_subscription_id=account.provider_subscription_id, status="paid", deleted_at=None,
+            ))
+            if payment_id is not None:
+                # The webhook can reach Core after a lost response and before the user retries.
+                self._commit_pending_change(account)
             return BillingSeatChangeRead(
-                status="pending_payment",
+                status="applied" if payment_id is not None else "pending_payment",
                 target_product_code=product_code,
                 target_seats=target_seats,
                 effective_at=None,
@@ -398,6 +408,7 @@ class BillingService:
         self, tenant_id: UUID, subject: str, product_code: str, billing_interval: str,
         *, branch_review_id: UUID | None = None,
     ) -> BillingCheckoutRead:
+        source_tenant_id = tenant_id
         product_code = self._normalize_product_code(product_code)
         if branch_review_id is not None:
             if product_code != "rubrica_team" or billing_interval != "month":
@@ -459,8 +470,8 @@ class BillingService:
                     price_id=price_id,
                     product_code=product_code,
                     tenant_id=str(tenant.id),
-                    success_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?checkout=success",
-                    cancel_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?checkout=cancelled",
+                    success_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?tenant={tenant_id}&checkout=success",
+                    cancel_url=f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?tenant={source_tenant_id}&checkout=cancelled",
                 )
             except CheckoutConflictError as exc:
                 raise WorkflowError(str(exc), 409) from exc
@@ -494,10 +505,8 @@ class BillingService:
                     "Lifetime accounts have no subscription or billing portal",
                     409,
                 )
-            if not account.provider_customer_id:
-                raise WorkflowError("Stripe customer is not configured", 409)
-            if self._normalize_product_code(account.current_product_code) == self._normalize_product_code(product_code):
-                raise WorkflowError("The selected plan is already active", 409)
+            if not account.provider_customer_id or not account.provider_subscription_id or account.status != "active":
+                raise WorkflowError("An active Stripe subscription is required to change plans", 409)
             try:
                 tenant = database.get(TenantEntity, tenant_id)
                 if tenant is None or tenant.deleted_at is not None:
@@ -505,21 +514,19 @@ class BillingService:
                 if tenant.kind == "personal" and self._normalize_product_code(product_code) in self.BUSINESS_PRODUCT_CODES:
                     raise WorkflowError("Request a business workspace before upgrading", 409)
                 price_id = self._price_for_currency(tenant.currency, product_code, billing_interval)
-                return_url = f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan"
+                return_url = f"{settings.PUBLIC_WEB_URL.rstrip('/')}/plan?tenant={tenant_id}"
                 portal = provider.create_portal_session(
                     customer_id=account.provider_customer_id,
                     return_url=return_url,
-                    subscription_id=(
-                        account.provider_subscription_id
-                        if account.status == "active"
-                        else None
-                    ),
+                    subscription_id=account.provider_subscription_id,
                     completion_url=(
-                        f"{return_url}?billing=updated&from_plan="
+                        f"{return_url}&billing=updated&from_plan="
                         f"{self._normalize_product_code(account.current_product_code)}"
                     ),
                     price_id=price_id,
                 )
+            except CheckoutConflictError as exc:
+                raise WorkflowError(str(exc), 409) from exc
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 502) from exc
             return BillingPortalRead(portal_url=portal.url)
@@ -560,19 +567,27 @@ class BillingService:
         event_type = str(event["type"])
         resource = event["data"]["object"]
         resource_id = str(resource.get("id", "unknown"))
-        tenant_id = self._tenant_id(resource)
         event_created_at = self._event_created_at(event)
-        if tenant_id is None and resource.get("customer"):
+        customer_id = self._stripe_id(resource.get("customer"))
+        subscription_id = self._webhook_subscription_id(event_type, resource)
+        candidate_tenants = {self._tenant_id(resource)}
+        if customer_id or subscription_id:
             with SessionLocal() as database:
-                tenant_id = database.scalar(
-                    select(BillingAccountEntity.tenant_id).where(
-                        BillingAccountEntity.provider_customer_id == str(resource["customer"])
-                    )
-                )
+                if customer_id:
+                    candidate_tenants.add(database.scalar(select(BillingAccountEntity.tenant_id).where(
+                        BillingAccountEntity.provider_customer_id == customer_id,
+                    )))
+                if subscription_id:
+                    candidate_tenants.add(database.scalar(select(BillingAccountEntity.tenant_id).where(
+                        BillingAccountEntity.provider_subscription_id == subscription_id,
+                    )))
+        candidate_tenants.discard(None)
+        scope_conflict = len(candidate_tenants) > 1
+        tenant_id = None if scope_conflict else next(iter(candidate_tenants), None)
         business_identity = None
         if (
             tenant_id is not None
-            and resource.get("customer")
+            and customer_id
             and event_type
             in {
                 "checkout.session.completed",
@@ -582,17 +597,16 @@ class BillingService:
             and self._product_code(resource) in self.BUSINESS_PRODUCT_CODES
         ):
             try:
-                business_identity = provider.retrieve_customer_business_identity(
-                    str(resource["customer"])
-                )
+                business_identity = provider.retrieve_customer_business_identity(customer_id)
             except BillingProviderError as exc:
                 raise WorkflowError(str(exc), 503) from exc
         sanitized = {
             "type": event_type,
             "resource_id": resource_id,
             "tenant_id": str(tenant_id) if tenant_id else None,
-            "customer_id": resource.get("customer"),
-            "subscription_id": resource.get("subscription"),
+            "customer_id": customer_id,
+            "subscription_id": subscription_id,
+            "scope_conflict": scope_conflict,
             "status": resource.get("status"),
             "cancel_at_period_end": resource.get("cancel_at_period_end"),
             "cancel_at": resource.get("cancel_at"),
@@ -630,8 +644,13 @@ class BillingService:
                     raise WorkflowError("Persisted billing event was not found", 500)
                 if billing_event.status in {"processed", "ignored_stale"}:
                     return BillingWebhookRead(duplicate=True)
+                if scope_conflict:
+                    billing_event.status = "ignored_stale"
+                    billing_event.processed_at = DateTimeService.utc_now()
+                    billing_event.error_code = "workspace_scope_conflict"
+                    return BillingWebhookRead()
                 previous_account = (
-                    self._account_entity(database, tenant_id)
+                    self._account_entity(database, tenant_id, lock=True)
                     if tenant_id is not None
                     else None
                 )
@@ -843,34 +862,69 @@ class BillingService:
     ) -> bool:
         if tenant_id is None:
             return True
+        subscription_event = event_type.startswith("customer.subscription.")
+        checkout_event = event_type == "checkout.session.completed"
+        invoice_event = event_type in {"invoice.payment_succeeded", "invoice.payment_failed", "invoice.voided"}
+        if not (subscription_event or checkout_event or invoice_event):
+            return True
         account = BillingService._account_entity(database, tenant_id, lock=True)
+        current_subscription = account.provider_subscription_id
+        billing_customer = getattr(account, "provider_customer_id", None)
+        customer = BillingService._stripe_id(resource.get("customer"))
+        if billing_customer and customer and customer != billing_customer:
+            return False
         if (
             event_type == "customer.subscription.deleted"
-            and account.provider_subscription_id
-            and resource.get("id") != account.provider_subscription_id
+            and current_subscription
+            and resource.get("id") != current_subscription
         ):
             return False
+        if account.status == "cancelled" and current_subscription:
+            # A canceled Stripe subscription is terminal, including when two events share a timestamp.
+            if subscription_event and resource.get("id") == current_subscription:
+                return False
+            if checkout_event and BillingService._stripe_id(resource.get("subscription")) == current_subscription:
+                return False
         last_subscription_event = getattr(account, "last_provider_event_created_at", None)
         if event_created_at and last_subscription_event:
-            if event_type == "checkout.session.completed" and event_created_at <= last_subscription_event:
+            if checkout_event and event_created_at <= last_subscription_event:
                 return False
-            if event_type.startswith("customer.subscription.") and event_created_at < last_subscription_event:
+            if subscription_event and event_created_at < last_subscription_event:
                 return False
-        invoice_event = event_type in {"invoice.payment_succeeded", "invoice.payment_failed"}
-        if invoice_event and not BillingService._record_payment(
-            database, tenant_id, event_type, resource, provider_event_id,
-        ):
-            return False
+        if invoice_event:
+            subscription_id = BillingService._invoice_subscription_id(resource)
+            if not subscription_id or (current_subscription and subscription_id != current_subscription):
+                return False
+            invoice_id = resource.get("id")
+            pending_invoice = bool(invoice_id and invoice_id == account.pending_provider_invoice_id)
+            if event_type == "invoice.voided":
+                if pending_invoice:
+                    BillingService._clear_pending_change(account)
+                return pending_invoice
+            if not BillingService._record_payment(database, tenant_id, event_type, resource, provider_event_id):
+                return False
+            if account.status == "cancelled":
+                # Keep the invoice in the ledger without reopening access or notifying about a plan change.
+                return False
+            if pending_invoice or resource.get("billing_reason") == "subscription_update":
+                # Proration payment and renewal are independent. A paid upgrade can
+                # change contracted capacity while the renewal remains overdue.
+                if pending_invoice and event_type == "invoice.payment_succeeded":
+                    BillingService._commit_pending_change(account)
+                return pending_invoice
+            period_start, period_end = BillingService._invoice_service_period(resource)
+            renewal = resource.get("billing_reason") == "subscription_cycle"
+            if renewal and period_end is not None and account.current_period_ends_at is not None:
+                known_end = account.current_period_ends_at
+                if known_end.tzinfo is None:
+                    known_end = known_end.replace(tzinfo=UTC)
+                if period_end < known_end:
+                    return False
         account.provider = "stripe"
-        billing_customer = account.provider_customer_id
-        customer = resource.get("customer")
         if customer:
-            account.provider_customer_id = str(customer)
-        if event_type == "checkout.session.completed":
-            subscription = resource.get("subscription")
-            account.provider_subscription_id = (
-                str(subscription) if subscription else None
-            )
+            account.provider_customer_id = customer
+        if checkout_event:
+            account.provider_subscription_id = BillingService._stripe_id(resource.get("subscription"))
             account.current_product_code = BillingService._product_code(resource)
             BillingService._sync_contracted_seats(account, resource)
             if account.status != "active":
@@ -890,30 +944,22 @@ class BillingService:
                     and resource.get("status") == "paid"
                 ):
                     activate_paid_business_workspace(database, tenant_id)
-                if (
-                    getattr(account, "pending_provider_invoice_id", None)
-                    and getattr(account, "pending_provider_invoice_id", None)
-                    == str(resource.get("id") or "")
-                ):
-                    BillingService._commit_pending_change(account)
-                period_start, period_end = BillingService._invoice_service_period(
-                    resource
-                )
                 BillingService._sync_usage_period(
                     account,
                     period_start,
                     period_end,
-                    reset_usage=(
-                        resource.get("billing_reason") == "subscription_cycle"
-                    ),
+                    reset_usage=renewal,
                 )
-            elif account.status != "past_due" or account.grace_period_ends_at is None:
-                account.status = "past_due"
-                account.grace_period_ends_at = DateTimeService.utc_now() + timedelta(
-                    days=settings.BILLING_GRACE_PERIOD_DAYS
-                )
+            else:
+                if renewal and period_end is not None:
+                    account.current_period_ends_at = period_end
+                if account.status != "past_due" or account.grace_period_ends_at is None:
+                    account.status = "past_due"
+                    account.grace_period_ends_at = DateTimeService.utc_now() + timedelta(
+                        days=settings.BILLING_GRACE_PERIOD_DAYS
+                    )
             return True
-        if event_type.startswith("customer.subscription."):
+        if subscription_event:
             account.provider_subscription_id = str(resource.get("id"))
             account.current_product_code = BillingService._product_code(resource)
             BillingService._sync_contracted_seats(account, resource)
@@ -959,6 +1005,10 @@ class BillingService:
             account.current_product_code = account.pending_product_code
         if account.pending_contracted_seats is not None:
             account.contracted_seats = account.pending_contracted_seats
+        BillingService._clear_pending_change(account)
+
+    @staticmethod
+    def _clear_pending_change(account: BillingAccountEntity) -> None:
         account.pending_product_code = None
         account.pending_contracted_seats = None
         account.pending_change_kind = None
@@ -1024,12 +1074,7 @@ class BillingService:
             )
             database.add(payment)
         status_transitions = resource.get("status_transitions") or {}
-        parent = resource.get("parent") or {}
-        subscription_details = parent.get("subscription_details") or {}
-        subscription_id = resource.get("subscription") or subscription_details.get(
-            "subscription"
-        )
-        payment.provider_subscription_id = str(subscription_id) if subscription_id else None
+        payment.provider_subscription_id = BillingService._invoice_subscription_id(resource)
         payment.provider_event_id = provider_event_id or event_type
         payment.status = (
             "paid" if event_type == "invoice.payment_succeeded" else "failed"
@@ -1044,19 +1089,50 @@ class BillingService:
         return True
 
     @staticmethod
+    def _invoice_subscription_id(resource) -> str | None:
+        details = (resource.get("parent") or {}).get("subscription_details") or {}
+        subscription = resource.get("subscription") or details.get("subscription")
+        return BillingService._stripe_id(subscription)
+
+    @staticmethod
+    def _stripe_id(reference) -> str | None:
+        if isinstance(reference, Mapping):
+            reference = reference.get("id")
+        return str(reference) if reference else None
+
+    @staticmethod
+    def _webhook_subscription_id(event_type: str, resource) -> str | None:
+        if event_type.startswith("invoice."):
+            return BillingService._invoice_subscription_id(resource)
+        if event_type.startswith("customer.subscription."):
+            return BillingService._stripe_id(resource.get("id"))
+        if event_type.startswith("checkout.session."):
+            return BillingService._stripe_id(resource.get("subscription"))
+        return None
+
+    @staticmethod
     def _timestamp(value) -> datetime | None:
         return datetime.fromtimestamp(int(value), tz=UTC) if value else None
 
     @staticmethod
     def _invoice_service_period(resource) -> tuple[datetime | None, datetime | None]:
         lines = (resource.get("lines") or {}).get("data") or []
+        untyped_period = None
         for line in lines:
             period = line.get("period") or {}
-            if period.get("start") and period.get("end"):
-                return (
-                    BillingService._timestamp(period["start"]),
-                    BillingService._timestamp(period["end"]),
-                )
+            if not period.get("start") or not period.get("end"):
+                continue
+            parent = line.get("parent") or {}
+            line_type = parent.get("type") or line.get("type")
+            details = parent.get("subscription_item_details") or {}
+            if line.get("proration") or details.get("proration"):
+                continue
+            if line_type in {"subscription", "subscription_item_details"}:
+                return BillingService._timestamp(period["start"]), BillingService._timestamp(period["end"])
+            if line_type is None and untyped_period is None:
+                untyped_period = period
+        if untyped_period is not None:
+            return BillingService._timestamp(untyped_period["start"]), BillingService._timestamp(untyped_period["end"])
         return (
             BillingService._timestamp(resource.get("period_start")),
             BillingService._timestamp(resource.get("period_end")),
@@ -1285,7 +1361,7 @@ class BillingService:
 
     @staticmethod
     def _tenant_id(resource) -> UUID | None:
-        raw = resource.get("metadata", {}).get("tenant_id") or resource.get(
+        raw = (resource.get("metadata") or {}).get("tenant_id") or resource.get(
             "client_reference_id"
         )
         try:

@@ -41,6 +41,7 @@ Em produção, `core_internal_service_key` deve ser um segredo aleatório indepe
 - `customer.subscription.deleted`
 - `invoice.payment_succeeded`
 - `invoice.payment_failed`
+- `invoice.voided`
 
 ## Consulta administrativa
 

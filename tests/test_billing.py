@@ -41,48 +41,18 @@ def test_checkout_rejects_a_currency_without_a_configured_price(monkeypatch) -> 
 
 
 @pytest.mark.parametrize("currency", ["BRL", "USD", "EUR", "JPY"])
-def test_checkout_selects_every_supported_currency(monkeypatch, currency: str) -> None:
-    expected = f"price_essential_monthly_{currency.lower()}"
-    monkeypatch.setattr(
-        settings,
-        f"STRIPE_PRICE_ESSENTIAL_MONTHLY_{currency}",
-        expected,
-    )
-
-    assert BillingService._price_for_currency(currency.lower()) == expected
-
-
+@pytest.mark.parametrize(("interval", "segment"), [("month", "MONTHLY"), ("year", "ANNUAL")])
 @pytest.mark.parametrize(
-    ("product_code", "setting_name"),
-    [
-        ("rubrica_base", "STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL"),
-        ("rubrica_intermediate", "STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL"),
-        ("rubrica_team", "STRIPE_PRICE_TEAM_MONTHLY_BRL"),
-    ],
+    ("product_code", "plan"),
+    [("rubrica_base", "ESSENTIAL"), ("rubrica_intermediate", "PROFESSIONAL"), ("rubrica_team", "TEAM")],
 )
-def test_checkout_selects_monthly_brl_price_for_every_plan(
-    monkeypatch, product_code: str, setting_name: str
-) -> None:
-    expected = f"price_{product_code}_monthly_brl"
-    monkeypatch.setattr(
-        f"core_api.modules.billing.billing_service.settings.{setting_name}", expected
-    )
+def test_checkout_selects_price_for_exact_plan_currency_and_interval(
+    monkeypatch, product_code, plan, interval, segment, currency
+):
+    expected = f"price_{plan.lower()}_{interval}_{currency.lower()}"
+    monkeypatch.setattr(settings, f"STRIPE_PRICE_{plan}_{segment}_{currency}", expected)
 
-    assert BillingService._price_for_currency("BRL", product_code) == expected
-
-
-@pytest.mark.parametrize(
-    ("product_code", "setting_name"),
-    [
-        ("rubrica_base", "STRIPE_PRICE_ESSENTIAL_ANNUAL_BRL"),
-        ("rubrica_intermediate", "STRIPE_PRICE_PROFESSIONAL_ANNUAL_BRL"),
-        ("rubrica_team", "STRIPE_PRICE_TEAM_ANNUAL_BRL"),
-    ],
-)
-def test_checkout_selects_annual_price(monkeypatch, product_code: str, setting_name: str) -> None:
-    expected = f"price_{product_code}_annual_brl"
-    monkeypatch.setattr(f"core_api.modules.billing.billing_service.settings.{setting_name}", expected)
-    assert BillingService._price_for_currency("BRL", product_code, "year") == expected
+    assert BillingService._price_for_currency(currency.lower(), product_code, interval) == expected
 
 
 def test_team_plan_limits() -> None:
@@ -653,6 +623,8 @@ def test_failed_invoice_starts_grace_period_and_records_payment(monkeypatch) -> 
         status="active",
         provider=None,
         provider_customer_id=None,
+        provider_subscription_id="sub_test",
+        pending_provider_invoice_id=None,
         grace_period_ends_at=None,
         current_period_ends_at=None,
     )
@@ -676,6 +648,7 @@ def test_failed_invoice_starts_grace_period_and_records_payment(monkeypatch) -> 
         "invoice.payment_failed",
         {
             "id": "in_test",
+            "subscription": "sub_test",
             "lines": {
                 "data": [
                     {"period": {"start": 1_790_000_000, "end": 1_800_000_000}}
@@ -701,6 +674,8 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
         status="past_due",
         provider=None,
         provider_customer_id=None,
+        provider_subscription_id="sub_test",
+        pending_provider_invoice_id=None,
         grace_period_ends_at=datetime.now(UTC) + timedelta(days=1),
         current_period_ends_at=None,
     )
@@ -712,7 +687,7 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
     BillingService._apply_event(
         object(),
         "invoice.payment_succeeded",
-        {"id": "in_test"},
+        {"id": "in_test", "subscription": "sub_test"},
         uuid4(),
     )
 
@@ -725,7 +700,8 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
     [("invoice.payment_failed", "active"), ("invoice.payment_succeeded", "cancelled")],
 )
 def test_replayed_invoice_preserves_paid_record_and_account(monkeypatch, event_type, account_status):
-    account = SimpleNamespace(status=account_status, grace_period_ends_at=None)
+    account = SimpleNamespace(status=account_status, grace_period_ends_at=None,
+                              provider_subscription_id="sub_test", pending_provider_invoice_id=None)
     payment = SimpleNamespace(
         status="paid", provider_event_id="evt_paid", amount_paid_minor=2990,
         paid_at=datetime(2026, 9, 10, tzinfo=UTC),
@@ -735,7 +711,7 @@ def test_replayed_invoice_preserves_paid_record_and_account(monkeypatch, event_t
     monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
 
     applied = BillingService._apply_event(
-        database, event_type, {"id": "in_test", "amount_paid": 0},
+        database, event_type, {"id": "in_test", "subscription": "sub_test", "amount_paid": 0},
         uuid4(), provider_event_id="evt_delayed_failure",
     )
 
@@ -745,11 +721,82 @@ def test_replayed_invoice_preserves_paid_record_and_account(monkeypatch, event_t
     assert vars(payment) == before
 
 
+@pytest.mark.parametrize(
+    "invoice",
+    [
+        {"subscription": "sub_previous", "billing_reason": "subscription_cycle"},
+        {"billing_reason": "manual"},
+    ],
+)
+@pytest.mark.parametrize("event_type", ["invoice.payment_succeeded", "invoice.payment_failed"])
+def test_unrelated_invoice_preserves_current_subscription(monkeypatch, invoice, event_type):
+    account = SimpleNamespace(
+        status="active", provider_subscription_id="sub_current",
+        provider_customer_id="cus_test", grace_period_ends_at=None,
+    )
+    previous = vars(account).copy()
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
+    record_calls = []
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *args: record_calls.append(args) or True)
+
+    applied = BillingService._apply_event(
+        object(), event_type, invoice | {"id": "in_unrelated", "customer": "cus_test"}, uuid4()
+    )
+
+    assert not applied
+    assert not record_calls
+    assert vars(account) == previous
+
+
+def test_failed_paid_add_on_attempt_preserves_current_access_and_pending_upgrade(monkeypatch):
+    account = SimpleNamespace(
+        status="active", provider="stripe", provider_customer_id="cus_test",
+        provider_subscription_id="sub_current", grace_period_ends_at=None,
+        current_product_code="rubrica_intermediate", contracted_seats=3,
+        pending_contracted_seats=4, pending_provider_invoice_id="in_upgrade",
+    )
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
+    record_calls = []
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *args: record_calls.append(args) or True)
+    invoice = {
+        "id": "in_upgrade", "customer": "cus_test", "billing_reason": "subscription_update",
+        "parent": {"subscription_details": {"subscription": "sub_current"}},
+    }
+
+    assert BillingService._apply_event(object(), "invoice.payment_failed", invoice, uuid4())
+    assert len(record_calls) == 1
+    assert (account.status, account.grace_period_ends_at) == ("active", None)
+    assert (account.contracted_seats, account.pending_contracted_seats) == (3, 4)
+    assert account.pending_provider_invoice_id == "in_upgrade"
+
+
+def test_voided_proration_clears_only_the_matching_pending_upgrade(monkeypatch):
+    account = SimpleNamespace(
+        status="active", provider_subscription_id="sub_current",
+        current_product_code="rubrica_intermediate", contracted_seats=3,
+        pending_product_code="rubrica_intermediate", pending_contracted_seats=4,
+        pending_change_kind="upgrade", pending_change_effective_at=None,
+        pending_provider_invoice_id="in_upgrade",
+    )
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
+
+    assert not BillingService._apply_event(
+        object(), "invoice.voided", {"id": "in_older", "subscription": "sub_current"}, uuid4()
+    )
+    assert account.pending_provider_invoice_id == "in_upgrade"
+    assert BillingService._apply_event(
+        object(), "invoice.voided", {"id": "in_upgrade", "subscription": "sub_current"}, uuid4()
+    )
+    assert (account.status, account.contracted_seats) == ("active", 3)
+    assert (account.pending_provider_invoice_id, account.pending_contracted_seats) == (None, None)
+
+
 def test_paid_proration_invoice_activates_pending_seat_upgrade(monkeypatch) -> None:
     account = SimpleNamespace(
         status="active",
         provider=None,
         provider_customer_id=None,
+        provider_subscription_id="sub_test",
         grace_period_ends_at=None,
         current_period_ends_at=None,
         current_product_code="rubrica_intermediate",
@@ -768,7 +815,7 @@ def test_paid_proration_invoice_activates_pending_seat_upgrade(monkeypatch) -> N
     BillingService._apply_event(
         object(),
         "invoice.payment_succeeded",
-        {"id": "in_upgrade"},
+        {"id": "in_upgrade", "subscription": "sub_test"},
         uuid4(),
     )
 
@@ -782,6 +829,7 @@ def test_unrelated_paid_invoice_does_not_activate_pending_upgrade(monkeypatch) -
         status="active",
         provider=None,
         provider_customer_id=None,
+        provider_subscription_id="sub_test",
         grace_period_ends_at=None,
         current_period_ends_at=None,
         current_product_code="rubrica_intermediate",
@@ -800,7 +848,7 @@ def test_unrelated_paid_invoice_does_not_activate_pending_upgrade(monkeypatch) -
     BillingService._apply_event(
         object(),
         "invoice.payment_succeeded",
-        {"id": "in_renewal"},
+        {"id": "in_renewal", "subscription": "sub_test"},
         uuid4(),
     )
 
@@ -872,6 +920,25 @@ def test_invoice_service_period_prefers_subscription_line_period() -> None:
 
     assert start == datetime.fromtimestamp(10, tz=UTC)
     assert end == datetime.fromtimestamp(20, tz=UTC)
+
+
+@pytest.mark.parametrize(("unrelated_line", "subscription_line"), [
+    ({"type": "invoiceitem"}, {"type": "subscription", "proration": False}),
+    ({"type": "subscription", "proration": True}, {"type": "subscription", "proration": False}),
+    ({"parent": {"type": "invoice_item_details"}},
+     {"parent": {"type": "subscription_item_details", "subscription_item_details": {"proration": False}}}),
+    ({"parent": {"type": "subscription_item_details", "subscription_item_details": {"proration": True}}},
+     {"parent": {"type": "subscription_item_details", "subscription_item_details": {"proration": False}}}),
+])
+def test_recurring_invoice_uses_renewal_period_even_when_an_extra_line_comes_first(unrelated_line, subscription_line):
+    start, end = BillingService._invoice_service_period({
+        "period_start": 1, "period_end": 2,
+        "lines": {"data": [
+            unrelated_line | {"period": {"start": 5, "end": 10}},
+            subscription_line | {"period": {"start": 10, "end": 20}},
+        ]},
+    })
+    assert (start, end) == (datetime.fromtimestamp(10, tz=UTC), datetime.fromtimestamp(20, tz=UTC))
 
 
 def test_only_professional_or_complimentary_accounts_enable_business_features() -> None:

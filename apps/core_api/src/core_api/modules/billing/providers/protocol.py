@@ -79,6 +79,7 @@ class BillingProvider(Protocol):
         *,
         subscription_id: str,
         product_code: str,
+        billing_interval: str,
         base_price_id: str,
         seat_price_id: str,
         seat_price_ids: frozenset[str],

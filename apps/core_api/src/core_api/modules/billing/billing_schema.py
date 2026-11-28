@@ -51,6 +51,8 @@ class BillingCheckoutRead(BaseModel):
 
 
 class BillingCheckoutCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     product_code: Literal["rubrica_base", "rubrica_intermediate", "rubrica_team"]
     billing_interval: Literal["month", "year"] = "month"
 
@@ -84,7 +86,7 @@ class BillingSeatChangeCreate(BillingSeatQuoteCreate):
 
 
 class BillingSeatChangeRead(BaseModel):
-    status: Literal["pending_payment", "scheduled"]
+    status: Literal["pending_payment", "scheduled", "applied"]
     target_product_code: Literal["rubrica_intermediate", "rubrica_team"]
     target_seats: int
     effective_at: datetime | None

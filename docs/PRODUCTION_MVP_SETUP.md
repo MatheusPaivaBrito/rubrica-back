@@ -152,6 +152,7 @@ pagamento. O vencimento é controlado pelo período informado pelo Stripe.
    - customer.subscription.deleted
    - invoice.payment_succeeded
    - invoice.payment_failed
+   - invoice.voided
 10. Em Billing > Revenue recovery > Retries, configure tentativas por 10 dias e
     escolha cancelar a assinatura se a recuperação falhar.
 11. Em Settings > Billing > Customer portal, habilite a atualização de

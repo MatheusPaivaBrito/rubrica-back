@@ -510,11 +510,12 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
     with pytest.raises(WorkflowError, match="approved before checkout"):
         service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
     review.record_decision(requested.id, "approved", "operator")
-    service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
+    checkout = service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
     service.create_checkout(tenant_id, subject, "rubrica_team", **checkout_options)
 
     with factory.begin() as db:
         destination_id = db.get(review.BusinessUpgradeReviewEntity, requested.id).business_tenant_id
+        assert checkout.checkout_url.endswith(f"/plan?tenant={destination_id}&checkout=success")
         destination = db.get(TenantEntity, destination_id)
         account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == destination_id))
         BillingService._apply_event(db, "checkout.session.completed", {
@@ -527,7 +528,7 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
     assert [item.id for item in module.tenant_service.list_for(subject)] == [tenant_id]
     with factory.begin() as db:
         account = db.scalar(select(BillingAccountEntity).where(BillingAccountEntity.tenant_id == destination_id))
-        invoice = {"id": "in_test", "customer": account.provider_customer_id, "status": "paid"}
+        invoice = {"id": "in_test", "customer": account.provider_customer_id, "subscription": "sub_test", "status": "paid"}
         BillingService._apply_event(db, "invoice.payment_succeeded", invoice, destination_id)
         assert db.get(TenantEntity, destination_id).status == "pending_billing"
         BillingService._apply_event(
@@ -830,6 +831,35 @@ def test_subscription_management_opens_only_the_customer_portal(team_db, monkeyp
         service.open_subscription_management(tenant_id, "member1@example.local")
     result = service.open_subscription_management(tenant_id, "member0@example.local")
     assert result.portal_url == "https://billing.example.test/portal"
+
+
+def test_plan_portal_accepts_a_new_interval_for_the_current_plan(team_db, monkeypatch):
+    from types import SimpleNamespace
+
+    from core_api.infrastructure.settings import settings
+    from core_api.modules.billing import billing_service as billing
+
+    factory, tenant_id, _ = team_db
+    monkeypatch.setattr(billing, "SessionLocal", factory)
+    monkeypatch.setattr(settings, "STRIPE_PRICE_TEAM_ANNUAL_BRL", "price_team_year_brl")
+    with factory.begin() as db:
+        db.get(TenantEntity, tenant_id).currency = "BRL"
+        account = db.scalar(select(BillingAccountEntity))
+        account.provider_customer_id = "cus_test"
+        account.provider_subscription_id = "sub_test"
+    arguments = {}
+
+    def open_portal(**kwargs):
+        arguments.update(kwargs)
+        return SimpleNamespace(url="https://billing.example.test/confirm")
+
+    service = billing.BillingService(SimpleNamespace(create_portal_session=open_portal))
+    result = service.create_portal(tenant_id, "member0@example.local", "rubrica_team", "year")
+
+    assert result.portal_url == "https://billing.example.test/confirm"
+    assert arguments["price_id"] == "price_team_year_brl"
+    assert arguments["return_url"].endswith(f"/plan?tenant={tenant_id}")
+    assert f"tenant={tenant_id}&billing=updated" in arguments["completion_url"]
 
 
 @pytest.mark.parametrize("subscription_status", ["active", "pending", "past_due", "unpaid", "paused"])

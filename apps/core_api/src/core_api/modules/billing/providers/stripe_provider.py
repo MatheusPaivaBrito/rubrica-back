@@ -1,3 +1,4 @@
+import json
 import logging
 from hashlib import sha256
 from pathlib import Path
@@ -53,6 +54,7 @@ class StripeBillingProvider:
         parameters: dict[str, object] = {
             "mode": "subscription",
             "customer": customer_id,
+            "adaptive_pricing": {"enabled": False},
             "line_items": [{"price": price_id, "quantity": 1}],
             "success_url": success_url,
             "cancel_url": cancel_url,
@@ -69,7 +71,7 @@ class StripeBillingProvider:
             reusable, latest_id = self._reconcile_checkout(customer_id, tenant_id, price_id)
             if reusable:
                 return ProviderSession(url=reusable)
-            key = sha256(f"{tenant_id}:{customer_id}:{price_id}:{latest_id}".encode()).hexdigest()
+            key = sha256(f"fixed-price:{tenant_id}:{customer_id}:{price_id}:{latest_id}".encode()).hexdigest()
             checkout = stripe.checkout.Session.create(**parameters, idempotency_key=f"rubrica-checkout-{key}")
         except CheckoutConflictError:
             raise
@@ -111,7 +113,8 @@ class StripeBillingProvider:
             matches = len(items) == 1 and items[0].get("quantity") == 1 and (
                 items[0].get("price") or {}
             ).get("id") == price_id
-            if matches and session.get("url") and reusable is None:
+            adaptive = (session.get("adaptive_pricing") or {}).get("enabled")
+            if matches and not adaptive and session.get("url") and reusable is None:
                 reusable = session["url"]
             else:
                 obsolete.append(session.id)
@@ -137,20 +140,16 @@ class StripeBillingProvider:
         }
         if settings.STRIPE_PORTAL_CONFIGURATION_ID:
             parameters["configuration"] = settings.STRIPE_PORTAL_CONFIGURATION_ID
-        cancellation_was_scheduled = False
         if subscription_id:
-            subscription = stripe.Subscription.retrieve(subscription_id)
-            cancellation_was_scheduled = bool(
-                subscription.get("cancel_at_period_end", False)
-            )
-            if cancellation_was_scheduled:
-                stripe.Subscription.modify(
-                    subscription_id,
-                    cancel_at_period_end=False,
-                )
-            items = subscription.get("items", {}).get("data", [])
-            if price_id and not items:
-                raise BillingProviderError("Stripe subscription has no changeable item")
+            subscription = self.retrieve_subscription(subscription_id)
+            if subscription.get("cancel_at_period_end") or subscription.get("cancel_at"):
+                raise CheckoutConflictError("Resume the subscription in the billing portal before changing its plan")
+            items = (subscription.get("items") or {}).get("data") or []
+            if price_id:
+                if len(items) != 1:
+                    raise CheckoutConflictError("Plan changes through the portal require a subscription with one item")
+                if (items[0].get("price") or {}).get("id") == price_id:
+                    raise CheckoutConflictError("The selected plan and billing interval are already active")
             flow_type = "subscription_update_confirm" if price_id else "subscription_update"
             flow_payload = (
                 {"subscription": subscription_id, "items": [{"id": str(items[0].get("id")), "price": price_id, "quantity": 1}]}
@@ -167,11 +166,6 @@ class StripeBillingProvider:
         try:
             portal = stripe.billing_portal.Session.create(**parameters)
         except Exception as exc:
-            if subscription_id and cancellation_was_scheduled:
-                stripe.Subscription.modify(
-                    subscription_id,
-                    cancel_at_period_end=True,
-                )
             raise BillingProviderError(
                 "Stripe billing portal could not be opened"
             ) from exc
@@ -192,38 +186,48 @@ class StripeBillingProvider:
         *,
         subscription_id: str,
         product_code: str,
+        billing_interval: str,
         base_price_id: str,
         seat_price_id: str,
         seat_price_ids: frozenset[str],
         additional_seats: int,
     ) -> ProviderSubscriptionChange:
         try:
-            subscription = stripe.Subscription.retrieve(subscription_id)
+            subscription = stripe.Subscription.retrieve(subscription_id, expand=["latest_invoice"])
+            if subscription.get("cancel_at_period_end") or subscription.get("cancel_at"):
+                raise CheckoutConflictError("Resume the subscription before adding seats")
+            if subscription.get("status") not in {"active", "trialing"}:
+                raise CheckoutConflictError("An active Stripe subscription is required to add seats")
             existing_items = list(
                 (subscription.get("items") or {}).get("data") or []
             )
-            base_item = next(
-                (
-                    item
-                    for item in existing_items
-                    if str((item.get("price") or {}).get("id") or "")
-                    not in seat_price_ids
-                ),
-                None,
-            )
-            if base_item is None:
-                raise BillingProviderError(
-                    "Stripe subscription has no base plan item"
-                )
-            seat_item = next(
-                (
-                    item
-                    for item in existing_items
-                    if str((item.get("price") or {}).get("id") or "")
-                    in seat_price_ids
-                ),
-                None,
-            )
+            base_items = [item for item in existing_items if (item.get("price") or {}).get("id") not in seat_price_ids]
+            seat_items = [item for item in existing_items if (item.get("price") or {}).get("id") in seat_price_ids]
+            if len(base_items) != 1 or len(seat_items) > 1:
+                raise CheckoutConflictError("Review the existing Stripe subscription items before adding seats")
+            base_item = base_items[0]
+            seat_item = seat_items[0] if seat_items else None
+            base_interval = ((base_item.get("price") or {}).get("recurring") or {}).get("interval")
+            if base_interval != billing_interval:
+                raise CheckoutConflictError("Use the billing portal to change the subscription interval")
+
+            target = [(base_price_id, 1)]
+            if additional_seats > 0:
+                target.append((seat_price_id, additional_seats))
+            target.sort()
+            latest_invoice = subscription.get("latest_invoice")
+            invoice_id = latest_invoice.get("id") if isinstance(latest_invoice, Mapping) else latest_invoice
+            proration = isinstance(latest_invoice, Mapping) and latest_invoice.get("billing_reason") == "subscription_update"
+            pending = subscription.get("pending_update")
+            if pending or self._priced_quantities(existing_items) == target:
+                # The first attempt can reach Stripe even if its response never reaches Core.
+                if invoice_id and proration and (
+                    self._priced_quantities(pending.get("subscription_items") or []) == target
+                    if pending else latest_invoice.get("status") == "paid"
+                ):
+                    return ProviderSubscriptionChange(invoice_id=str(invoice_id))
+                raise CheckoutConflictError("Review the existing Stripe change before adding seats")
+
             items: list[dict[str, object]] = [
                 {
                     "id": str(base_item.get("id")),
@@ -243,16 +247,22 @@ class StripeBillingProvider:
                 items.append(
                     {"id": str(seat_item.get("id")), "deleted": True}
                 )
-            updated = stripe.Subscription.modify(
-                subscription_id,
-                items=items,
-                payment_behavior="pending_if_incomplete",
-                proration_behavior="always_invoice",
-                metadata={
+            parameters = {
+                "items": items,
+                "payment_behavior": "pending_if_incomplete",
+                "proration_behavior": "always_invoice",
+                "metadata": {
                     **dict(subscription.get("metadata") or {}),
                     "product_code": product_code,
                 },
-                expand=["latest_invoice"],
+                "expand": ["latest_invoice"],
+            }
+            # A new renewal or a voided proration changes the invoice anchor and allows a fresh attempt.
+            key_data = json.dumps([subscription_id, invoice_id, parameters], sort_keys=True)
+            updated = stripe.Subscription.modify(
+                subscription_id,
+                **parameters,
+                idempotency_key=f"rubrica-seats-{sha256(key_data.encode()).hexdigest()}",
             )
         except BillingProviderError:
             raise
@@ -271,6 +281,13 @@ class StripeBillingProvider:
                 "Stripe did not return the proration invoice"
             )
         return ProviderSubscriptionChange(invoice_id=invoice_id)
+
+    @staticmethod
+    def _priced_quantities(items) -> list[tuple[str, int]]:
+        return sorted(
+            (str((item.get("price") or {}).get("id") or ""), int(item.get("quantity") or 0))
+            for item in items
+        )
 
     def retrieve_customer_business_identity(
         self, customer_id: str

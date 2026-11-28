@@ -4,18 +4,21 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
 from hashlib import sha256
+from hmac import new as hmac_new
 from io import BytesIO
+from itertools import permutations
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 import pytest
+import stripe
 from fastapi.testclient import TestClient
 from redis import Redis
-from sqlalchemy import delete, select, text, update
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import delete, event as sqlalchemy_event, select, text, update
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError
 from pypdf import PdfReader, PdfWriter
 
 from auth_api.infrastructure.database.connection import SessionLocal as AuthSessionLocal
@@ -24,13 +27,17 @@ from auth_api.main import app as auth_app
 from auth_api.modules.accounts import account_service, tenant_client
 from auth_api.modules.sessions.session_service import session_service
 from auth_api.modules.users.user_entity import UserEntity
-from core_api.infrastructure.database.connection import SessionLocal
+from core_api.infrastructure import auth_context
+from core_api.infrastructure.database.connection import SessionLocal, engine
 from core_api.infrastructure.settings import settings as core_settings
 from core_api.main import app as core_app
-from core_api.modules.billing.billing_entity import BillingAccountEntity, BillingEventEntity
-from core_api.modules.billing.billing_service import billing_service
+from core_api.modules.billing.billing_entity import BillingAccountEntity, BillingEventEntity, BillingPaymentEntity
+from core_api.modules.billing.billing_schema import BillingCheckoutRead
+from core_api.modules.billing.billing_service import BillingService, billing_service
 from core_api.modules.billing.notification_client import BillingEmailDeliveryError
 from core_api.modules.billing.providers.fake_provider import FakeBillingProvider
+from core_api.modules.billing.providers.protocol import BillingProviderError, ProviderSubscriptionChange
+from core_api.modules.billing.providers.stripe_provider import StripeBillingProvider
 from core_api.modules.document.document_entity import DocumentEntity
 from core_api.modules.document.document_schema import DocumentCreate
 from core_api.modules.document.storage import LocalDocumentStorage
@@ -274,6 +281,392 @@ def subscription_webhook(monkeypatch):
     return tenant_id, event_id, payload
 
 
+def test_signed_stripe_webhook_route_applies_valid_event_and_rejects_tampering(monkeypatch, subscription_webhook):
+    tenant_id, event_id, payload = subscription_webhook
+    event = json.loads(payload) | {"object": "event"}
+    payload = json.dumps(event).encode()
+    webhook_secret = "whsec_local_rubrica_fixture"
+    monkeypatch.setattr(core_settings, "STRIPE_SECRET_KEY", "sk_test_local_fixture")
+    monkeypatch.setattr(core_settings, "STRIPE_RUNTIME_WEBHOOK_SECRET_FILE", None)
+    monkeypatch.setattr(core_settings, "STRIPE_WEBHOOK_SECRET", webhook_secret)
+    monkeypatch.setattr(billing_service, "_get_provider", StripeBillingProvider)
+    timestamp = str(event["created"])
+    signature = hmac_new(webhook_secret.encode(), timestamp.encode() + b"." + payload, sha256).hexdigest()
+    headers = {"Stripe-Signature": f"t={timestamp},v1={signature}", "Content-Type": "application/json"}
+
+    with TestClient(core_app) as http:
+        path = "/billing/webhooks/stripe"
+        assert http.post(path, content=payload + b" ", headers=headers).status_code == 400
+        with SessionLocal() as db:
+            assert db.scalar(select(BillingEventEntity.id).filter_by(provider_event_id=event_id)) is None
+        accepted = http.post(path, content=payload, headers=headers)
+        assert accepted.status_code == 200
+        assert accepted.json()["duplicate"] is False
+        repeated = http.post(path, content=payload, headers=headers)
+        assert repeated.status_code == 200
+        assert repeated.json()["duplicate"] is True
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.status, account.signatures_used) == ("active", 3)
+
+
+@pytest.mark.parametrize("late_event_type", [
+    "customer.subscription.updated", "invoice.payment_succeeded", "invoice.payment_failed",
+    "checkout.session.completed",
+])
+def test_cancelled_subscription_survives_redelivery_and_backend_restart(subscription_webhook, late_event_type):
+    tenant_id, activation_id, activation_payload = subscription_webhook
+    activation = json.loads(activation_payload)
+    subscription = activation["data"]["object"]
+    now = activation["created"]
+    period_end = subscription["current_period_end"]
+    invoice = {
+        "id": f"in_{tenant_id.hex}", "subscription": subscription["id"],
+        "metadata": subscription["metadata"], "status": "paid",
+        "billing_reason": "subscription_create", "currency": "brl", "amount_paid": 2990,
+    }
+
+    def event_payload(event_type, created, resource):
+        return json.dumps({
+            "id": f"evt_qa_{uuid4().hex}", "type": event_type, "created": created,
+            "data": {"object": resource},
+        }).encode()
+
+    checkout = event_payload("checkout.session.completed", now - 1, {
+        "id": f"cs_{tenant_id.hex}", "subscription": subscription["id"],
+        "payment_status": "paid", "metadata": subscription["metadata"],
+    })
+    paid = event_payload("invoice.payment_succeeded", now + 1, invoice)
+    cancellation = event_payload("customer.subscription.updated", now + 2, subscription | {
+        "cancel_at_period_end": True, "cancel_at": period_end,
+    })
+
+    # Only webhooks reach the Core after payment. The browser never returns.
+    original_service = BillingService(FakeBillingProvider())
+    assert not original_service.receive_webhook(checkout, "qa").duplicate
+    assert not original_service.receive_webhook(activation_payload, "qa").duplicate
+    assert not original_service.receive_webhook(paid, "qa").duplicate
+    assert original_service.receive_webhook(activation_payload, "qa").duplicate
+    assert not original_service.receive_webhook(cancellation, "qa").duplicate
+
+    engine.dispose()
+    restarted_service = BillingService(FakeBillingProvider())
+    assert restarted_service.receive_webhook(activation_payload, "qa").duplicate
+    assert restarted_service.receive_webhook(paid, "qa").duplicate
+    assert restarted_service.receive_webhook(cancellation, "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.status, account.cancel_at_period_end, account.signatures_used) == ("active", True, 3)
+        assert account.cancels_at.timestamp() == period_end
+        assert restarted_service._paid_access_enabled(account)
+
+    deletion = event_payload("customer.subscription.deleted", period_end, subscription | {"status": "canceled"})
+    assert not restarted_service.receive_webhook(deletion, "qa").duplicate
+    assert restarted_service.receive_webhook(deletion, "qa").duplicate
+    assert restarted_service.receive_webhook(paid, "qa").duplicate
+    if late_event_type == "customer.subscription.updated":
+        late_resource = subscription
+    elif late_event_type == "checkout.session.completed":
+        late_resource = json.loads(checkout)["data"]["object"]
+    else:
+        late_resource = invoice | {"id": f"in_late_{tenant_id.hex}", "billing_reason": "subscription_cycle"}
+    if late_event_type == "invoice.payment_failed":
+        late_resource |= {"status": "open", "amount_paid": 0}
+    late_created_at = period_end + 1 if late_event_type == "checkout.session.completed" else period_end
+    late_event = event_payload(late_event_type, late_created_at, late_resource)
+    assert not restarted_service.receive_webhook(late_event, "qa").duplicate
+    assert restarted_service.receive_webhook(late_event, "qa").duplicate
+
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.status, account.cancel_at_period_end, account.signatures_used) == ("cancelled", False, 3)
+        assert account.grace_period_ends_at is None
+        assert not restarted_service._paid_access_enabled(account)
+        assert db.scalars(select(BillingEventEntity.status).filter_by(provider_event_id=activation_id)).one() == "processed"
+        assert db.scalars(select(BillingEventEntity.status).filter_by(
+            provider_event_id=json.loads(late_event)["id"],
+        )).one() == "ignored_stale"
+        payments = {payment.provider_payment_id: payment for payment in db.scalars(
+            select(BillingPaymentEntity).filter_by(tenant_id=tenant_id),
+        )}
+        assert (payments[invoice["id"]].status, payments[invoice["id"]].amount_paid_minor) == ("paid", 2990)
+        if late_event_type.startswith("invoice."):
+            assert payments.keys() == {invoice["id"], late_resource["id"]}
+            assert payments[late_resource["id"]].status == ("paid" if late_resource["status"] == "paid" else "failed")
+        else:
+            assert payments.keys() == {invoice["id"]}
+
+    # A truly new subscription can still be purchased after terminal cancellation.
+    replacement_id = f"sub_replacement_{tenant_id.hex}"
+    replacement = event_payload("customer.subscription.created", period_end + 2, subscription | {
+        "id": replacement_id, "current_period_start": period_end + 2, "current_period_end": period_end + 3600,
+    })
+    assert not restarted_service.receive_webhook(replacement, "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.provider_subscription_id, account.status) == (replacement_id, "active")
+
+
+def test_concurrent_checkout_reuses_the_same_customer_and_session(monkeypatch):
+    tenant_id = uuid4()
+    subject = "checkout-owner@example.test"
+    price_id = "price_qa_essential_monthly_brl"
+    with SessionLocal.begin() as db:
+        db.add(TenantEntity(id=tenant_id, name="Checkout QA", slug=f"checkout-{tenant_id}", country_code="BR"))
+        db.flush()
+        db.add(TenantMemberEntity(tenant_id=tenant_id, auth_user_id=subject, role="admin"))
+
+    customers = []
+    sessions = []
+    def create_customer(**parameters):
+        customers.append(parameters)
+        return SimpleNamespace(id="cus_qa_concurrent")
+
+    def create_session(**parameters):
+        sessions.append(stripe.StripeObject.construct_from({
+            "id": "cs_qa_concurrent", "status": "open", "payment_status": "unpaid",
+            "url": "https://checkout.stripe.test/session", **parameters,
+        }, None))
+        return sessions[-1]
+
+    monkeypatch.setattr(core_settings, "STRIPE_SECRET_KEY", "sk_test_local_fixture")
+    monkeypatch.setattr(core_settings, "STRIPE_PRICE_ESSENTIAL_MONTHLY_BRL", price_id)
+    monkeypatch.setattr(stripe.Customer, "create", create_customer)
+    monkeypatch.setattr(stripe.checkout.Session, "create", create_session)
+    monkeypatch.setattr(stripe.checkout.Session, "list", lambda **_: SimpleNamespace(auto_paging_iter=lambda: iter(sessions)))
+    monkeypatch.setattr(stripe.checkout.Session, "list_line_items", lambda *_args, **_: {
+        "data": [{"price": {"id": price_id}, "quantity": 1}],
+    })
+    service = BillingService(StripeBillingProvider())
+    simultaneous = Barrier(2)
+
+    def open_checkout():
+        simultaneous.wait(timeout=10)
+        return service.create_checkout(tenant_id, subject, "rubrica_base").checkout_url
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = [pool.submit(open_checkout) for _ in range(2)]
+        assert [result.result(timeout=10) for result in results] == ["https://checkout.stripe.test/session"] * 2
+
+    assert len(customers) == len(sessions) == 1
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.provider_customer_id, account.status) == ("cus_qa_concurrent", "not_configured")
+
+
+@pytest.mark.parametrize("delivery_order", list(permutations(("checkout", "subscription", "invoice"))))
+def test_first_payment_is_recorded_once_in_each_delivery_order(subscription_webhook, delivery_order):
+    tenant_id, _, subscription_payload = subscription_webhook
+    subscription = json.loads(subscription_payload)
+    resource = subscription["data"]["object"]
+    customer = f"cus_{tenant_id.hex}"
+    with SessionLocal.begin() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        account.provider_customer_id = customer
+
+    def payload(event_type, obj):
+        return json.dumps({
+            "id": f"evt_{uuid4().hex}", "type": event_type, "created": subscription["created"],
+            "data": {"object": obj},
+        }).encode()
+
+    invoice = {"id": f"in_{tenant_id.hex}", "customer": customer, "billing_reason": "subscription_create",
+               "status": "paid", "currency": "jpy", "amount_due": 3900, "amount_paid": 3900,
+               "parent": {"subscription_details": {"subscription": resource["id"], "metadata": resource["metadata"]}}}
+    events = {
+        "checkout": payload("checkout.session.completed", {
+            "id": f"cs_{tenant_id.hex}", "subscription": resource["id"], "customer": customer,
+            "metadata": resource["metadata"], "payment_status": "paid",
+        }),
+        "subscription": subscription_payload,
+        "invoice": payload("invoice.payment_succeeded", invoice),
+    }
+    for key in delivery_order:
+        assert not billing_service.receive_webhook(events[key], "qa").duplicate
+    for key in reversed(delivery_order):
+        assert billing_service.receive_webhook(events[key], "qa").duplicate
+    # A separate delivery ID for the very same invoice must also have only one financial effect.
+    assert not billing_service.receive_webhook(payload("invoice.payment_succeeded", invoice), "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.status, account.provider_subscription_id, account.signatures_used) == ("active", resource["id"], 3)
+        assert (payment.status, payment.currency, payment.amount_paid_minor) == ("paid", "JPY", 3900)
+
+
+def test_seat_upgrade_retry_recovers_payment_webhook_received_after_timeout(monkeypatch, subscription_webhook):
+    tenant_id, _, activation_payload = subscription_webhook
+    assert not billing_service.receive_webhook(activation_payload, "qa").duplicate
+    activation = json.loads(activation_payload)
+    subscription = activation["data"]["object"]
+    invoice_id = f"in_{tenant_id.hex}"
+    attempts = []
+
+    class LostResponseProvider(FakeBillingProvider):
+        def update_subscription_seats(self, **params):
+            attempts.append(params)
+            if len(attempts) == 1:
+                raise BillingProviderError("Simulated response loss")
+            return ProviderSubscriptionChange(invoice_id=invoice_id)
+
+    with SessionLocal.begin() as db:
+        db.get(TenantEntity, tenant_id).currency = "BRL"
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        account.current_product_code = "rubrica_intermediate"
+        account.contracted_seats = 3
+    paid = json.dumps({
+        "id": f"evt_{uuid4().hex}", "type": "invoice.payment_succeeded", "created": activation["created"] + 1,
+        "data": {"object": {
+            "id": invoice_id, "subscription": subscription["id"], "metadata": subscription["metadata"],
+            "billing_reason": "subscription_update", "status": "paid", "currency": "brl", "amount_paid": 1143,
+        }},
+    }).encode()
+    monkeypatch.setattr("core_api.modules.billing.billing_service.tenant_service.require_role", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(core_settings, "STRIPE_PRICE_PROFESSIONAL_MONTHLY_BRL", "price_base")
+    monkeypatch.setattr(core_settings, "STRIPE_PRICE_SEAT_MONTHLY_BRL", "price_seat")
+    service = BillingService(LostResponseProvider())
+    with pytest.raises(WorkflowError, match="Simulated response loss"):
+        service.change_seats(tenant_id, "test-admin", 4, "month")
+    assert not service.receive_webhook(paid, "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.contracted_seats, account.pending_provider_invoice_id) == (3, None)
+    assert service.change_seats(tenant_id, "test-admin", 4, "month").status == "applied"
+    assert service.receive_webhook(paid, "qa").duplicate
+    assert attempts[0] == attempts[1]
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.contracted_seats, account.pending_provider_invoice_id) == (4, None)
+        assert (payment.status, payment.amount_paid_minor) == ("paid", 1143)
+
+
+@pytest.mark.parametrize("late_event_type", ["invoice.payment_succeeded", "invoice.payment_failed"])
+def test_invoice_from_a_previous_cycle_cannot_change_current_cycle(subscription_webhook, late_event_type):
+    tenant_id, _, activation_payload = subscription_webhook
+    assert not billing_service.receive_webhook(activation_payload, "qa").duplicate
+    activation = json.loads(activation_payload)
+    subscription = activation["data"]["object"]
+    previous_start, current_start = subscription["current_period_start"], subscription["current_period_end"]
+    current_end = current_start + current_start - previous_start
+
+    def renewal(event_type, start, end):
+        succeeded = event_type == "invoice.payment_succeeded"
+        invoice = {
+            "id": f"in_{uuid4().hex}", "subscription": subscription["id"],
+            "metadata": subscription["metadata"], "billing_reason": "subscription_cycle",
+            "status": "paid" if succeeded else "open", "currency": "brl",
+            "amount_paid": 2990 if succeeded else 0, "amount_due": 2990,
+            "lines": {"data": [{"period": {"start": start, "end": end}}]},
+        }
+        return json.dumps({
+            "id": f"evt_{uuid4().hex}", "type": event_type, "created": current_start + 1,
+            "data": {"object": invoice},
+        }).encode()
+
+    # Late failures cannot revoke a paid renewal, and old payments cannot cover a failed renewal.
+    current_event_type = (
+        "invoice.payment_failed" if late_event_type == "invoice.payment_succeeded" else "invoice.payment_succeeded"
+    )
+    current_renewal = renewal(current_event_type, current_start, current_end)
+    assert not billing_service.receive_webhook(current_renewal, "qa").duplicate
+    with SessionLocal.begin() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        account.files_uploaded_in_period = 7
+        expected_status = account.status
+        expected_grace = account.grace_period_ends_at
+    late_renewal = renewal(late_event_type, previous_start, current_start)
+    assert not billing_service.receive_webhook(late_renewal, "qa").duplicate
+    assert billing_service.receive_webhook(late_renewal, "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        assert account.status == expected_status
+        assert account.grace_period_ends_at == expected_grace
+        assert account.current_period_ends_at.timestamp() == current_end
+        assert account.files_uploaded_in_period == 7
+        assert len(db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).all()) == 2
+
+
+@pytest.mark.parametrize(("event_type", "initial_status", "matching"), [
+    ("invoice.payment_succeeded", "past_due", False),
+    ("invoice.payment_succeeded", "past_due", True),
+    ("invoice.payment_failed", "active", False),
+    ("invoice.payment_failed", "active", True),
+])
+def test_proration_payment_does_not_change_renewal_status(subscription_webhook, event_type, initial_status, matching):
+    tenant_id, _, activation_payload = subscription_webhook
+    assert not billing_service.receive_webhook(activation_payload, "qa").duplicate
+    activation = json.loads(activation_payload)
+    subscription = activation["data"]["object"]
+    succeeded = event_type == "invoice.payment_succeeded"
+    invoice = {
+        "id": f"in_{uuid4().hex}", "subscription": subscription["id"],
+        "metadata": subscription["metadata"], "billing_reason": "subscription_update",
+        "status": "paid" if succeeded else "open", "amount_due": 1143,
+        "amount_paid": 1143 if succeeded else 0, "currency": "brl",
+    }
+    grace = DateTimeService.utc_now() + timedelta(days=1) if initial_status == "past_due" else None
+    with SessionLocal.begin() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        account.status = initial_status
+        account.grace_period_ends_at = grace
+        account.pending_provider_invoice_id = invoice["id"] if matching else "in_other_upgrade"
+        account.pending_contracted_seats = 4
+        account.pending_product_code = "rubrica_intermediate"
+        expected_seats = 4 if matching and succeeded else account.contracted_seats
+    event = json.dumps({
+        "id": f"evt_{uuid4().hex}", "type": event_type, "created": activation["created"] + 1,
+        "data": {"object": invoice},
+    }).encode()
+    assert not billing_service.receive_webhook(event, "qa").duplicate
+    assert billing_service.receive_webhook(event, "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (account.status, account.grace_period_ends_at) == (initial_status, grace)
+        assert account.contracted_seats == expected_seats
+        assert account.pending_contracted_seats == (None if matching and succeeded else 4)
+        assert payment.status == ("paid" if succeeded else "failed")
+
+
+def test_invoice_waiting_on_update_checks_the_committed_subscription(monkeypatch, subscription_webhook):
+    tenant_id, _, payload = subscription_webhook
+    assert not billing_service.receive_webhook(payload, "qa").duplicate
+    old_subscription = f"sub_{tenant_id.hex}"
+    invoice_event = json.loads(payload) | {
+        "id": f"evt_qa_{uuid4().hex}",
+        "type": "invoice.payment_failed",
+        "data": {"object": {
+            "id": "in_old", "subscription": old_subscription, "metadata": {"tenant_id": str(tenant_id)},
+        }},
+    }
+    webhook_lookup_started = Event()
+    get_account = billing_service._account_entity
+
+    def observed_lookup(db, lookup_tenant_id, *, lock=False):
+        if lock:
+            webhook_lookup_started.set()
+        account = get_account(db, lookup_tenant_id, lock=lock)
+        webhook_lookup_started.set()
+        return account
+
+    monkeypatch.setattr(billing_service, "_account_entity", observed_lookup)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with SessionLocal.begin() as db:
+            account = get_account(db, tenant_id, lock=True)
+            account.provider_subscription_id = "sub_replacement"
+            delivery = pool.submit(billing_service.receive_webhook, json.dumps(invoice_event).encode(), "qa")
+            assert webhook_lookup_started.wait(10)
+        assert not delivery.result(timeout=10).duplicate
+
+    with SessionLocal() as db:
+        account = get_account(db, tenant_id)
+        event = db.scalar(select(BillingEventEntity).filter_by(provider_event_id=invoice_event["id"]))
+        assert account.status == "active"
+        assert account.provider_subscription_id == "sub_replacement"
+        assert event.status == "ignored_stale"
+
+
 def test_webhook_retry_success_is_preserved_when_an_earlier_attempt_records_failure(
     monkeypatch, subscription_webhook,
 ):
@@ -383,6 +776,253 @@ def test_webhook_insert_collision_resumes_the_unprocessed_event(monkeypatch, sub
     assert billing_service.receive_webhook(payload, "qa").duplicate
     with SessionLocal() as db:
         assert db.scalar(select(BillingEventEntity.status).filter_by(provider_event_id=event_id)) == "processed"
+
+
+def _stripe_event_payload(event_type, resource):
+    return json.dumps({
+        "id": f"evt_qa_{uuid4().hex}", "object": "event", "type": event_type,
+        "created": int(DateTimeService.utc_now().timestamp()), "data": {"object": resource},
+    }).encode()
+
+
+@pytest.fixture
+def paid_stripe_invoice(subscription_webhook):
+    tenant_id, _, subscription = subscription_webhook
+    customer = f"cus_{tenant_id.hex}"
+    with SessionLocal.begin() as db:
+        account = db.scalar(select(BillingAccountEntity).filter_by(tenant_id=tenant_id))
+        account.provider_customer_id = customer
+        account.files_uploaded_in_period = 7
+    assert not billing_service.receive_webhook(subscription, "qa").duplicate
+    return tenant_id, {
+        "id": f"in_{tenant_id.hex}", "customer": customer, "subscription": f"sub_{tenant_id.hex}",
+        "metadata": {"tenant_id": str(tenant_id)}, "billing_reason": "subscription_create",
+        "status": "paid", "currency": "brl", "amount_due": 2990, "amount_paid": 2990,
+    }
+
+
+@pytest.mark.parametrize("same_event", [True, False], ids=["same-event-id", "same-invoice-distinct-events"])
+def test_parallel_workers_apply_a_paid_invoice_once(paid_stripe_invoice, monkeypatch, same_event):
+    tenant_id, invoice = paid_stripe_invoice
+    first = _stripe_event_payload("invoice.payment_succeeded", invoice)
+    second = first if same_event else _stripe_event_payload("invoice.payment_succeeded", invoice)
+    ready = Barrier(2)
+
+    class ConcurrentProvider(FakeBillingProvider):
+        def construct_webhook_event(self, *, payload, signature):
+            ready.wait(timeout=10)
+            return super().construct_webhook_event(payload=payload, signature=signature)
+
+    notifications = []
+    monkeypatch.setattr(BillingService, "_notify_billing_event", staticmethod(
+        lambda _db, event_id, *_args: notifications.append(event_id),
+    ))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        requests = [pool.submit(BillingService(ConcurrentProvider()).receive_webhook, payload, "qa")
+                    for payload in (first, second)]
+        assert sorted(request.result(timeout=10).duplicate for request in requests) == [False, same_event]
+
+    with SessionLocal() as db:
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        events = db.scalars(select(BillingEventEntity.status).filter_by(
+            tenant_id=tenant_id, event_type="invoice.payment_succeeded",
+        )).all()
+        assert (payment.status, payment.amount_paid_minor) == ("paid", 2990)
+        assert sorted(events) == (["processed"] if same_event else ["ignored_stale", "processed"])
+        assert notifications == [payment.provider_event_id]
+
+
+def test_paid_webhook_retries_after_postgres_connection_failure(paid_stripe_invoice):
+    tenant_id, invoice = paid_stripe_invoice
+    payload = _stripe_event_payload("invoice.payment_succeeded", invoice)
+    event_id = json.loads(payload)["id"]
+    failures = []
+
+    def unavailable(*_args):
+        failures.append(True)
+        raise OperationalError(None, None, ConnectionRefusedError("Simulated PostgreSQL outage"))
+
+    engine.dispose()
+    with TestClient(core_app, raise_server_exceptions=False) as http:
+        path = "/billing/webhooks/stripe"
+        headers = {"Stripe-Signature": "qa"}
+        sqlalchemy_event.listen(engine, "do_connect", unavailable)
+        try:
+            assert http.post(path, content=payload, headers=headers).status_code == 500
+        finally:
+            sqlalchemy_event.remove(engine, "do_connect", unavailable)
+        assert failures
+        with SessionLocal() as db:
+            assert db.scalar(select(BillingEventEntity.id).filter_by(provider_event_id=event_id)) is None
+            assert db.scalar(select(BillingPaymentEntity.id).filter_by(tenant_id=tenant_id)) is None
+        response = http.post(path, content=payload, headers=headers)
+        assert response.status_code == 200 and response.json()["duplicate"] is False
+        repeated = http.post(path, content=payload, headers=headers)
+        assert repeated.status_code == 200 and repeated.json()["duplicate"] is True
+    with SessionLocal() as db:
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        assert (payment.status, payment.amount_paid_minor) == ("paid", 2990)
+
+
+def test_postgres_rollback_after_paid_invoice_flush_can_be_retried(paid_stripe_invoice, monkeypatch):
+    tenant_id, invoice = paid_stripe_invoice
+    payload = _stripe_event_payload("invoice.payment_succeeded", invoice)
+    event_id = json.loads(payload)["id"]
+    with SessionLocal.begin() as db:
+        account = db.scalar(select(BillingAccountEntity).filter_by(tenant_id=tenant_id))
+        account.status = "past_due"
+    apply_event = billing_service._apply_event
+
+    def apply_and_rollback(db, *args):
+        assert apply_event(db, *args)
+        db.flush()
+        db.execute(text("SELECT 1 / 0"))
+
+    with monkeypatch.context() as changes:
+        changes.setattr(billing_service, "_apply_event", apply_and_rollback)
+        with pytest.raises(DBAPIError) as error:
+            billing_service.receive_webhook(payload, "qa")
+    assert error.value.orig.sqlstate == "22012"
+    with SessionLocal() as db:
+        assert db.scalar(select(BillingAccountEntity.status).filter_by(tenant_id=tenant_id)) == "past_due"
+        assert db.scalar(select(BillingPaymentEntity.id).filter_by(tenant_id=tenant_id)) is None
+        assert db.scalar(select(BillingEventEntity.status).filter_by(provider_event_id=event_id)) == "failed"
+
+    assert not billing_service.receive_webhook(payload, "qa").duplicate
+    assert billing_service.receive_webhook(payload, "qa").duplicate
+    with SessionLocal() as db:
+        assert db.scalar(select(BillingAccountEntity.status).filter_by(tenant_id=tenant_id)) == "active"
+        assert db.scalars(select(BillingPaymentEntity.amount_paid_minor).filter_by(tenant_id=tenant_id)).one() == 2990
+        assert db.scalar(select(BillingEventEntity.status).filter_by(provider_event_id=event_id)) == "processed"
+
+
+@pytest.mark.parametrize(("event_type", "fields"), [
+    ("charge.refunded", {"amount": 2990, "amount_refunded": 1000, "refunded": False}),
+    ("charge.refunded", {"amount": 2990, "amount_refunded": 2990, "refunded": True}),
+    ("charge.dispute.created", {"amount": 2990, "status": "needs_response"}),
+    ("charge.dispute.closed", {"amount": 2990, "status": "lost"}),
+], ids=["partial-refund", "full-refund", "dispute-opened", "dispute-lost"])
+def test_refund_and_dispute_deliveries_preserve_subscription_and_original_invoice(paid_stripe_invoice, event_type, fields):
+    tenant_id, invoice = paid_stripe_invoice
+    assert not billing_service.receive_webhook(_stripe_event_payload("invoice.payment_succeeded", invoice), "qa").duplicate
+    resource = {"id": f"stripe_qa_{uuid4().hex}", "currency": "brl", **fields}
+    if event_type == "charge.refunded":
+        resource |= {"object": "charge", "customer": invoice["customer"]}
+    else:
+        resource |= {"object": "dispute", "charge": "ch_qa_disputed", "payment_intent": "pi_qa_disputed"}
+    payload = _stripe_event_payload(event_type, resource)
+    assert not billing_service.receive_webhook(payload, "qa").duplicate
+    assert billing_service.receive_webhook(payload, "qa").duplicate
+    with SessionLocal() as db:
+        account = db.scalars(select(BillingAccountEntity).filter_by(tenant_id=tenant_id)).one()
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        delivery = db.scalars(select(BillingEventEntity).filter_by(provider_event_id=json.loads(payload)["id"])).one()
+        assert (account.status, account.cancel_at_period_end, account.files_uploaded_in_period) == ("active", False, 7)
+        assert (payment.status, payment.amount_paid_minor, payment.provider_payment_id) == ("paid", 2990, invoice["id"])
+        assert (delivery.status, delivery.event_type) == ("processed", event_type)
+
+
+@pytest.mark.parametrize("conflicting_reference", ["customer", "subscription"])
+def test_signed_webhook_cannot_move_a_stripe_reference_to_the_wrong_workspace(
+    paid_stripe_invoice, monkeypatch, conflicting_reference,
+):
+    owner_id, invoice = paid_stripe_invoice
+    other_id = uuid4()
+    with SessionLocal.begin() as db:
+        db.add(TenantEntity(id=other_id, name="Other Workspace", slug=f"other-{other_id}"))
+        db.flush()
+        db.add(BillingAccountEntity(tenant_id=other_id))
+
+    customer_event = conflicting_reference == "customer"
+    resource = {"metadata": {"tenant_id": str(other_id)}, "status": "active"}
+    if customer_event:
+        resource |= {"id": "cs_local_wrong_workspace", "customer": invoice["customer"], "subscription": "sub_new_qa"}
+    else:
+        resource["id"] = invoice["subscription"]
+    event_type = "checkout.session.completed" if customer_event else "customer.subscription.updated"
+    payload = _stripe_event_payload(event_type, resource)
+    event = json.loads(payload)
+    timestamp = str(event["created"])
+    secret = "whsec_local_scope_fixture"
+    signature = hmac_new(secret.encode(), timestamp.encode() + b"." + payload, sha256).hexdigest()
+    monkeypatch.setattr(core_settings, "STRIPE_SECRET_KEY", "sk_test_local_fixture")
+    monkeypatch.setattr(core_settings, "STRIPE_RUNTIME_WEBHOOK_SECRET_FILE", None)
+    monkeypatch.setattr(core_settings, "STRIPE_WEBHOOK_SECRET", secret)
+    monkeypatch.setattr(billing_service, "_get_provider", StripeBillingProvider)
+
+    with TestClient(core_app, raise_server_exceptions=False) as http:
+        path = "/billing/webhooks/stripe"
+        headers = {"Stripe-Signature": f"t={timestamp},v1={signature}"}
+        response = http.post(path, content=payload, headers=headers)
+        assert response.status_code == 200 and response.json()["duplicate"] is False
+        retry = http.post(path, content=payload, headers=headers)
+        assert retry.status_code == 200 and retry.json()["duplicate"] is True
+    with SessionLocal() as db:
+        owner = db.scalar(select(BillingAccountEntity).filter_by(tenant_id=owner_id))
+        other = db.scalar(select(BillingAccountEntity).filter_by(tenant_id=other_id))
+        delivery = db.scalars(select(BillingEventEntity).filter_by(provider_event_id=event["id"])).one()
+        assert (owner.status, owner.provider_customer_id, owner.provider_subscription_id) == (
+            "active", invoice["customer"], invoice["subscription"],
+        )
+        assert (other.status, other.provider_customer_id, other.provider_subscription_id) == ("not_configured", None, None)
+        assert (delivery.status, delivery.error_code, delivery.tenant_id) == ("ignored_stale", "workspace_scope_conflict", None)
+
+
+def test_paid_invoice_without_metadata_is_routed_by_linked_subscription(paid_stripe_invoice):
+    tenant_id, invoice = paid_stripe_invoice
+    resource = {key: value for key, value in invoice.items() if key not in {"customer", "metadata"}}
+    assert not billing_service.receive_webhook(_stripe_event_payload("invoice.payment_succeeded", resource), "qa").duplicate
+    with SessionLocal() as db:
+        payment = db.scalars(select(BillingPaymentEntity).filter_by(tenant_id=tenant_id)).one()
+        assert payment.provider_payment_id == invoice["id"]
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("price_id", "price_unconfigured_qa"), ("quantity", 100), ("customer_id", "cus_unrelated_qa"),
+])
+def test_checkout_rejects_client_supplied_provider_fields(monkeypatch, field, value):
+    checkout_attempts = []
+
+    def checkout(*args, **kwargs):
+        checkout_attempts.append((args, kwargs))
+        return BillingCheckoutRead(checkout_url="https://checkout.stripe.test/session")
+
+    monkeypatch.setattr(billing_service, "create_checkout", checkout)
+    monkeypatch.setattr(auth_context, "_resolve_context", lambda _token: auth_context.AuthContext(
+        subject="checkout-qa@example.test", roles=frozenset(), permission_keys=frozenset({"documents:write"}),
+    ))
+    with TestClient(core_app) as http:
+        response = http.post(f"/billing/tenants/{uuid4()}/checkout", headers={"Authorization": "Bearer qa"},
+                             json={"product_code": "rubrica_base", "billing_interval": "month", field: value})
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", field]
+    assert not checkout_attempts
+
+
+def test_workspace_admin_cannot_open_checkout_for_another_workspace(monkeypatch):
+    owner_id, other_id = uuid4(), uuid4()
+    subject = "checkout-scope-qa@example.test"
+    with SessionLocal.begin() as db:
+        for tenant_id in (owner_id, other_id):
+            db.add(TenantEntity(id=tenant_id, name="Checkout scope", slug=f"checkout-{tenant_id}", country_code="BR"))
+        db.flush()
+        db.add(TenantMemberEntity(tenant_id=owner_id, auth_user_id=subject, role="admin"))
+
+    def unexpected_customer(**_kwargs):
+        pytest.fail("An unrelated workspace reached the Stripe customer API")
+
+    monkeypatch.setattr(core_settings, "STRIPE_SECRET_KEY", "sk_test_local_fixture")
+    monkeypatch.setattr(billing_service, "_get_provider", StripeBillingProvider)
+    monkeypatch.setattr(stripe.Customer, "create", unexpected_customer)
+    monkeypatch.setattr(auth_context, "_resolve_context", lambda _token: auth_context.AuthContext(
+        subject=subject, roles=frozenset(), permission_keys=frozenset({"documents:write"}),
+    ))
+    with TestClient(core_app) as http:
+        response = http.post(f"/billing/tenants/{other_id}/checkout", headers={"Authorization": "Bearer qa"},
+                             json={"product_code": "rubrica_base", "billing_interval": "month"})
+    assert response.status_code == 403
+    with SessionLocal() as db:
+        assert db.scalar(select(BillingAccountEntity.id).filter_by(tenant_id=other_id)) is None
 
 
 @pytest.mark.usefixtures("auth_identities")
