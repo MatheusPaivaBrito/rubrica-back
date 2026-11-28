@@ -546,12 +546,13 @@ class BillingService:
         self, provider: BillingProvider, event: Mapping[str, Any], payload: bytes
     ) -> BillingWebhookRead:
         event_id = str(event["id"])
+        event_key = (
+            BillingEventEntity.provider == "stripe",
+            BillingEventEntity.provider_event_id == event_id,
+        )
         with SessionLocal() as database:
             existing_status = database.scalar(
-                select(BillingEventEntity.status).where(
-                    BillingEventEntity.provider == "stripe",
-                    BillingEventEntity.provider_event_id == event_id,
-                )
+                select(BillingEventEntity.status).where(*event_key)
             )
         if existing_status in {"processed", "ignored_stale"}:
             return BillingWebhookRead(duplicate=True)
@@ -612,16 +613,17 @@ class BillingService:
                         status="received",
                     ))
             except IntegrityError:
-                return BillingWebhookRead(duplicate=True)
+                # A concurrent delivery may have inserted the event without
+                # finishing it. Continue to the row lock if the event exists.
+                with SessionLocal() as database:
+                    if database.scalar(select(BillingEventEntity.id).where(*event_key)) is None:
+                        raise
 
         try:
             with SessionLocal.begin() as database:
                 billing_event = database.scalar(
                     select(BillingEventEntity)
-                    .where(
-                        BillingEventEntity.provider == "stripe",
-                        BillingEventEntity.provider_event_id == event_id,
-                    )
+                    .where(*event_key)
                     .with_for_update()
                 )
                 if billing_event is None:
@@ -677,13 +679,10 @@ class BillingService:
             with SessionLocal.begin() as database:
                 failed_event = database.scalar(
                     select(BillingEventEntity)
-                    .where(
-                        BillingEventEntity.provider == "stripe",
-                        BillingEventEntity.provider_event_id == event_id,
-                    )
+                    .where(*event_key)
                     .with_for_update()
                 )
-                if failed_event is not None:
+                if failed_event is not None and failed_event.status not in {"processed", "ignored_stale"}:
                     failed_event.status = "failed"
                     failed_event.error_code = type(exc).__name__[:120]
             raise
@@ -845,6 +844,23 @@ class BillingService:
         if tenant_id is None:
             return True
         account = BillingService._account_entity(database, tenant_id, lock=True)
+        if (
+            event_type == "customer.subscription.deleted"
+            and account.provider_subscription_id
+            and resource.get("id") != account.provider_subscription_id
+        ):
+            return False
+        last_subscription_event = getattr(account, "last_provider_event_created_at", None)
+        if event_created_at and last_subscription_event:
+            if event_type == "checkout.session.completed" and event_created_at <= last_subscription_event:
+                return False
+            if event_type.startswith("customer.subscription.") and event_created_at < last_subscription_event:
+                return False
+        invoice_event = event_type in {"invoice.payment_succeeded", "invoice.payment_failed"}
+        if invoice_event and not BillingService._record_payment(
+            database, tenant_id, event_type, resource, provider_event_id,
+        ):
+            return False
         account.provider = "stripe"
         billing_customer = account.provider_customer_id
         customer = resource.get("customer")
@@ -863,14 +879,7 @@ class BillingService:
                 database, tenant_id, account.current_product_code, business_identity
             )
             return True
-        if event_type in {"invoice.payment_succeeded", "invoice.payment_failed"}:
-            BillingService._record_payment(
-                database,
-                tenant_id,
-                event_type,
-                resource,
-                provider_event_id,
-            )
+        if invoice_event:
             if event_type == "invoice.payment_succeeded":
                 account.status = "active"
                 account.grace_period_ends_at = None
@@ -905,12 +914,6 @@ class BillingService:
                 )
             return True
         if event_type.startswith("customer.subscription."):
-            if (
-                event_created_at
-                and getattr(account, "last_provider_event_created_at", None)
-                and event_created_at < account.last_provider_event_created_at
-            ):
-                return False
             account.provider_subscription_id = str(resource.get("id"))
             account.current_product_code = BillingService._product_code(resource)
             BillingService._sync_contracted_seats(account, resource)
@@ -994,7 +997,7 @@ class BillingService:
         event_type: str,
         resource,
         provider_event_id: str,
-    ) -> None:
+    ) -> bool:
         provider_payment_id = str(resource.get("id", ""))
         if not provider_payment_id:
             raise WorkflowError("Stripe invoice does not include an id", 422)
@@ -1004,6 +1007,10 @@ class BillingService:
                 BillingPaymentEntity.provider_payment_id == provider_payment_id,
             )
         )
+        # Separate Stripe events can refer to the same invoice.
+        # An already-paid invoice must not change access or generate another notification.
+        if payment is not None and payment.status == "paid":
+            return False
         if payment is None:
             payment = BillingPaymentEntity(
                 tenant_id=tenant_id,
@@ -1034,6 +1041,7 @@ class BillingService:
         payment.period_starts_at = period_start
         payment.period_ends_at = period_end
         payment.paid_at = BillingService._timestamp(status_transitions.get("paid_at"))
+        return True
 
     @staticmethod
     def _timestamp(value) -> datetime | None:

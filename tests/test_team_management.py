@@ -1,3 +1,5 @@
+import os
+from contextlib import ExitStack
 from datetime import timedelta
 from uuid import uuid4
 
@@ -6,12 +8,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from core_api.infrastructure.auth_context import AuthContext, _active_auth_context
+from core_api.infrastructure.database.connection import engine as core_engine
 from core_api.modules.billing.billing_entity import BillingAccountEntity
 from core_api.modules.document.document_entity import DocumentEntity, DocumentVersionEntity
 from core_api.modules.signature_request.database_workflow_service import DatabaseSignatureWorkflowService
 from core_api.modules.signature_request.signature_request_entity import AuditEventEntity, SignatureRequestEntity, SignerEntity
 from core_api.modules.signature_request.workflow_service import WorkflowError
 from core_api.modules.tenant import tenant_service as module
+from core_api.modules.tenant.tenant_identity import protect_cnpj
 from core_api.modules.tenant.tenant_entity import (
     TenantEntity,
     TenantMemberEntity,
@@ -27,36 +31,56 @@ from shared_kernel.time.datetime_service import DateTimeService
 from toolbox.operations import staging_billing
 
 
+def business_identity(cnpj, name):
+    encrypted, lookup, masked = protect_cnpj(cnpj)
+    return {
+        "legal_name": name,
+        "registration_country": "BR",
+        "registration_type": "BR_CNPJ",
+        "registration_value_encrypted": encrypted,
+        "registration_lookup_hmac": lookup,
+        "registration_masked": masked,
+    }
+
+
 @pytest.fixture
 def team_db(monkeypatch):
-    token = _active_auth_context.set(None)
-    engine = create_engine('sqlite://')
-    for entity in (
-        TenantEntity,
-        TenantMemberEntity,
-        TenantSeatRosterEntity,
-        BillingAccountEntity,
-        AuditEventEntity,
-        DocumentEntity,
-        DocumentVersionEntity,
-        SignatureRequestEntity,
-        SignerEntity,
-    ):
-        entity.__table__.create(engine)
-    factory = sessionmaker(engine, expire_on_commit=False)
-    monkeypatch.setattr(module, 'SessionLocal', factory)
-    with factory.begin() as db:
-        tenant = TenantEntity(name='Team', slug='team-test', kind='business')
-        db.add(tenant)
-        db.flush()
-        db.add(BillingAccountEntity(tenant_id=tenant.id, status='active', current_product_code='rubrica_team'))
-        members = [TenantMemberEntity(tenant_id=tenant.id, auth_user_id=f'member{i}@example.local',
-                   role='admin' if i == 0 else 'member', status='active') for i in range(6)]
-        db.add_all(members)
-        db.flush()
-        tenant_id, member_ids = tenant.id, [m.id for m in members]
-    yield factory, tenant_id, member_ids
-    _active_auth_context.reset(token)
+    with ExitStack() as cleanup:
+        cleanup.callback(_active_auth_context.reset, _active_auth_context.set(None))
+        if os.getenv("RUBRICA_DATABASE_TESTS") == "1":
+            connection = cleanup.enter_context(core_engine.connect())
+            cleanup.callback(connection.begin().rollback)
+            factory = sessionmaker(connection, expire_on_commit=False, join_transaction_mode="create_savepoint")
+        else:
+            engine = create_engine("sqlite://")
+            cleanup.callback(engine.dispose)
+            for entity in (
+                TenantEntity,
+                TenantMemberEntity,
+                TenantSeatRosterEntity,
+                BillingAccountEntity,
+                AuditEventEntity,
+                DocumentEntity,
+                DocumentVersionEntity,
+                SignatureRequestEntity,
+                SignerEntity,
+            ):
+                entity.__table__.create(engine)
+            factory = sessionmaker(engine, expire_on_commit=False)
+
+        monkeypatch.setattr(module, "SessionLocal", factory)
+        with factory.begin() as db:
+            tenant = TenantEntity(name="Team", slug="team-test", kind="business",
+                                  **business_identity("11.222.333/0001-81", "QA Team"))
+            db.add(tenant)
+            db.flush()
+            db.add(BillingAccountEntity(tenant_id=tenant.id, status="active", current_product_code="rubrica_team"))
+            members = [TenantMemberEntity(tenant_id=tenant.id, auth_user_id=f"member{i}@example.local",
+                       role="admin" if i == 0 else "member", status="active") for i in range(6)]
+            db.add_all(members)
+            db.flush()
+            tenant_id, member_ids = tenant.id, [member.id for member in members]
+        yield factory, tenant_id, member_ids
 
 
 def test_downgrade_requires_selection_then_revokes_only_suspended_members(team_db):
@@ -318,7 +342,7 @@ def test_staging_shortcut_applies_future_seats_without_moving_billing_cycle(team
     with factory() as db:
         account = db.scalar(select(BillingAccountEntity))
         roster = db.scalar(select(TenantSeatRosterEntity))
-        assert account.current_period_ends_at == cycle_start.replace(tzinfo=None)
+        assert DateTimeService.to_utc(account.current_period_ends_at) == cycle_start
         assert roster.status == "applied"
         assert roster.applied_at < roster.cycle_starts_at
         assert db.get(TenantMemberEntity, ids[-1]).status == "without_seat"
@@ -428,7 +452,7 @@ def test_business_review_does_not_convert_or_activate_personal_workspace(team_db
     from core_api.modules.tenant.tenant_schema import TenantBusinessConversion
 
     factory, tenant_id, _ = team_db
-    review.BusinessUpgradeReviewEntity.__table__.create(factory.kw["bind"])
+    review.BusinessUpgradeReviewEntity.__table__.create(factory.kw["bind"], checkfirst=True)
     monkeypatch.setattr(review, "SessionLocal", factory)
     monkeypatch.setattr(review, "protect_cnpj", lambda _value: ("encrypted", "lookup", "**.***.***/****-81"))
     with factory.begin() as db:
@@ -458,12 +482,12 @@ def test_approved_business_checkout_activates_separate_workspace_only_after_paid
     from core_api.modules.tenant.tenant_schema import TenantBusinessConversion
 
     factory, tenant_id, _ = team_db
-    review.BusinessUpgradeReviewEntity.__table__.create(factory.kw["bind"])
+    review.BusinessUpgradeReviewEntity.__table__.create(factory.kw["bind"], checkfirst=True)
     monkeypatch.setattr(review, "SessionLocal", factory)
     monkeypatch.setattr(billing, "SessionLocal", factory)
     monkeypatch.setattr(review, "protect_cnpj", lambda _value: ("encrypted", "lookup", "**.***.***/****-81"))
     monkeypatch.setattr(BillingService, "_price_for_currency", staticmethod(lambda *_args: "price_test"))
-    monkeypatch.setattr(BillingService, "_record_payment", staticmethod(lambda *_args: None))
+    monkeypatch.setattr(BillingService, "_record_payment", staticmethod(lambda *_args: True))
     monkeypatch.setattr(settings, "STRIPE_PRICE_TEAM_BRANCH_MONTHLY_BRL", "price_test_branch")
     with factory.begin() as db:
         source = db.get(TenantEntity, tenant_id)
@@ -653,7 +677,8 @@ def test_organization_admin_branch_access_is_scoped_and_revocable(team_db, monke
     factory, root_id, ids = team_db
     monkeypatch.setattr(workflow, "SessionLocal", factory)
     with factory.begin() as db:
-        branch = TenantEntity(name="Branch", slug="branch", kind="business", parent_workspace_id=root_id)
+        branch = TenantEntity(name="Branch", slug="branch", kind="business", parent_workspace_id=root_id,
+                              **business_identity("11.444.777/0001-61", "QA Branch"))
         private = TenantEntity(name="Personal", slug="personal-scope", kind="personal")
         db.add_all([branch, private])
         db.flush()

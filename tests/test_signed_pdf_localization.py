@@ -1,14 +1,49 @@
 from io import BytesIO
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import LimitReachedError
 
 from core_api.modules.signature_request.database_workflow_service import DatabaseSignatureWorkflowService
 from core_api.modules.signature_request.workflow_schema import StampPosition
 from core_api.modules.signature_request.signed_pdf import _alpha3_country_code, _draw_country_flag, _stamp_locale_for_country, generate_signed_pdf
+
+
+def test_each_incremental_signature_preserves_the_previous_pdf_and_stamps() -> None:
+    source = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.write(source)
+    document = source.getvalue()
+    for index, name in enumerate(("Primeira assinatura", "Segunda assinatura", "Terceira assinatura")):
+        signed = generate_signed_pdf(document, stamps=[{
+            "signer_name": name,
+            "signed_at": "2026-10-23T21:00:00-03:00",
+            "evidence_sha256": "d" * 64,
+            "stamp": {"page": 1, "x": 0.5, "y": 0.2 + index * 0.3},
+        }], metadata={})
+        assert signed.startswith(document)
+        document = signed
+
+    text = PdfReader(BytesIO(document), strict=True).pages[0].extract_text()
+    assert "Primeira assinatura" in text
+    assert "Segunda assinatura" in text
+    assert "Terceira assinatura" in text
+
+
+def test_incremental_signature_rejects_an_oversized_trailer_object_range() -> None:
+    source = BytesIO()
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    writer.write(source)
+    original, replacements = re.subn(rb"/Size \d+", b"/Size 1000002", source.getvalue())
+    assert replacements == 1
+    with pytest.raises(LimitReachedError, match="incremental object ID limit"):
+        generate_signed_pdf(original, stamps=[], metadata={})
 
 
 def test_japanese_stamp_and_locale_are_embedded_in_signed_pdf() -> None:

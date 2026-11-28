@@ -7,6 +7,7 @@ from io import BytesIO
 from typing import Any
 
 from pypdf import PdfReader, PdfWriter
+from pypdf.errors import LimitReachedError
 from PIL import Image
 from reportlab.lib.colors import HexColor, white
 from reportlab.pdfgen.canvas import Canvas
@@ -35,6 +36,14 @@ def generate_signed_pdf(
     source = BytesIO(original)
     reader = PdfReader(source)
     writer = PdfWriter(source, incremental=True)
+    # pypdf 6.19 only reserves IDs present in the xref entries. An earlier
+    # xref stream can omit its own ID, so also reserve the trailer's range.
+    highest_reserved_id = int(reader.trailer["/Size"]) - 1
+    if highest_reserved_id > writer._incremental_clone_object_id_limit:
+        raise LimitReachedError("PDF trailer exceeds the incremental object ID limit")
+    missing_slots = highest_reserved_id - len(writer._objects)
+    if missing_slots > 0:
+        writer._objects.extend([None] * missing_slots)
     for page_number, output_page in enumerate(writer.pages, start=1):
         page_stamps: list[dict[str, Any]] = []
         for item in stamps:

@@ -181,6 +181,28 @@ def test_completed_checkout_does_not_unlock_unlimited_signatures(monkeypatch) ->
     assert account.provider_subscription_id == "sub_test"
 
 
+@pytest.mark.parametrize("delay", [timedelta(), timedelta(minutes=1)])
+def test_checkout_cannot_overwrite_a_more_authoritative_subscription_event(monkeypatch, delay):
+    current = datetime(2026, 9, 10, tzinfo=UTC)
+    account = SimpleNamespace(
+        status="active", provider="stripe", provider_customer_id="cus_current",
+        provider_subscription_id="sub_current", current_product_code="rubrica_team",
+        contracted_seats=14, last_provider_event_created_at=current,
+    )
+    before = vars(account).copy()
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
+
+    applied = BillingService._apply_event(
+        object(), "checkout.session.completed",
+        {"subscription": "sub_previous", "customer": "cus_previous",
+         "metadata": {"product_code": "rubrica_base"}},
+        uuid4(), current - delay,
+    )
+
+    assert applied is False
+    assert vars(account) == before
+
+
 def test_professional_event_applies_stripe_cnpj_to_tenant(monkeypatch) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
@@ -574,6 +596,24 @@ def test_older_subscription_event_is_ignored(monkeypatch) -> None:
     assert account.status == "active"
 
 
+def test_deleting_a_previous_subscription_does_not_cancel_the_current_one(monkeypatch):
+    current = datetime(2026, 9, 10, tzinfo=UTC)
+    account = SimpleNamespace(
+        status="active", provider_subscription_id="sub_current",
+        last_provider_event_created_at=current,
+    )
+    before = vars(account).copy()
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
+
+    applied = BillingService._apply_event(
+        object(), "customer.subscription.deleted", {"id": "sub_previous", "status": "canceled"},
+        uuid4(), current + timedelta(minutes=1),
+    )
+
+    assert applied is False
+    assert vars(account) == before
+
+
 def test_past_due_account_keeps_access_during_grace_period() -> None:
     account = SimpleNamespace(status="past_due", signatures_used=5, free_signatures_limit=5, deleted_at=None, grace_period_ends_at=datetime.now(UTC) + timedelta(days=1))
     BillingService().consume_signature(BillingDatabaseStub(account), uuid4())
@@ -617,17 +657,18 @@ def test_failed_invoice_starts_grace_period_and_records_payment(monkeypatch) -> 
         current_period_ends_at=None,
     )
     recorded: dict[str, object] = {}
+
+    def record_payment(_db, _tenant_id, event_type, resource, event_id):
+        recorded.update(event_type=event_type, invoice_id=resource["id"], event_id=event_id)
+        return True
+
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
     )
     monkeypatch.setattr(
         BillingService,
         "_record_payment",
-        lambda _db, _tenant_id, event_type, resource, event_id: recorded.update(
-            event_type=event_type,
-            invoice_id=resource["id"],
-            event_id=event_id,
-        ),
+        record_payment,
     )
 
     BillingService._apply_event(
@@ -666,7 +707,7 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
     )
-    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: None)
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: True)
 
     BillingService._apply_event(
         object(),
@@ -677,6 +718,31 @@ def test_successful_invoice_restores_active_access(monkeypatch) -> None:
 
     assert account.status == "active"
     assert account.grace_period_ends_at is None
+
+
+@pytest.mark.parametrize(
+    ("event_type", "account_status"),
+    [("invoice.payment_failed", "active"), ("invoice.payment_succeeded", "cancelled")],
+)
+def test_replayed_invoice_preserves_paid_record_and_account(monkeypatch, event_type, account_status):
+    account = SimpleNamespace(status=account_status, grace_period_ends_at=None)
+    payment = SimpleNamespace(
+        status="paid", provider_event_id="evt_paid", amount_paid_minor=2990,
+        paid_at=datetime(2026, 9, 10, tzinfo=UTC),
+    )
+    before = vars(payment).copy()
+    database = SimpleNamespace(scalar=lambda _query: payment)
+    monkeypatch.setattr(BillingService, "_account_entity", lambda *_args, **_kwargs: account)
+
+    applied = BillingService._apply_event(
+        database, event_type, {"id": "in_test", "amount_paid": 0},
+        uuid4(), provider_event_id="evt_delayed_failure",
+    )
+
+    assert applied is False
+    assert account.status == account_status
+    assert account.grace_period_ends_at is None
+    assert vars(payment) == before
 
 
 def test_paid_proration_invoice_activates_pending_seat_upgrade(monkeypatch) -> None:
@@ -697,7 +763,7 @@ def test_paid_proration_invoice_activates_pending_seat_upgrade(monkeypatch) -> N
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
     )
-    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: None)
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: True)
 
     BillingService._apply_event(
         object(),
@@ -729,7 +795,7 @@ def test_unrelated_paid_invoice_does_not_activate_pending_upgrade(monkeypatch) -
     monkeypatch.setattr(
         BillingService, "_account_entity", lambda *_args, **_kwargs: account
     )
-    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: None)
+    monkeypatch.setattr(BillingService, "_record_payment", lambda *_args: True)
 
     BillingService._apply_event(
         object(),
