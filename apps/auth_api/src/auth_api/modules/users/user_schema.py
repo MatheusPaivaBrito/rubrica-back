@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from auth_api.modules.users.passwords import validate_password_length
 from auth_api.modules.users.user_identifier_service import (
     IdentifierType,
     normalize_identifier_type,
@@ -34,6 +35,8 @@ class UserCreate(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     role: UserRole = "signature_signer"
     preferred_locale: SupportedLocale = "en"
+
+    _validate_password_length = field_validator("password")(validate_password_length)
 
     @field_validator("preferred_locale", mode="before")
     @classmethod

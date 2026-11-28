@@ -19,7 +19,7 @@ from auth_api.modules.sessions.session_schema import (
 )
 from auth_api.modules.access_control.access_control_service import access_control_service
 from auth_api.modules.mfa.mfa_service import mfa_service
-from auth_api.modules.users.passwords import verify_password
+from auth_api.modules.users.passwords import hash_password, verify_password
 from auth_api.modules.users.user_entity import UserEntity
 
 
@@ -39,6 +39,13 @@ redis.call('EXPIRE', KEYS[6], ARGV[3])
 return 1
 """
 
+_LOGIN_ATTEMPT_SCRIPT = """
+local attempts = redis.call('INCR', KEYS[1])
+if redis.call('TTL', KEYS[1]) < 0 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
+return attempts
+"""
+_DUMMY_PASSWORD_HASH = hash_password("rubrica-login-timing-placeholder")
+
 
 class SessionService:
     def __init__(self) -> None:
@@ -52,20 +59,17 @@ class SessionService:
     def login(self, payload: LoginRequest) -> LoginResponse | MfaChallengeResponse | None:
         normalized_email = payload.email.strip().lower()
         rate_key = self._token_key("login-attempts", normalized_email)
-        attempts = self._redis.incr(rate_key)
-        if attempts == 1:
-            self._redis.expire(rate_key, 300)
+        attempts = self._redis.eval(_LOGIN_ATTEMPT_SCRIPT, 1, rate_key, 300)
         if attempts > 10:
             return None
         with SessionLocal() as database:
             user = database.scalar(
                 select(UserEntity)
-                .where(UserEntity.email == normalized_email)
+                .where(UserEntity.email == normalized_email, UserEntity.deleted_at.is_(None))
                 .limit(1)
             )
-            if user is None or not user.is_active or not user.email_verified:
-                return None
-            if not verify_password(payload.password, user.password_hash):
+            password_matches = verify_password(payload.password, user.password_hash if user else _DUMMY_PASSWORD_HASH)
+            if not password_matches or not self._can_authenticate(user):
                 return None
             self._redis.delete(rate_key)
             if settings.AUTH_MFA_REQUIRED and user.mfa_enabled:
@@ -90,7 +94,7 @@ class SessionService:
                 .where(UserEntity.id == self._user_identifier(raw_user_id))
                 .with_for_update()
             )
-            if user is None or not user.is_active or not user.email_verified or not user.mfa_enabled:
+            if not self._can_authenticate(user) or not user.mfa_enabled:
                 return None
             if not mfa_service.verify_user_code(database, user, code):
                 mfa_service.audit(database, user, "mfa.challenge_failed")
@@ -239,11 +243,14 @@ class SessionService:
             "refresh_key": self._token_key("refresh", refresh_token),
         }
         payload = json.dumps(state)
-        self._redis.set(self._session_key(session_id), payload, ex=settings.AUTH_SESSION_TTL_SECONDS)
-        self._redis.set(state["access_key"], session_id, ex=settings.AUTH_ACCESS_TTL_SECONDS)
-        self._redis.set(state["refresh_key"], session_id, ex=settings.AUTH_SESSION_TTL_SECONDS)
-        self._redis.sadd(self._user_sessions_key(user_id), session_id)
-        self._redis.expire(self._user_sessions_key(user_id), settings.AUTH_SESSION_TTL_SECONDS)
+        user_key = self._user_sessions_key(user_id)
+        with self._redis.pipeline(transaction=True) as transaction:
+            transaction.set(self._session_key(session_id), payload, ex=settings.AUTH_SESSION_TTL_SECONDS)
+            transaction.set(state["access_key"], session_id, ex=settings.AUTH_ACCESS_TTL_SECONDS)
+            transaction.set(state["refresh_key"], session_id, ex=settings.AUTH_SESSION_TTL_SECONDS)
+            transaction.sadd(user_key, session_id)
+            transaction.expire(user_key, settings.AUTH_SESSION_TTL_SECONDS)
+            transaction.execute()
         return LoginResponse(
             access_token=access_token,
             refresh_token=refresh_token,
@@ -303,7 +310,11 @@ class SessionService:
     def _user_is_active(state: dict[str, object]) -> bool:
         with SessionLocal() as database:
             user = database.get(UserEntity, SessionService._user_identifier(state["user_id"]))
-            return user is not None and user.is_active and user.token_version == state.get("token_version")
+            return SessionService._can_authenticate(user) and user.token_version == state.get("token_version")
+
+    @staticmethod
+    def _can_authenticate(user: UserEntity | None) -> bool:
+        return user is not None and user.is_active and user.email_verified and user.deleted_at is None
 
 
 session_service = SessionService()

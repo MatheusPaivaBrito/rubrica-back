@@ -286,12 +286,13 @@ test:
 	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest
 
 test-unit:
-	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest --ignore=tests/test_database_workflow.py -k "not real_redis"
+	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest --ignore=tests/test_database_workflow.py --ignore=tests/test_auth_qa_integration.py -k "not real_redis"
 
 test-integration: ensure-integration-services
 	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run python toolbox/checks/integration_test_services.py
 	PYTHONPATH=$(TEST_PYTHONPATH) $(TEST_ENV) poetry run pytest \
 		tests/test_database_workflow.py \
+		tests/test_auth_qa_integration.py \
 		tests/test_team_management.py \
 		tests/test_auth_session_security.py::test_login_attempts_are_limited_with_real_redis \
 		tests/test_auth_session_security.py::test_refresh_rotation_replay_and_logout_with_real_redis \

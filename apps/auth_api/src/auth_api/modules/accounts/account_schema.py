@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from auth_api.modules.users.passwords import validate_password_length
+
 from shared_kernel.localization import (
     SupportedLocale,
     normalize_country_code,
@@ -28,6 +30,7 @@ IdentityDocumentType = Literal[
 
 
 def validate_new_password(value: str) -> str:
+    validate_password_length(value)
     requirements = (
         any("A" <= character <= "Z" for character in value),
         any("a" <= character <= "z" for character in value),

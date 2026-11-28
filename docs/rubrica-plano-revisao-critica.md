@@ -90,6 +90,10 @@ A bateria detalhada chegou a **50 casos automatizados de Stripe**. A suíte comp
 
 ## 2. Login, cadastro e sessão
 
+A [revisão de Auth com os 50 cenários](auth-qa-critical.md) registra a evidência local, as correções e as pendências de homologação.
+
+**Ensaio remoto autorizado.** A sondagem pública encontrou Cloudflare Access nas três rotas. Para fechar a homologação, falta a contagem do marcador fictício nos dois proxies e a evidência da regra efetiva da borda. A [coleta de staging](auth-qa-critical.md#coleta-de-contagens-no-servidor-de-staging) imprime somente status e contagens.
+
 | Caso | Ação e resultado esperado | Evidência |
 | --- | --- | --- |
 | [ ] AU-01 · Cadastro e ativação | Tente cadastrar sem país e sem documento. Repita e-mail com outro documento e documento com outro e-mail. A interface deve apresentar a mensagem genérica de duplicidade. Cadastre os dados válidos, tente entrar antes da confirmação, receba e abra o e-mail real de teste, defina a senha e entre. Reabra o mesmo link e confira a rejeição. Deve existir um único usuário e um único workspace pessoal para a conta válida. | Interface e respostas HTTP esperadas. Confirme o recebimento e a ativação sem gravar o link. |

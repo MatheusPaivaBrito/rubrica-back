@@ -164,7 +164,7 @@ class AccountService:
 
     def request_password_recovery(self, email: str, return_url: str | None = None) -> None:
         with SessionLocal.begin() as database:
-            user = self._user_by_email(database, email)
+            user = self._user_by_email(database, email, lock=True)
             if user is None or not user.is_active:
                 return
             token = self._issue_token(
@@ -188,10 +188,21 @@ class AccountService:
 
     def reset_password(self, raw_token: str, new_password: str) -> None:
         with SessionLocal.begin() as database:
-            token = self._consume_token(database, raw_token, "reset_password")
-            user = database.get(UserEntity, token.user_id)
+            # Recovery issuance and consumption must acquire the user before touching its tokens.
+            user = database.scalar(
+                select(UserEntity)
+                .join(AccountTokenEntity, AccountTokenEntity.user_id == UserEntity.id)
+                .where(
+                    AccountTokenEntity.token_hash == self._digest(raw_token),
+                    AccountTokenEntity.purpose == "reset_password",
+                    UserEntity.is_active.is_(True),
+                    UserEntity.deleted_at.is_(None),
+                )
+                .with_for_update(of=UserEntity)
+            )
             if user is None:
                 raise InvalidAccountTokenError
+            self._consume_token(database, raw_token, "reset_password")
             user.password_hash = hash_password(new_password)
             user.token_version += 1
 
@@ -260,8 +271,8 @@ class AccountService:
         return token
 
     @staticmethod
-    def _user_by_email(database, email: str) -> UserEntity | None:
-        return database.scalar(
+    def _user_by_email(database, email: str, *, lock: bool = False) -> UserEntity | None:
+        statement = (
             select(UserEntity)
             .where(
                 UserEntity.email == email.strip().lower(),
@@ -269,6 +280,7 @@ class AccountService:
             )
             .limit(1)
         )
+        return database.scalar(statement.with_for_update() if lock else statement)
 
     @staticmethod
     def _digest(value: str) -> str:

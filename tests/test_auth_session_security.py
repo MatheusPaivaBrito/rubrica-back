@@ -54,7 +54,7 @@ def test_browser_auth_responses_keep_refresh_token_in_httponly_cookie(monkeypatc
 
 
 def test_session_checks_password_token_version(monkeypatch) -> None:
-    user = SimpleNamespace(id=uuid4(), is_active=True, token_version=2)
+    user = SimpleNamespace(id=uuid4(), is_active=True, email_verified=True, deleted_at=None, token_version=2)
 
     class Database:
         def __enter__(self):
